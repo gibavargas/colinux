@@ -36,8 +36,12 @@ start_pre() {
     fi
 
     # Load kernel modules for GPU
-    modprobe -a i915 drm 2>/dev/null || true
-    modprobe -a amdgpu 2>/dev/null || true
+    case "$(uname -m)" in
+        x86_64)
+            modprobe -a i915 drm 2>/dev/null || true
+            modprobe -a amdgpu 2>/dev/null || true
+            ;;
+    esac
 }
 
 start() {

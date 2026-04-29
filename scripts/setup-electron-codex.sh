@@ -251,8 +251,8 @@ function createWindow() {
         title: 'Codex Desktop',
         backgroundColor: '#1e1e1e',
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false
+            nodeIntegration: false,
+            contextIsolation: true
         }
     });
     mainWindow.loadFile(path.join(__dirname, 'index.html'));

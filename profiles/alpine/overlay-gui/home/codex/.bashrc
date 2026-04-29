@@ -28,9 +28,15 @@ if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
     export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
 fi
 
-# ── Persist user profile customizations ──────────────────────────────────────
+# ── Persist user profile customizations (safe parse: only export VAR=value) ─
 if [[ -f /persist/profile ]]; then
-    source /persist/profile
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$line" ]] && continue
+        if [[ "$line" =~ ^export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            eval "$line"
+        fi
+    done < /persist/profile
 fi
 
 # ── Prompt ───────────────────────────────────────────────────────────────────

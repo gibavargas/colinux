@@ -428,7 +428,7 @@ rmdir "$TEMP_MOUNT"
 # ── Install EFI boot entry (NVRAM) ────────────────────────────────────────
 if command -v efibootmgr &>/dev/null && [[ "$DUAL_BOOT" != true ]]; then
     efibootmgr --create --disk "$DEVICE" --part ${P1_NUM} \
-               --loader "/EFI/codexos/BOOTX64.EFI" \
+               --loader "/EFI/codexos/${EFI_BOOT}" \
                --label "CodexOS" \
                --unicode 2>/dev/null || true
     echo "  → Added EFI boot entry"

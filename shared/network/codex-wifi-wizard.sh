@@ -67,6 +67,13 @@ error() { echo -e "${RED}[ERROR]${NC} $*" >&2; log_error "$*"; }
 die()   { error "$*"; exit 1; }
 
 # ---------------------------------------------------------------------------
+# Sanitize SSID for use in filenames (prevent path traversal)
+# ---------------------------------------------------------------------------
+safe_ssid() {
+    echo "$1" | tr -cd 'a-zA-Z0-9_-' | head -c 32
+}
+
+# ---------------------------------------------------------------------------
 # Ensure directories exist
 # ---------------------------------------------------------------------------
 ensure_dirs() {
@@ -394,7 +401,9 @@ connect_iwd() {
         # Write config for auto-reconnect
         local escaped_ssid
         escaped_ssid="$(echo "$ssid" | sed 's/\\/\\\\/g; s/ /\\ /g')"
-        local config_file="/var/lib/iwd/${escaped_ssid}.psk"
+        local safe_name
+        safe_name="$(safe_ssid "$ssid")"
+        local config_file="/var/lib/iwd/${safe_name}.psk"
         cat > "$config_file" <<EOF
 [Security]
 Passphrase=${password}
@@ -407,7 +416,9 @@ EOF
         # Open network
         local escaped_ssid
         escaped_ssid="$(echo "$ssid" | sed 's/\\/\\\\/g; s/ /\\ /g')"
-        local config_file="/var/lib/iwd/${escaped_ssid}.open"
+        local safe_name
+        safe_name="$(safe_ssid "$ssid")"
+        local config_file="/var/lib/iwd/${safe_name}.open"
         cat > "$config_file" <<EOF
 [Settings]
 AutoConnect=true
@@ -429,14 +440,17 @@ connect_wpa() {
     local ctrl="$ctrl_dir/$adapter"
 
     # Create network config
-    local wpa_conf="$WIFI_CONFIG_DIR/${ssid}.conf"
+    local wpa_conf="$WIFI_CONFIG_DIR/$(safe_ssid "$ssid").conf"
+
+    local safe_ssid_esc
+    safe_ssid_esc="$(printf '%s' "$ssid" | sed 's/["\\]/\\&/g')"
 
     cat > "$wpa_conf" <<EOF
 ctrl_interface=$ctrl_dir
 update_config=1
 
 network={
-    ssid="$ssid"
+    ssid="$safe_ssid_esc"
     scan_ssid=1
 EOF
 
@@ -448,10 +462,12 @@ EOF
             if [[ -n "$hashed" ]]; then
                 echo "$hashed" >> "$wpa_conf"
             else
-                echo "    psk=\"$password\"" >> "$wpa_conf"
+                error "Failed to hash WiFi password — connection aborted"
+                return 1
             fi
         else
-            echo "    psk=\"$password\"" >> "$wpa_conf"
+            error "wpa_passphrase not available — cannot securely configure WiFi"
+            return 1
         fi
     else
         echo "    key_mgmt=NONE" >> "$wpa_conf"
@@ -470,10 +486,24 @@ EOF
         fi
         wpa_cli -i "$adapter" -p "$ctrl_dir" remove_network all 2>/dev/null || true
         wpa_cli -i "$adapter" -p "$ctrl_dir" add_network 2>/dev/null || true
-        wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 ssid "\"$ssid\"" 2>/dev/null
+        wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 ssid "\"$safe_ssid_esc\"" 2>/dev/null
         wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 scan_ssid 1 2>/dev/null
         if [[ -n "$password" ]]; then
-            wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 psk "\"$password\"" 2>/dev/null
+            # Write a temporary config to feed PSK safely (avoids password in ps/process list)
+            local tmp_psk_conf
+            tmp_psk_conf="$(mktemp /tmp/wpa_psk_XXXXXX.conf)"
+            cat > "$tmp_psk_conf" <<PSKEOF
+network={
+    ssid="$safe_ssid_esc"
+    psk="$password"
+}
+PSKEOF
+            local hashed_psk
+            hashed_psk="$(wpa_passphrase -f "$tmp_psk_conf" 2>/dev/null | grep 'psk=' | head -1 | sed 's/^[[:space:]]*//' | cut -d= -f2-)"
+            rm -f "$tmp_psk_conf"
+            if [[ -n "$hashed_psk" ]]; then
+                wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 psk "\"$hashed_psk\"" 2>/dev/null
+            fi
         else
             wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 key_mgmt NONE 2>/dev/null
         fi
@@ -529,7 +559,7 @@ connect_network() {
         save_config
 
         # Save known network entry
-        local known_file="$WIFI_CONFIG_DIR/known_${ssid}"
+        local known_file="$WIFI_CONFIG_DIR/known_$(safe_ssid "$ssid")"
         cat > "$known_file" <<EOF
 SSID=$ssid
 ADAPTER=$adapter
@@ -597,7 +627,7 @@ show_status() {
     echo -e "  Adapter:  ${CYAN}$adapter${NC}"
 
     local state
-    state="$(cat /sys/class/net/$adapter/operstate 2>/dev/null || echo "unknown")"
+    state="$(cat "/sys/class/net/$adapter/operstate" 2>/dev/null || echo "unknown")"
     echo -e "  State:    ${GREEN}$state${NC}"
 
     # IP address
@@ -724,11 +754,11 @@ gui_select() {
         result="$(whiptail --title "$title" --menu "$title" 15 60 ${#items[@]} "${menu_args[@]}" 3>&1 1>&2 2>&3)"
         echo "${items[$((result-1))]}"
     elif command -v zenity &>/dev/null; then
-        local list=""
+        local args=(--list --title="$title" --column="" --column="Name")
         for item in "${items[@]}"; do
-            list+="FALSE \"$item\" "
+            args+=(FALSE "$item")
         done
-        eval "zenity --list --title=\"$title\" --column=\"\" --column=\"Name\" $list 2>/dev/null"
+        zenity "${args[@]}" 2>/dev/null
     elif command -v yad &>/dev/null; then
         local list=""
         for item in "${items[@]}"; do

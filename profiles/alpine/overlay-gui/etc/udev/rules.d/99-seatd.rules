@@ -11,10 +11,10 @@ KERNEL=="mouse*", SUBSYSTEM=="input", GROUP="input", MODE="0660"
 KERNEL=="ts*", SUBSYSTEM="input", GROUP="input", MODE="0660"
 
 # DRI (Direct Rendering Infrastructure) — 3D acceleration
-SUBSYSTEM=="dri", GROUP="video", MODE="0666"
+SUBSYSTEM=="dri", GROUP="video", MODE="0660"
 
 # Render nodes
-SUBSYSTEM=="render", GROUP="video", MODE="0666"
+SUBSYSTEM=="render", GROUP="video", MODE="0660"
 
 # Seat device for seatd
 KERNEL=="seat0", TAG+="systemd", MODE="0660"

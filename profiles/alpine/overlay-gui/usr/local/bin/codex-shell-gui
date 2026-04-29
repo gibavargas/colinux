@@ -36,7 +36,14 @@ GUI_TERMINAL="foot"
 GUI_FALLBACK_TTY="true"
 
 if [[ -f "$CONF_FILE" ]]; then
-    source "$CONF_FILE"
+    while IFS='=' read -r key val; do
+        key="$(echo "$key" | tr -d '[:space:]')"
+        val="$(echo "$val" | sed 's/^"//;s/"$//' | tr -d '[:space:]')"
+        case "$key" in
+            MODE|COMPOSITOR|GUI_TERMINAL|GUI_FALLBACK_TTY|GUI_LOG)
+                declare -g "$key=$val" ;;
+        esac
+    done < "$CONF_FILE"
 fi
 
 # Colors
@@ -101,9 +108,15 @@ if [[ -d "${WORKSPACE_DIR}/bin" ]]; then
     export PATH="${WORKSPACE_DIR}/bin:${PATH}"
 fi
 
-# Source user profile if exists
+# Source user profile if exists (safe parse: only allow export VAR=value lines)
 if [[ -f "${PERSIST_DIR}/profile" ]]; then
-    source "${PERSIST_DIR}/profile"
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$line" ]] && continue
+        if [[ "$line" =~ ^export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            eval "$line"
+        fi
+    done < "${PERSIST_DIR}/profile"
 fi
 
 # =============================================================================
@@ -224,22 +237,30 @@ launch_gui() {
 
     log_info "Launching cage Wayland kiosk..."
 
+    # Recursive GUI launch guard
+    CODEX_GUI_DEPTH="${CODEX_GUI_DEPTH:-0}"
+    if [[ "$CODEX_GUI_DEPTH" -gt 2 ]]; then
+        echo "ERROR: Recursive GUI launch detected — aborting" >&2
+        fallback_tty
+        return 1
+    fi
+
     # Set environment for cage child process
-    export CODX_AGENTS_CONTEXT="${CODEX_AGENTS_CONTEXT:-}"
+    export CODEX_AGENTS_CONTEXT="${CODEX_AGENTS_CONTEXT:-}"
 
     # Launch cage with foot running this script (it will detect INSIDE_WAYLAND=true)
     case "$COMPOSITOR" in
         sway)
             log_info "Using sway compositor..."
             if command -v sway &>/dev/null; then
-                exec sway
+                exec env CODEX_GUI_INNER=1 CODEX_GUI_DEPTH=$((CODEX_GUI_DEPTH + 1)) sway
             else
                 log_warn "sway not found — falling back to cage"
-                exec cage -s -- "$GUI_TERMINAL" -- "$0"
+                exec env CODEX_GUI_INNER=1 CODEX_GUI_DEPTH=$((CODEX_GUI_DEPTH + 1)) cage -s -- "$GUI_TERMINAL" -- "$0"
             fi
             ;;
         cage|*)
-            exec cage -s -- "$GUI_TERMINAL" -- "$0"
+            exec env CODEX_GUI_INNER=1 CODEX_GUI_DEPTH=$((CODEX_GUI_DEPTH + 1)) cage -s -- "$GUI_TERMINAL" -- "$0"
             ;;
     esac
 }
@@ -291,7 +312,9 @@ main() {
     # Step 2: Initialize network (only if not already connected)
     local has_ip
     has_ip="$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)" || true
-    if [[ -z "$has_ip" ]]; then
+    if [[ -n "${CODEX_GUI_INNER:-}" ]]; then
+        log_info "Running inside cage — skipping network init (already done by outer)"
+    elif [[ -z "$has_ip" ]]; then
         init_network
     else
         log_info "Network already connected: $has_ip"

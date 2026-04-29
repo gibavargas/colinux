@@ -202,7 +202,7 @@ install_camoufox_python() {
     pip install --upgrade pip setuptools wheel 2>&1 | tail -5
 
     # Install camoufox
-    if ! pip install camoufox 2>&1; then
+    if ! pip install 'camoufox>=0.4,<2.0' 2>&1; then
         error "pip install camoufox failed!"
         error "This may be due to missing system dependencies or network issues."
         error "Check the output above for details."
@@ -464,18 +464,25 @@ if __name__ == "__main__":
     main()
 '"'"'
 
-# Export arguments as JSON for the Python script
+# Export arguments as JSON for the Python script (safe: uses env vars, not string interpolation)
+export _CS_QUERY="$QUERY"
+export _CS_ENGINE="$SEARCH_ENGINE"
+export _CS_TARGET="$TARGET_URL"
+export _CS_OUTPUT_JSON="$OUTPUT_JSON"
+export _CS_COUNT="$SEARCH_COUNT"
+export _CS_TIMEOUT="$SEARCH_TIMEOUT"
 ARGS_JSON=$(python3 -c "
-import json
+import json, os
 print(json.dumps({
-    'query': '''$QUERY''',
-    'count': $SEARCH_COUNT,
-    'timeout': $SEARCH_TIMEOUT,
-    'engine': '$SEARCH_ENGINE',
-    'output_json': '$OUTPUT_JSON',
-    'target_url': '$TARGET_URL'
+    'query': os.environ.get('_CS_QUERY', ''),
+    'count': int(os.environ.get('_CS_COUNT', '5')),
+    'timeout': int(os.environ.get('_CS_TIMEOUT', '30')),
+    'engine': os.environ.get('_CS_ENGINE', 'duckduckgo'),
+    'output_json': os.environ.get('_CS_OUTPUT_JSON', 'no'),
+    'target_url': os.environ.get('_CS_TARGET', '')
 }))
 ")
+unset _CS_QUERY _CS_ENGINE _CS_TARGET _CS_OUTPUT_JSON _CS_COUNT _CS_TIMEOUT
 
 exec python3 -c "$PYTHON_SCRIPT" "$ARGS_JSON"
 '

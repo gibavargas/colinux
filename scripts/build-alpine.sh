@@ -356,38 +356,52 @@ inject_codex() {
     log_info "Repacking ISO with injected files..."
 
     if command -v xorriso &>/dev/null; then
-        xorriso -as mkisofs \
-            -o "$repacked_iso" \
-            -isohybrid-mbr /usr/share/syslinux/mbr.bin \
-            -c boot/boot.cat \
-            -b boot/isolinux/isolinux.bin \
-            -no-emul-boot \
-            -boot-load-size 4 \
-            -boot-info-table \
-            -eltorito-alt-boot \
-            -e boot/grub/efi.img \
-            -no-emul-boot \
-            -isohybrid-gpt-basdat \
-            -V "CODEXOS" \
-            "$iso_staging" 2>/dev/null || {
-            log_warn "xorriso repack failed. Trying genisoimage..."
-            if command -v genisoimage &>/dev/null; then
-                genisoimage -o "$repacked_iso" \
-                    -R -J -V "CODEXOS" \
-                    -b boot/isolinux/isolinux.bin \
-                    -c boot/boot.cat \
-                    -no-emul-boot \
-                    -boot-load-size 4 \
-                    -boot-info-table \
-                    "$iso_staging" 2>/dev/null || {
-                    log_warn "genisoimage also failed."
+        if [ "$ARCH" = "x86_64" ]; then
+            xorriso -as mkisofs \
+                -o "$repacked_iso" \
+                -isohybrid-mbr /usr/share/syslinux/mbr.bin \
+                -c boot/boot.cat \
+                -b boot/isolinux/isolinux.bin \
+                -no-emul-boot \
+                -boot-load-size 4 \
+                -boot-info-table \
+                -eltorito-alt-boot \
+                -e boot/grub/efi.img \
+                -no-emul-boot \
+                -isohybrid-gpt-basdat \
+                -V "CODEXOS" \
+                "$iso_staging" 2>/dev/null || {
+                log_warn "xorriso repack failed. Trying genisoimage..."
+                if command -v genisoimage &>/dev/null; then
+                    genisoimage -o "$repacked_iso" \
+                        -R -J -V "CODEXOS" \
+                        -b boot/isolinux/isolinux.bin \
+                        -c boot/boot.cat \
+                        -no-emul-boot \
+                        -boot-load-size 4 \
+                        -boot-info-table \
+                        "$iso_staging" 2>/dev/null || {
+                        log_warn "genisoimage also failed."
+                        repacked_iso=""
+                    }
+                else
+                    log_warn "genisoimage not available."
                     repacked_iso=""
-                }
-            else
-                log_warn "genisoimage not available."
+                fi
+            }
+        else
+            # EFI-only arches (aarch64): no isohybrid-mbr or isolinux
+            xorriso -as mkisofs \
+                -o "$repacked_iso" \
+                -eltorito-alt-boot \
+                -e boot/grub/efi.img \
+                -no-emul-boot \
+                -V "CODEXOS" \
+                "$iso_staging" 2>/dev/null || {
+                log_warn "xorriso repack failed for $ARCH."
                 repacked_iso=""
-            fi
-        }
+            }
+        fi
     elif command -v genisoimage &>/dev/null; then
         genisoimage -o "$repacked_iso" \
             -R -J -V "CODEXOS" \

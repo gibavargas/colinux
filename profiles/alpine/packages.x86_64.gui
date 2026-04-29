@@ -105,6 +105,7 @@ font-dejavu
 
 # Wayland utilities
 wlr-randr
+wl-clipboard
 
 # Screenshots (optional)
 grim

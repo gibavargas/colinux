@@ -275,45 +275,86 @@ update_codex() {
     log_action "codex_update_ok version=$latest_version checksum=$checksum_ok"
 }
 
-# ── Update Alpine packages ────────────────────────────────────────────────
+# ── Detect package manager ─────────────────────────────────────────────────
+detect_pkg_manager() {
+    if command -v apk &>/dev/null; then
+        PKG_MANAGER="apk"
+    elif command -v apt-get &>/dev/null; then
+        PKG_MANAGER="apt"
+    else
+        die "No supported package manager found"
+    fi
+}
+detect_pkg_manager
+
+# ── Update system packages ────────────────────────────────────────────────
 update_system() {
     log_action "system_update_start"
 
-    echo "Alpine Linux packages:"
+    case "$PKG_MANAGER" in
+        apk)
+            echo "Alpine Linux packages:"
 
-    if [[ "$CHECK_ONLY" == true ]]; then
-        echo "  Checking for updates..."
-        apk version -v -s '<' 2>/dev/null || echo "  (unknown)"
-        return 0
-    fi
+            if [[ "$CHECK_ONLY" == true ]]; then
+                echo "  Checking for updates..."
+                apk version -v -s '<' 2>/dev/null || echo "  (unknown)"
+                return 0
+            fi
 
-    echo "  Updating repository index..."
-    if ! apk update 2>/dev/null; then
-        echo "  ✗ Failed to update package index. Check network."
-        log_action "system_update_fail apk_update_failed"
-        return 1
-    fi
+            echo "  Updating repository index..."
+            if ! apk update 2>/dev/null; then
+                echo "  ✗ Failed to update package index. Check network."
+                log_action "system_update_fail apk_update_failed"
+                return 1
+            fi
 
-    echo "  Upgrading packages..."
-    local upgradable
-    upgradable="$(apk version -s '<' 2>/dev/null | wc -l || echo 0)"
-    upgradable="$(echo "$upgradable" | tr -d ' ')"
+            echo "  Upgrading packages..."
+            local upgradable
+            upgradable="$(apk version -s '<' 2>/dev/null | wc -l || echo 0)"
+            upgradable="$(echo "$upgradable" | tr -d ' ')"
 
-    if [[ "$upgradable" == "0" ]] && [[ "$FORCE" != true ]]; then
-        echo "  → All packages up to date."
-        log_action "system_update_skip all_current"
-        return 0
-    fi
+            if [[ "$upgradable" == "0" ]] && [[ "$FORCE" != true ]]; then
+                echo "  → All packages up to date."
+                log_action "system_update_skip all_current"
+                return 0
+            fi
 
-    echo "  → $upgradable package(s) to upgrade."
+            echo "  → $upgradable package(s) to upgrade."
 
-    if apk upgrade --verbose 2>&1; then
-        echo "  ✓ System packages updated."
-        log_action "system_update_ok packages=$upgradable"
-    else
-        echo "  ⚠ Some packages failed to update."
-        log_action "system_update_partial packages=$upgradable"
-    fi
+            if apk upgrade --verbose 2>&1; then
+                echo "  ✓ System packages updated."
+                log_action "system_update_ok packages=$upgradable"
+            else
+                echo "  ⚠ Some packages failed to update."
+                log_action "system_update_partial packages=$upgradable"
+            fi
+            ;;
+        apt)
+            echo "Debian packages:"
+
+            if [[ "$CHECK_ONLY" == true ]]; then
+                echo "  Checking for updates..."
+                apt list --upgradable 2>/dev/null || echo "  (unknown)"
+                return 0
+            fi
+
+            echo "  Updating repository index..."
+            if ! apt-get update 2>/dev/null; then
+                echo "  ✗ Failed to update package index. Check network."
+                log_action "system_update_fail apt_update_failed"
+                return 1
+            fi
+
+            echo "  Upgrading packages..."
+            if apt-get upgrade -y 2>&1; then
+                echo "  ✓ System packages updated."
+                log_action "system_update_ok pkg_manager=apt"
+            else
+                echo "  ⚠ Some packages failed to update."
+                log_action "system_update_partial pkg_manager=apt"
+            fi
+            ;;
+    esac
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────

@@ -19,9 +19,11 @@
 set -euo pipefail
 
 # ── Cleanup ──────────────────────────────────────────────────────────────────
-_CLEANUP_DIRS=""
+_CLEANUP_DIRS=()
 _cleanup() {
-    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf "${_CLEANUP_DIRS}" 2>/dev/null || true
+    if [[ ${#_CLEANUP_DIRS[@]} -gt 0 ]]; then
+        rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
+    fi
 }
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
@@ -36,6 +38,7 @@ ALPINE_MIRROR="${ALPINE_MIRROR:-http://dl-cdn.alpinelinux.org/alpine}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/dist}"
 APORTS_BRANCH="v${ALPINE_RELEASE}.0"
 APORTS_DIR="/tmp/aports-codexos-gui"
+_CLEANUP_DIRS=("${_CLEANUP_DIRS[@]}" "$APORTS_DIR")
 CODEX_VERSION="${CODEX_VERSION:-latest}"
 CODEXOS_IMG_SIZE="${CODEXOS_IMG_SIZE:-900}"
 
@@ -237,7 +240,6 @@ run_mkimage() {
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/main" \
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/community" \
         --outdir "$OUTDIR" \
-        --extra-repository "${ALPINE_MIRROR}/alpine/edge/main" \
         --tag "v${ALPINE_RELEASE}" \
         --yaml "$APORTS_DIR/scripts/mkimg.codexos-lite-gui.sh" \
         || {
@@ -275,7 +277,7 @@ inject_codex() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
+    _CLEANUP_DIRS=("${_CLEANUP_DIRS[@]}" "$tmpdir")
     trap _cleanup EXIT
 
     curl -fsSL --retry 3 --retry-delay 5 -o "$tmpdir/$codex_filename" "$download_url" || {
@@ -308,7 +310,7 @@ inject_codex() {
 
     local iso_staging
     iso_staging="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $iso_staging"
+    _CLEANUP_DIRS=("${_CLEANUP_DIRS[@]}" "$iso_staging")
 
     if command -v xorriso &>/dev/null; then
         xorriso -osirrox on -indev "$iso_file" -extract / "$iso_staging" 2>/dev/null || {

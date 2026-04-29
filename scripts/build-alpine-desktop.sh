@@ -20,11 +20,13 @@
 set -euo pipefail
 
 # ── Cleanup ──────────────────────────────────────────────────────────────────
-_CLEANUP_DIRS=""
+_CLEANUP_DIRS=()
 _cleanup() {
-    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf "${_CLEANUP_DIRS}" 2>/dev/null || true
+    for d in "${_CLEANUP_DIRS[@]}"; do
+        rm -rf "$d" 2>/dev/null || true
+    done
 }
-trap _cleanup EXIT
+trap _cleanup EXIT INT TERM
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -310,7 +312,7 @@ inject_codex() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
+    _CLEANUP_DIRS+=("$tmpdir")
 
     curl -fsSL --retry 3 --retry-delay 5 -o "$tmpdir/$codex_filename" "$download_url" || {
         log_error "Failed to download Codex CLI binary."
@@ -342,7 +344,7 @@ inject_codex() {
 
     local iso_staging
     iso_staging="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $iso_staging"
+    _CLEANUP_DIRS+=("$iso_staging")
 
     if command -v xorriso &>/dev/null; then
         xorriso -osirrox on -indev "$iso_file" -extract / "$iso_staging" 2>/dev/null || {
@@ -464,8 +466,7 @@ EOF
     sync
 
     umount "$iso_mount"
-    umount "$boot_mount"
-    rmdir "$iso_mount" "$boot_mount"
+    rmdir "$iso_mount"
 
     # Install GRUB
     local esp_mount
@@ -493,6 +494,9 @@ EOF
             log_warn "grub-install failed (may work on bare metal)"
             ;;
     esac
+
+    umount "$boot_mount"
+    rmdir "$boot_mount"
 
     sync
     umount "$esp_mount"

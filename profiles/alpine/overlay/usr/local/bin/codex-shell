@@ -30,10 +30,14 @@ mkdir -p "$LOG_DIR" "$PERSIST_DIR/backups" "$PERSIST_DIR/state" /mnt/disks/by-de
 # ── Run disk inventory on start ───────────────────────────────────────────
 if command -v codex-disk-inventory &>/dev/null; then
     echo "Scanning disks..."
-    if codex-disk-inventory 2>/dev/null; then
-        echo "Disk inventory complete."
+    if command -v doas &>/dev/null; then
+        doas codex-disk-inventory 2>/dev/null && echo "Disk inventory complete." || {
+            echo "Note: Disk inventory had issues (may need root for some features)."
+        }
     else
-        echo "Note: Disk inventory had issues (may need root for some features)."
+        codex-disk-inventory 2>/dev/null && echo "Disk inventory complete." || {
+            echo "Note: Disk inventory had issues (may need root for some features)."
+        }
     fi
 fi
 
@@ -56,7 +60,17 @@ fi
 
 # ── Source user profile if exists ─────────────────────────────────────────
 if [[ -f "${PERSIST_DIR}/profile" ]]; then
-    source "${PERSIST_DIR}/profile"
+    if [[ -z "${CODEX_SHELL_ACTIVE:-}" ]]; then
+        export CODEX_SHELL_ACTIVE=1
+        # Only source export VAR=value lines, skip anything with shell metacharacters
+        while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$line" ]] && continue
+            if [[ "$line" =~ ^export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*= ]]; then
+                eval "$line"
+            fi
+        done < "${PERSIST_DIR}/profile"
+    fi
 fi
 
 # ── Check if we're already in a tmux session ──────────────────────────────

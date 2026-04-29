@@ -312,7 +312,7 @@ install_wifi_wizard() {
 
     # Create compatibility symlinks
     safe_write "$bin/wifi-setup" "#!/bin/sh
-exec codex-wizard \"\\\$@\"
+exec codex-wifi-wizard \"\\\$@\"
 " 755
 
     # Create WiFi config directory

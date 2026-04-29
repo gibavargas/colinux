@@ -69,7 +69,6 @@ BOOT_DEV="$(find_boot_device)"
 log_msg "boot_device=${BOOT_DEV}"
 
 # ── Collect per-device info ───────────────────────────────────────────────
-declare -a DEVICES=()
 
 collect_device_info() {
     local dev="$1"  # e.g. /dev/sda

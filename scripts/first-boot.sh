@@ -67,7 +67,7 @@ setup_runtime_dirs() {
 generate_disk_inventory() {
     log_info "Generating disk inventory..."
 
-    local inventory_file="$CODEX_RUNTIME/disk-inventory.json"
+    local inventory_file="$CODEX_RUNTIME/disks.json"
 
     if command -v codex-disk-inventory >/dev/null 2>&1; then
         codex-disk-inventory > "$inventory_file" 2>&1 || {
@@ -82,7 +82,7 @@ generate_disk_inventory() {
 }
 
 generate_disk_inventory_manual() {
-    local inventory_file="$CODEX_RUNTIME/disk-inventory.json"
+    local inventory_file="$CODEX_RUNTIME/disks.json"
 
     # Fallback: use lsblk JSON output
     if command -v lsblk >/dev/null 2>&1; then
@@ -241,7 +241,7 @@ setup_codex_auth() {
         cat > "$auth_file" <<EOF
 # CodexOS authentication configuration
 # Created: $(date -Iseconds)
-export OPENAI_API_KEY="${OPENAI_API_KEY}"
+export OPENAI_API_KEY="$existing_key"
 EOF
         chmod 600 "$auth_file"
         chown codex:codex "$auth_file" 2>/dev/null || true
@@ -273,7 +273,7 @@ EOF
                     cat > "$auth_file" <<EOF
 # CodexOS authentication configuration
 # Created: $(date -Iseconds)
-export OPENAI_API_KEY="${api_key}"
+export OPENAI_API_KEY="$api_key"
 EOF
                     chmod 600 "$auth_file"
                     chown codex:codex "$auth_file" 2>/dev/null || true

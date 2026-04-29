@@ -25,7 +25,7 @@ set $mod Mod4
 
 bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit CodexOS GUI?' -b 'Yes' 'swaymsg exit'
 bindsym $mod+Shift+Escape exec killall foot || killall sway
-bindsym Print exec grim /persist/logs/screenshot-$(date +%Y%m%d-%H%M%S).png
+bindsym Print exec "mkdir -p /persist/logs && grim /persist/logs/screenshot-$(date +%Y%m%d-%H%M%S).png"
 
 # =============================================================================
 # Appearance — no borders, no gaps, no title bar

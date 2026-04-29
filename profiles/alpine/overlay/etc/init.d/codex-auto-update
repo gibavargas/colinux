@@ -28,9 +28,15 @@ ENABLED="true"
 INTERVAL="6"
 
 config_load() {
-    if [ -f "${CONFIG_FILE}" ]; then
-        . "${CONFIG_FILE}"
-    fi
+    [ -f "${CONFIG_FILE}" ] || return 1
+    while IFS='=' read -r key value; do
+        case "$key" in
+            \#*|"") continue ;;
+            enabled) ENABLED="$(echo "$value" | xargs 2>/dev/null)" ;;
+            interval) INTERVAL="$(echo "$value" | xargs 2>/dev/null)" ;;
+            lock_wait) LOCK_WAIT="$(echo "$value" | xargs 2>/dev/null)" ;;
+        esac
+    done < "${CONFIG_FILE}"
 }
 
 start() {

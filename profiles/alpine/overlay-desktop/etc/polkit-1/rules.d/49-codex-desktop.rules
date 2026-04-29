@@ -1,0 +1,7 @@
+polkit.addRule(function(action, subject) {
+    if (subject.user == "codex") {
+        if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0) {
+            return polkit.Result.YES;
+        }
+    }
+});

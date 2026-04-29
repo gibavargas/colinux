@@ -188,5 +188,5 @@ AGETTYCFG
     chown -R root:root "$WORKDIR"
     chmod 755 "$WORKDIR"/home/codex
     chown 1000:1000 "$WORKDIR"/home/codex
-    chmod 700 "$WORKDIR"/var/lib/codexos
+    chmod 755 "$WORKDIR"/var/lib/codexos
 }

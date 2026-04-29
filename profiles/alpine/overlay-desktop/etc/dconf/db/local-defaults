@@ -25,10 +25,10 @@ dynamic-workspaces=false
 workspaces-only-on-primary=true
 
 [org/gnome/desktop/session]
-idle-delay=0
+idle-delay=uint32 300
 
 [org/gnome/desktop/screensaver]
-lock-enabled=false
+lock-enabled=true
 lock-delay=0
 
 [org/gnome/desktop/background]

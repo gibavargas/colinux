@@ -13,7 +13,10 @@
 
 set -euo pipefail
 
-CLIPBOARD_FILE="/tmp/codex-clipboard.txt"
+umask 077
+
+CLIPBOARD_FILE="/run/user/$(id -u)/codex-clipboard.txt"
+mkdir -p "$(dirname "$CLIPBOARD_FILE")" 2>/dev/null || CLIPBOARD_FILE="/tmp/codex-clipboard-$(id -u).txt"
 
 # Check for wl-clipboard
 if command -v wl-copy &>/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then

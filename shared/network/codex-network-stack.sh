@@ -89,20 +89,20 @@ write_state() {
     local gateway=""
     gateway="$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}')" || true
 
-    mkdir -p "$CODEX_STATE_DIR"
-    cat > "$CODEX_NETWORK_JSON" <<EOF
-{
-    "mode": "$mode",
-    "interface": "$iface",
-    "ssid": "$ssid",
-    "ip": "${ip:-none}",
-    "gateway": "${gateway:-none}",
-    "dns_primary": "$DNS_PRIMARY",
-    "dns_secondary": "$DNS_SECONDARY",
-    "dns_working": "$dns_ok",
-    "timestamp": "$(date -Iseconds)"
-}
-EOF
+    local json
+    json="$(jq -n \
+        --arg mode "$mode" \
+        --arg iface "$iface" \
+        --arg ssid "${ssid:-}" \
+        --arg ip "${ip:-none}" \
+        --arg gateway "${gateway:-none}" \
+        --arg dns_primary "$DNS_PRIMARY" \
+        --arg dns_secondary "$DNS_SECONDARY" \
+        --arg dns_working "$dns_ok" \
+        --arg timestamp "$(date -Iseconds)" \
+        '{mode: $mode, interface: $iface, ssid: $ssid, ip: $ip, gateway: $gateway, dns_primary: $dns_primary, dns_secondary: $dns_secondary, dns_working: $dns_working, timestamp: $timestamp}')"
+    mkdir -p "$(dirname "$CODEX_NETWORK_JSON")"
+    echo "$json" > "$CODEX_NETWORK_JSON"
     log_info "State updated: mode=$mode iface=$iface ip=${ip:-none}"
 }
 
@@ -389,7 +389,7 @@ parse_args() {
                 echo "  -h, --help        Show this help"
                 exit 0
                 ;;
-            *) shift ;;
+            *) echo "Unknown option: $1" >&2; shift ;;
         esac
     done
 }

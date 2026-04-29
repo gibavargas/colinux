@@ -87,21 +87,21 @@ fi
 
 # ── Create by-label symlink ───────────────────────────────────────────────
 if [[ -n "$LABEL" ]]; then
-    local_symlink_path="${MOUNT_BASE}/by-label/${LABEL}"
-    if [[ -L "$local_symlink_path" ]]; then
-        rm -f "$local_symlink_path"
+    symlink_path="${MOUNT_BASE}/by-label/${LABEL}"
+    if [[ -L "$symlink_path" ]]; then
+        rm -f "$symlink_path"
     fi
-    ln -s "$MOUNT_POINT" "$local_symlink_path"
+    ln -s "$MOUNT_POINT" "$symlink_path"
     echo "  → symlink: by-label/${LABEL}"
 fi
 
 # ── Create by-uuid symlink ────────────────────────────────────────────────
 if [[ -n "$UUID" ]]; then
-    local_symlink_path="${MOUNT_BASE}/by-uuid/${UUID}"
-    if [[ -L "$local_symlink_path" ]]; then
-        rm -f "$local_symlink_path"
+    symlink_path="${MOUNT_BASE}/by-uuid/${UUID}"
+    if [[ -L "$symlink_path" ]]; then
+        rm -f "$symlink_path"
     fi
-    ln -s "$MOUNT_POINT" "$local_symlink_path"
+    ln -s "$MOUNT_POINT" "$symlink_path"
     echo "  → symlink: by-uuid/${UUID}"
 fi
 

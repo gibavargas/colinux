@@ -146,12 +146,11 @@ RUN adduser -D -s /bin/bash -h /home/codex codex && \
     addgroup codex video 2>/dev/null || true && \
     addgroup codex input 2>/dev/null || true && \
     addgroup codex audio 2>/dev/null || true && \
-    echo "codex ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/codex && \
+    echo "codex ALL=(root) NOPASSWD: /usr/local/bin/codex-disk-inventory, /usr/local/bin/codex-network, /usr/local/bin/codex-backup, /usr/local/bin/codex-restore, /usr/local/bin/codex-update, /usr/local/bin/codex-shell, /usr/local/bin/codex-shell-gui, /usr/local/bin/codexctl, /usr/local/bin/codex-logs, /usr/local/bin/codex-mount-rw, /usr/local/bin/codex-mount-ro, /usr/local/bin/codex-usb-persist, /usr/local/sbin/codex-wifi-wizard, /usr/local/sbin/codex-network-stack" > /etc/sudoers.d/codex && \
     chown -R codex:codex /home/codex /workspace /persist
 
 # ── Install doas config ──────────────────────────────────────────────────────
-RUN echo "permit nopass keepenv codex" > /etc/doas.conf && \
-    echo "permit nopass :codex as root cmd /usr/local/bin/codex-wifi-wizard" >> /etc/doas.conf && \
+RUN echo "permit nopass :codex as root cmd /usr/local/bin/codex-wifi-wizard" > /etc/doas.conf && \
     echo "permit nopass :codex as root cmd /usr/local/sbin/codex-network-stack" >> /etc/doas.conf && \
     echo "permit nopass :codex as root cmd /usr/local/sbin/install-camoufox" >> /etc/doas.conf && \
     chmod 640 /etc/doas.conf

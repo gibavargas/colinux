@@ -163,7 +163,7 @@ EXCLUDES=(
     --exclude='__pycache__'
     --exclude='.cache'
     --exclude='node_modules/.cache'
-    --exclude='/persist/backups/*.tar.gz'
+    --exclude='backups/*.tar.gz'
 )
 
 tar czf "$BACKUP_FILE" "${EXCLUDES[@]}" "${PATHS[@]}" 2>&1

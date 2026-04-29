@@ -4,7 +4,7 @@
 #
 # On first login, sets up the GNOME desktop environment and launches
 # the Electron Codex Desktop app. Falls back to a terminal if needed.
-set -euo pipefail
+set -uo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────
 PERSIST_DIR="/persist"
@@ -45,13 +45,25 @@ fi
 
 # ── Source user profile if exists ─────────────────────────────────────────
 if [[ -f "${PERSIST_DIR}/profile" ]]; then
-    source "${PERSIST_DIR}/profile"
+    if [[ -z "${CODEX_SHELL_ACTIVE:-}" ]]; then
+        export CODEX_SHELL_ACTIVE=1
+        while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$line" ]] && continue
+            if [[ "$line" =~ ^export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*= ]]; then
+                eval "$line"
+            fi
+        done < "${PERSIST_DIR}/profile"
+    fi
 fi
 
 # ── Launch Electron Codex Desktop if available ────────────────────────────
 if [[ -x "$CODEX_ELECTRON" ]]; then
     echo "Starting Codex Desktop..."
-    exec "$CODEX_ELECTRON" "$@"
+    if ! "$CODEX_ELECTRON" "$@"; then
+        echo "Codex Desktop failed to launch. Starting fallback..." >&2
+        exec gnome-terminal -- bash -c "codex 2>/dev/null || bash"
+    fi
 else
     echo "Codex Desktop not found at $CODEX_ELECTRON"
     echo "To install: sudo setup-electron-codex.sh"

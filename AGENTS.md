@@ -81,5 +81,5 @@
 
 ---
 
-*Last updated: $(date -Iseconds)*
+*Last updated: 2025-01-01T00:00:00+00:00*
 *CodexOS Lite — Alpine Linux + OpenAI Codex CLI*

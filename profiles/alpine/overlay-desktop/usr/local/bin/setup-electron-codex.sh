@@ -58,12 +58,11 @@ install_nodejs() {
         fi
     fi
 
-    # Install Node.js from NodeSource
+    # Install Node.js from Alpine repos
     if [[ -f /etc/alpine-release ]]; then
         apk add --no-cache nodejs npm 2>/dev/null || {
-            # Fallback: install from NodeSource
-            curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash - 2>/dev/null || true
-            apk add --no-cache nodejs npm
+            warn "Failed to install Node.js from Alpine repos."
+            return 1
         }
     else
         warn "Non-Alpine system detected. Please install Node.js ${NODE_VERSION} manually."
@@ -240,8 +239,8 @@ function createWindow() {
         title: 'Codex Desktop',
         backgroundColor: '#1e1e1e',
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false
+            nodeIntegration: false,
+            contextIsolation: true
         }
     });
 
@@ -370,7 +369,9 @@ fi
 if [ "$AUTO_UPDATE" = "true" ]; then
     echo "  Auto-update: enabled" >> "$LOG"
     cd "$INSTALL_DIR/app" 2>/dev/null && {
-        npm update --no-audit --no-fund >> "$LOG" 2>&1 || \
+        # WARNING: Supply-chain risk — npm update fetches latest from registry without
+    # integrity verification. Pin versions in package-lock.json when possible.
+    npm update --no-audit --no-fund >> "$LOG" 2>&1 || \
             echo "  WARNING: npm update failed" >> "$LOG"
     }
 else

@@ -120,7 +120,7 @@ STAGING_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGING_DIR"' EXIT
 
 echo "Extracting to staging directory..."
-tar xzf "$RESTORE_FILE" -C "$STAGING_DIR" 2>&1 || {
+tar xzf "$RESTORE_FILE" -C "$STAGING_DIR" --no-absolute-filenames --anchored 2>&1 || {
     die "Failed to extract backup archive."
 }
 

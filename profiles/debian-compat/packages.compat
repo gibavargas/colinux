@@ -33,8 +33,6 @@ ethtool
 crda
 dialog
 openssh-client
-curl
-wget
 gnutls-bin
 rsync
 
@@ -55,7 +53,6 @@ nvme-cli
 hdparm
 pciutils
 usbutils
-gparted
 
 # --- Dev Tools & CLI ---
 git
