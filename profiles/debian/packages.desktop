@@ -91,7 +91,6 @@ git
 build-essential
 dpkg-dev
 p7zip-full
-7z
 
 # --- Python ---
 python3
@@ -170,7 +169,6 @@ jq
 less
 file
 tree
-htop
 ncdu
 strace
 lsof
@@ -192,7 +190,6 @@ apt-listchanges
 debian-archive-keyring
 
 # --- Archive & Compression ---
-p7zip-full
 unzip
 tar
 gzip

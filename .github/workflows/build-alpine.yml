@@ -39,9 +39,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             squashfs-tools xorriso grub-efi-amd64-bin \
-            grub-efi-arm64-bin mtools dosfstools fdisk \
+            mtools dosfstools fdisk \
             bash curl ca-certificates git qemu-utils \
-            openssl sgdisk fdisk e2fsprogs
+            openssl gptfdisk e2fsprogs
+          # grub-efi-arm64-bin may not be available on all runners; install if present
+          sudo apt-get install -y --no-install-recommends grub-efi-arm64-bin 2>/dev/null || true
 
       - name: Build Alpine ISO (${{ matrix.arch }})
         run: |

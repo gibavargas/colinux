@@ -144,38 +144,26 @@ configure_lb() {
         --debug $([ "$DEBUG" = true ] && echo true || echo false) \
         --verbose true \
         \
-        --image-type "$IMAGE_TYPE" \
         --binary-images "iso-hybrid" \
         --memtest none \
         \
         --bootloader "syslinux,grub-efi" \
-        --uefi secure \
-        --efi-images "true" \
         \
         --iso-application "CodexOS Desktop" \
         --iso-publisher "CoLinux Project" \
         --iso-volume "CODEXOS-DESKTOP" \
         \
-        --debootstrap-options "--variant=minbase" \
         --apt-indices false \
         --cache-packages true \
         --cache-indices true \
-        --packages-lists "codexos-desktop" \
         --package-lists "codexos-desktop" \
         \
-        --linux-flavors "amd64" \
-        --linux-packages "linux-image amd64" \
+        --linux-flavours "amd64" \
         \
         --firmware-binary true \
         --firmware-chroot true \
         \
-        --initramfs "live-boot-initramfs-tools" \
-        --live-boot "live-boot live-boot-initramfs-tools" \
-        \
-        --persistence "encrypted" \
-        --persistence-encryption "luks" \
-        \
-        --chroot-filesystem "squashfs"
+        --initramfs "live-boot-initramfs-tools"
 
     log_info "live-build configuration complete"
 }

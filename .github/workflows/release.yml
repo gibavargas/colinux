@@ -16,15 +16,6 @@ jobs:
   # ── Build Alpine ISOs ─────────────────────────────────────────────────────────
   build-alpine:
     name: Alpine ISO (${{ matrix.arch }})
-    uses: ./.github/workflows/build-alpine.yml
-    strategy:
-      matrix:
-        arch: [x86_64, aarch64]
-    with:
-      arch: ${{ matrix.arch }}
-    # Reusable workflows can't use matrix directly in 'uses',
-    # so we build inline instead
-    # Actually, let's just build inline for reliability
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -46,9 +37,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             squashfs-tools xorriso grub-efi-amd64-bin \
-            grub-efi-arm64-bin mtools dosfstools fdisk \
+            mtools dosfstools fdisk \
             bash curl ca-certificates git qemu-utils \
-            openssl sgdisk e2fsprogs
+            openssl gptfdisk e2fsprogs
+          # grub-efi-arm64-bin may not be available on all runners; install if present
+          sudo apt-get install -y --no-install-recommends grub-efi-arm64-bin 2>/dev/null || true
 
       - name: Build Alpine ISO (${{ matrix.arch }})
         run: |

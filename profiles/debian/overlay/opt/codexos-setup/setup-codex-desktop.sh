@@ -25,7 +25,7 @@ set -euo pipefail
 # ── Cleanup ──────────────────────────────────────────────────────────────────
 _CLEANUP_DIRS=""
 _cleanup() {
-    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf $_CLEANUP_DIRS 2>/dev/null || true
+    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf "${_CLEANUP_DIRS}" 2>/dev/null || true
 }
 trap _cleanup EXIT
 

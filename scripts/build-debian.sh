@@ -194,27 +194,22 @@ configure_lb() {
     lb config \
         --distribution bookworm \
         --debian-installer none \
-        --mode debian \
         --architectures amd64 \
-        --archive-areas main contrib non-free non-free-firmware \
-        --debootstrap-options "--variant=minbase --include=apt-transport-https,ca-certificates" \
+        --archive-areas main \
         --bootloader syslinux,grub-efi \
-        --uefi-secure-boot enable \
         --memtest none \
         --source false \
         --binary-images iso-hybrid \
         --iso-application "CodexOS Desktop" \
         --iso-publisher "CodexOS Project" \
         --iso-volume "codexos-desktop" \
-        --iso-level 3 \
-        --linux-packages "linux-image-amd64" \
         --linux-flavours "amd64" \
         --firmware-binary true \
         --firmware-chroot true \
+        --apt-indices false \
+        --cache-packages true \
+        --cache-indices true \
         --initramfs systemd \
-        --kernel-packages "linux-image-amd64 linux-headers-amd64" \
-        --system live \
-        --binary-filesystem fat32 \
         2>&1
 
     ok "live-build configured"
