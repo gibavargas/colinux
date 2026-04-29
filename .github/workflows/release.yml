@@ -1,0 +1,263 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  packages: write
+  actions: write
+
+env:
+  ALPINE_RELEASE: '3.21'
+
+jobs:
+  # ── Build Alpine ISOs ─────────────────────────────────────────────────────────
+  build-alpine:
+    name: Alpine ISO (${{ matrix.arch }})
+    uses: ./.github/workflows/build-alpine.yml
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    with:
+      arch: ${{ matrix.arch }}
+    # Reusable workflows can't use matrix directly in 'uses',
+    # so we build inline instead
+    # Actually, let's just build inline for reliability
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            squashfs-tools xorriso grub-efi-amd64-bin \
+            grub-efi-arm64-bin mtools dosfstools fdisk \
+            bash curl ca-certificates git qemu-utils \
+            openssl sgdisk e2fsprogs
+
+      - name: Build Alpine ISO (${{ matrix.arch }})
+        run: |
+          mkdir -p dist
+          ARCH=${{ matrix.arch }} \
+          ALPINE_RELEASE=${{ env.ALPINE_RELEASE }} \
+          OUTDIR="$GITHUB_WORKSPACE/dist" \
+          bash scripts/build-alpine.sh
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-alpine-${{ matrix.arch }}
+          path: dist/codexos-lite-*
+          retention-days: 1
+          if-no-files-found: error
+
+  # ── Build Debian Desktop ISO ─────────────────────────────────────────────────
+  build-debian:
+    name: Debian Desktop ISO
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+          df -h /
+
+      - name: Install live-build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            live-build debootstrap squashfs-tools xorriso \
+            dpkg-dev fakeroot cpio dosfstools mtools \
+            grub-efi-amd64-bin grub-pc-bin syslinux \
+            isolinux systemd-container
+
+      - name: Build Debian Desktop ISO
+        run: |
+          sudo bash scripts/build-debian.sh
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-debian-desktop
+          path: |
+            work/debian-build/output/*.iso
+            work/debian-build/output/*.img.gz
+          retention-days: 1
+          if-no-files-found: warn
+
+  # ── Build Docker image ───────────────────────────────────────────────────────
+  build-docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: secrets.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/codexos-lite
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+  # ── Create Release ───────────────────────────────────────────────────────────
+  create-release:
+    name: Create GitHub Release
+    needs: [build-alpine, build-debian, build-docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: List all artifacts
+        run: find release-artifacts -type f -exec ls -lh {} \;
+
+      - name: Generate combined SHA256SUMS
+        working-directory: release-artifacts
+        run: |
+          sha256sum codexos-* > SHA256SUMS
+          echo ""
+          echo "=== SHA256SUMS ==="
+          cat SHA256SUMS
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "## What's in ${TAG}" > release-notes.md
+          echo "" >> release-notes.md
+          echo "### Downloads" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "| File | Description |" >> release-notes.md
+          echo "|------|-------------|" >> release-notes.md
+
+          # List Alpine ISOs
+          for f in release-artifacts/codexos-lite-*.iso; do
+            [ -f "$f" ] || continue
+            bn=$(basename "$f")
+            sz=$(du -h "$f" | cut -f1)
+            echo "| \`${bn}\` | Alpine Lite ISO (${sz}) |" >> release-notes.md
+          done
+
+          # List raw images
+          for f in release-artifacts/codexos-lite-*.raw.img; do
+            [ -f "$f" ] || continue
+            bn=$(basename "$f")
+            sz=$(du -h "$f" | cut -f1)
+            echo "| \`${bn}\` | Raw disk image (${sz}) |" >> release-notes.md
+          done
+
+          # List Debian desktop
+          for f in release-artifacts/codexos-desktop-*.iso; do
+            [ -f "$f" ] || continue
+            bn=$(basename "$f")
+            sz=$(du -h "$f" | cut -f1)
+            echo "| \`${bn}\` | Debian Desktop ISO (${sz}) |" >> release-notes.md
+          done
+
+          for f in release-artifacts/codexos-desktop-*.img.gz; do
+            [ -f "$f" ] || continue
+            bn=$(basename "$f")
+            sz=$(du -h "$f" | cut -f1)
+            echo "| \`${bn}\` | USB-ready image (${sz}) |" >> release-notes.md
+          done
+
+          echo "" >> release-notes.md
+          echo "### Verify" >> release-notes.md
+          echo '```bash' >> release-notes.md
+          echo 'sha256sum -c SHA256SUMS' >> release-notes.md
+          echo '```' >> release-notes.md
+          echo "" >> release-notes.md
+          echo "### Docker" >> release-notes.md
+          echo '```bash' >> release-notes.md
+          echo "docker run -it ghcr.io/gibavargas/codexos-lite:${TAG}" >> release-notes.md
+          echo '```' >> release-notes.md
+
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CodexOS ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: |
+            release-artifacts/codexos-lite-*.iso
+            release-artifacts/codexos-lite-*.raw.img
+            release-artifacts/codexos-desktop-*.iso
+            release-artifacts/codexos-desktop-*.img.gz
+            release-artifacts/SHA256SUMS
+          draft: false
+          prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,82 @@
+name: Build Alpine ISO
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  ALPINE_RELEASE: '3.21'
+
+jobs:
+  build-alpine:
+    name: Alpine ISO (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            squashfs-tools xorriso grub-efi-amd64-bin \
+            grub-efi-arm64-bin mtools dosfstools fdisk \
+            bash curl ca-certificates git qemu-utils \
+            openssl sgdisk fdisk e2fsprogs
+
+      - name: Build Alpine ISO (${{ matrix.arch }})
+        run: |
+          mkdir -p dist
+          ARCH=${{ matrix.arch }} \
+          ALPINE_RELEASE=${{ env.ALPINE_RELEASE }} \
+          OUTDIR="$GITHUB_WORKSPACE/dist" \
+          bash scripts/build-alpine.sh
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum codexos-lite-* > SHA256SUMS-${{ matrix.arch }}.txt
+          cat SHA256SUMS-${{ matrix.arch }}.txt
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-iso-${{ matrix.arch }}
+          path: |
+            dist/codexos-lite-*.iso
+            dist/codexos-lite-*.raw.img
+            dist/SHA256SUMS-${{ matrix.arch }}.txt
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload as release asset (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/codexos-lite-*.iso
+            dist/codexos-lite-*.raw.img
+            dist/SHA256SUMS-${{ matrix.arch }}.txt
+          draft: false
+          prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

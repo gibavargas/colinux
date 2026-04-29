@@ -1,0 +1,109 @@
+name: Daily Issue & PR Review
+
+on:
+  schedule:
+    # Run daily at 9:00 AM UTC
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: read
+  pull-requests: read
+
+jobs:
+  review:
+    name: Summarize open issues & PRs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: List open issues
+        id: issues
+        run: |
+          echo "## 📋 Open Issues" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Count issues
+          ISSUE_COUNT=$(gh issue list --state open --json number,title,labels,createdAt --jq 'length' 2>/dev/null || echo "0")
+          echo "**Total open issues: $ISSUE_COUNT**" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ISSUE_COUNT" -gt 0 ]; then
+            echo "| # | Title | Labels | Age |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---|-------|--------|-----|" >> "$GITHUB_STEP_SUMMARY"
+
+            gh issue list --state open --limit 50 \
+              --json number,title,labels,createdAt \
+              --jq '.[] | "| #\(.number) | \(.title) | \([.labels[].name] | join(", ") // "none") | \((now - (.createdAt | fromdateiso8601)) / 86400 | floor | tostring) days |"' \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No open issues. 🎉" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: List open pull requests
+        id: prs
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🔀 Open Pull Requests" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          PR_COUNT=$(gh pr list --state open --json number,title,labels,createdAt --jq 'length' 2>/dev/null || echo "0")
+          echo "**Total open PRs: $PR_COUNT**" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$PR_COUNT" -gt 0 ]; then
+            echo "| # | Title | Labels | Age |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---|-------|--------|-----|" >> "$GITHUB_STEP_SUMMARY"
+
+            gh pr list --state open --limit 50 \
+              --json number,title,labels,createdAt \
+              --jq '.[] | "| #\(.number) | \(.title) | \([.labels[].name] | join(", ") // "none") | \((now - (.createdAt | fromdateiso8601)) / 86400 | floor | tostring) days |"' \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No open PRs." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: List stale items
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## ⏰ Stale Items (30+ days)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          STALE_ISSUES=$(gh issue list --state open --search "updated:<$(date -d '30 days ago' +%Y-%m-%d)" \
+            --json number,title,updatedAt --limit 20 --jq '.[] | "• #\(.number) \(.title) (updated \(.updatedAt | split("T")[0]))"' 2>/dev/null || echo "")
+
+          STALE_PRS=$(gh pr list --state open --search "updated:<$(date -d '30 days ago' +%Y-%m-%d)" \
+            --json number,title,updatedAt --limit 20 --jq '.[] | "• #\(.number) \(.title) (updated \(.updatedAt | split("T")[0]))"' 2>/dev/null || echo "")
+
+          if [ -n "$STALE_ISSUES" ]; then
+            echo "### Stale Issues" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "$STALE_ISSUES" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -n "$STALE_PRS" ]; then
+            echo "### Stale PRs" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "$STALE_PRS" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -z "$STALE_ISSUES" ] && [ -z "$STALE_PRS" ]; then
+            echo "No stale items. Everything is fresh! ✨" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Print summary to log
+        run: |
+          echo "========================================="
+          echo "  CodexOS Daily Review Summary"
+          echo "  $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "========================================="
+          echo ""
+          gh issue list --state open --limit 10 2>/dev/null || echo "(no issues)"
+          echo ""
+          gh pr list --state open --limit 10 2>/dev/null || echo "(no PRs)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

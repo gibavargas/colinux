@@ -12,6 +12,8 @@
 <p align="center">
   <a href="#features">Features</a> •
   <a href="#editions">Editions</a> •
+  <a href="#for-humans">For Humans</a> •
+  <a href="#for-ai-agents">For AI Agents</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#building-from-source">Build</a> •
   <a href="#installation">Install</a> •
@@ -291,6 +293,424 @@ codexctl persistence status
 # Update Codex CLI
 codexctl update --channel stable
 ```
+
+## 🧑 For Humans
+
+### Prerequisites
+
+To use CodexOS Lite, you need:
+
+- **A USB drive** — 4 GB minimum, 8 GB+ recommended (for persistence)
+- **An x86_64 PC** with USB boot support (UEFI or legacy BIOS)
+- **2 GB RAM** minimum (4 GB recommended)
+- **Internet access** — required for OpenAI Codex CLI to function
+- **An OpenAI API key** — you'll be prompted for it on first boot
+
+To **build** from source, you also need:
+
+- Docker (easiest) or an Alpine Linux 3.19+ host
+- ~2 GB of free disk space
+
+### Quick Start — Build with Docker in 3 Commands
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/gibavargas/codexos.git
+cd codexos
+
+# 2. Build the Docker image (this IS CodexOS — a full environment)
+docker build -t codexos-lite .
+
+# 3. Launch it
+docker run -it --rm codexos-lite
+```
+
+That's it. You're inside CodexOS with all the disk tools, codexctl, and a shell. Run `codexctl status` to see system info.
+
+For a bootable ISO instead:
+
+```bash
+# Build the Alpine ISO
+docker run -it --rm -v "$PWD/dist:/dist" -w /build \
+  alpine:3.21 \
+  sh -c "apk add --no-cache bash curl git ca-certificates squashfs-tools xorriso grub-efi e2fsprogs dosfstools mtools qemu-utils openssl sgdisk && \
+          ./scripts/build-alpine.sh --outdir /dist"
+```
+
+### Creating a Bootable USB
+
+**Option A: `dd` (Linux/macOS)**
+
+```bash
+# Find your USB drive
+lsblk
+
+# Write the image (REPLACE /dev/sdX WITH YOUR DEVICE)
+sudo dd if=dist/codexos-lite-x86_64-*.iso of=/dev/sdX bs=4M status=progress && sync
+
+# Or use the safe helper script
+sudo ./scripts/usb-write.sh /dev/sdX
+```
+
+> ⚠️ **This will erase all data on the target drive.** Double-check the device name.
+
+**Option B: balenaEtcher (Windows/macOS/Linux)**
+
+1. Download [balenaEtcher](https://balena.io/etcher/)
+2. Select the ISO file
+3. Select your USB drive
+4. Click "Flash"
+
+### First Boot Walkthrough
+
+When you boot CodexOS Lite for the first time, here's what happens:
+
+1. **Bootloader menu** — syslinux shows three options:
+   - `Live` — normal boot (choose this)
+   - `Forensic` — all disks forced read-only
+   - `Debug` — verbose boot with shell fallback
+
+2. **Kernel loads** — Alpine's initramfs boots in under 10 seconds
+
+3. **First-boot wizard** runs automatically:
+   ```
+   === CodexOS Lite — First Boot Setup ===
+   ? Enter your OpenAI API key: sk-...
+   ✓ Codex CLI configured
+   ? Set up encrypted persistence? (y/N):
+   ```
+
+4. **Codex CLI launches** — you see the Codex prompt:
+   ```
+   codex> 
+   ```
+
+5. **Start typing.** For example:
+   ```
+   codex> Show me what disks are attached
+   codex> List all files on the second partition of /dev/sdb
+   codex> What's the SMART health status of /dev/sda?
+   ```
+
+Subsequent boots skip the wizard and go straight to Codex.
+
+### Using Codex (Basic Commands)
+
+Codex CLI is a natural language interface. Here are things you can ask:
+
+```
+# System information
+codex> What OS version are we running? What kernel?
+codex> How much RAM and disk space is available?
+
+# File operations
+codex> List all files in /mnt/disks/by-device/sdb1
+codex> Copy the photos folder from the USB drive to /persist/data/
+codex> Find all .jpg files larger than 5MB on the mounted drive
+
+# Disk operations
+codex> Show me all attached block devices with their filesystems
+codex> What's the partition table of /dev/nvme0n1?
+codex> Check the filesystem health of /dev/sda1
+
+# Recovery
+codex> I accidentally deleted a file called report.docx — can you recover it?
+codex> This NTFS drive won't mount, help me diagnose it
+
+# Networking
+codex> Scan the local network for devices
+codex> Test if I can reach the internet
+```
+
+### Disk Operations
+
+All disk operations go through `codexctl` for safety:
+
+```bash
+# See what's attached
+codexctl disks
+
+# Mount a drive read-only (safe, always allowed)
+codexctl mount-ro /dev/sdb1
+ls /mnt/disks/by-device/sdb1/
+
+# Mount read-write (requires confirmation with device serial)
+codexctl mount-rw --confirm "WD-WMC4T0123456" /dev/sdb1
+
+# Copy files from a mounted drive to persistent storage
+cp -r /mnt/disks/by-device/sdb1/photos /persist/data/
+
+# Create a forensic disk image (with SHA-256 verification)
+codexctl image /dev/sdb --output /persist/images/evidence.img
+
+# Enter forensic mode (all operations read-only, immutable)
+codexctl forensic on
+
+# View mounted disks
+mount | grep /mnt/disks
+```
+
+### Network Setup
+
+```bash
+# Check current network status
+codexctl network
+
+# Wired: usually auto-configured via DHCP
+# If not, bring up the interface:
+codexctl network up eth0
+
+# Wireless: scan and connect
+codexctl network scan
+codexctl network connect "MyWiFi" "password123"
+
+# Check connectivity
+ping -c 3 8.8.8.8
+curl -sS ifconfig.me
+```
+
+### Troubleshooting Common Issues
+
+| Problem | Solution |
+|---------|----------|
+| Won't boot from USB | Check BIOS/UEFI boot order; try "USB HDD" or "UEFI: <drive>" |
+| Black screen after boot | Reboot and select `Debug` from the boot menu; check graphics compatibility |
+| No network | Run `codexctl network`; try `ip link` to see interfaces; check cable/WiFi |
+| Codex says "API key invalid" | Run `setup-codex --key` to reconfigure your OpenAI API key |
+| Can't write to USB drive | By design! Use `codexctl mount-rw --confirm <SERIAL> <device>` |
+| Disk won't mount | Try `codexctl mount-ro /dev/sdXN` first; run `fsck /dev/sdXN` to check |
+| Out of space on persistence | Run `df -h /persist`; clean up with `codexctl backup --list` |
+| Slow boot | Check USB drive speed (USB 3.0+ recommended); try a different port |
+
+### FAQ
+
+**Q: Does CodexOS install anything on my computer?**
+A: No. It runs entirely from the USB drive. Nothing is written to your internal disks unless you explicitly request it.
+
+**Q: Can I use it without an OpenAI API key?**
+A: You can use the shell and disk tools without an API key, but the Codex AI assistant requires one.
+
+**Q: How do I update Codex CLI?**
+A: Run `codexctl update` — it checks for new versions and updates automatically.
+
+**Q: Can I run this in a virtual machine?**
+A: Yes. `qemu-system-x86_64 -m 2048 -cdrom dist/codexos-lite-x86_64-*.iso -boot d` or use VirtualBox/VMware.
+
+**Q: How do I set up persistence?**
+A: Run `codexctl persist setup /dev/sdX` during a live session. It creates an encrypted partition for your config, logs, and data.
+
+**Q: Is my API key stored securely?**
+A: Yes. API keys are stored in `/persist/config/` with 0600 permissions, owned by the `codex` user. If using LUKS persistence, the key is encrypted on disk.
+
+---
+
+## 🤖 For AI Agents
+
+### AGENTS.md — The Rules Codex Follows
+
+CodexOS places an `AGENTS.md` file at `/workspace/AGENTS.md` on first boot. This file contains all operating rules that Codex must follow. Key rules:
+
+1. **Disk Safety** — Never write to disks without explicit user confirmation. Always run `codex-disk-inventory` first.
+2. **Read-First** — Mount unknown filesystems read-only before any write operations.
+3. **Persistence Layout** — Use `/persist/` for all persistent data (`config/`, `data/`, `logs/`, `backups/`).
+4. **Network** — Use `codex-network` for all network operations. Prefer wired over wireless.
+5. **Logging** — All operations must be logged to `/persist/logs/` in format `YYYY-MM-DD HH:MM:SS [LEVEL] message`.
+6. **Security** — Only `codex-*` commands are whitelisted in `doas.conf`. Never escalate outside these.
+7. **Workspace** — `/workspace` is ephemeral. Persistent data goes to `/workspace/data` (bind-mounted from `/persist/data/`).
+
+See the full [`AGENTS.md`](AGENTS.md) in the repository root.
+
+### codexctl API Reference
+
+`codexctl` is the primary control interface. All subcommands:
+
+```bash
+# System info
+codexctl status                 # Human-readable status
+codexctl status --json          # JSON output for programmatic use
+
+# Version info
+codexctl version                # Show CodexOS + Codex CLI versions
+
+# Disk operations
+codexctl disks                  # Disk inventory (human)
+codexctl disks --json           # Disk inventory (JSON)
+
+# Mounting
+codexctl mount-ro /dev/sdb1     # Read-only mount (always safe)
+codexctl mount-rw --confirm "SERIAL" /dev/sdb1 /mnt/target  # Read-write (requires confirmation)
+
+# Persistence
+codexctl persist                # Show persistence status
+codexctl persist open /dev/sdX3 # Unlock LUKS persistence
+codexctl persist close          # Lock persistence
+
+# Updates
+codexctl update                 # Update Codex CLI + Alpine packages
+codexctl update --check         # Check for available updates
+
+# Network
+codexctl network                # Network status
+codexctl network up eth0        # Bring up interface
+codexctl network scan           # Scan WiFi networks
+
+# Logs
+codexctl logs                   # View system logs
+codexctl logs --follow          # Tail logs
+
+# Backups
+codexctl backup                 # Create workspace backup
+codexctl backup --list          # List existing backups
+
+# Installation
+codexctl install-usb /dev/sdX   # Install CodexOS to USB
+codexctl install-pc             # Install to internal disk
+```
+
+### Programmatic Disk Operations (JSON Output)
+
+For CI/CD and automation, use `--json` flags:
+
+```bash
+# Get system status as JSON
+codexctl status --json
+# Output:
+# {
+#   "codexos_version": "0.1.0",
+#   "codex_cli": "codex 0.1.0",
+#   "kernel": "6.6.x",
+#   "arch": "x86_64",
+#   "hostname": "codexos",
+#   "uptime": "up 5 minutes",
+#   "timestamp": "2025-01-15T10:30:00Z"
+# }
+
+# Get disk inventory as JSON
+codexctl disks --json
+# Output:
+# {
+#   "devices": [
+#     {
+#       "name": "/dev/sda",
+#       "serial": "WD-WMC4T0123456",
+#       "size": "500107862016",
+#       "model": "WDC WD5000LPCX",
+#       "partitions": [...],
+#       "safety": "foreign_disk"
+#     }
+#   ]
+# }
+
+# Parse with jq
+codexctl disks --json | jq '.devices[] | {name, size, safety}'
+codexctl status --json | jq '.codex_cli'
+```
+
+### Building Custom Images Programmatically
+
+**Docker build (recommended for CI):**
+
+```bash
+# Build with a specific Codex version
+docker build \
+  --build-arg CODEX_VERSION=0.1.0 \
+  -t codexos-lite:custom .
+
+# Run with persistent volume
+docker run -it \
+  -v ./my-data:/workspace/data \
+  -e OPENAI_API_KEY=sk-... \
+  codexos-lite:custom
+```
+
+**Alpine ISO build (in CI):**
+
+```bash
+# Build for x86_64
+ARCH=x86_64 ALPINE_RELEASE=3.21 OUTDIR=./dist \
+  bash scripts/build-alpine.sh
+
+# Build for aarch64
+ARCH=aarch64 ALPINE_RELEASE=3.21 OUTDIR=./dist \
+  bash scripts/build-alpine.sh
+
+# With specific Codex version
+CODEX_VERSION=v0.1.0 ARCH=x86_64 bash scripts/build-alpine.sh
+```
+
+### Testing in CI/CD
+
+```bash
+# Run the test suite
+make test
+
+# Or directly with bats
+bats tests/disk-safety.bats
+bats tests/integration.bats
+
+# Quick smoke test in Docker
+docker run --rm codexos-lite codexctl version
+docker run --rm codexos-lite codexctl status --json
+
+# Test ISO in QEMU (headless)
+qemu-system-x86_64 \
+  -m 1024 \
+  -nographic \
+  -cdrom dist/codexos-lite-x86_64-*.iso \
+  -boot d \
+  -net nic \
+  -net user &
+sleep 30
+# ... run tests against booted system ...
+kill %1
+```
+
+### Integration Patterns
+
+**Pattern 1: Automated data recovery pipeline**
+
+```bash
+# Boot CodexOS, mount evidence drive, image it, hash it
+codexctl mount-ro /dev/sdb1
+codexctl image /dev/sdb --output /persist/images/evidence-$(date +%Y%m%d).img
+sha256sum /persist/images/evidence-*.img > /persist/images/evidence.sha256
+```
+
+**Pattern 2: CI/CD infrastructure tool**
+
+```bash
+# Use CodexOS in Docker as a Codex agent for infrastructure tasks
+docker run -it --rm \
+  -v ~/.ssh:/persist/ssh:ro \
+  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  codexos-lite \
+  codex -q "Check the health of all disks on these servers: host1, host2, host3"
+```
+
+**Pattern 3: Batch processing with JSON output**
+
+```bash
+# Script: inventory-all-disks.sh
+#!/bin/bash
+codexctl disks --json | jq -r '.devices[].name' | while read dev; do
+  echo "=== $dev ==="
+  codexctl mount-ro "$dev" 2>/dev/null || continue
+  echo "Mounted successfully"
+  codexctl persist
+done
+```
+
+**Pattern 4: Custom AGENTS.md for your workflow**
+
+```bash
+# Mount your custom rules
+docker run -it --rm \
+  -v ./my-agents.md:/workspace/AGENTS.md \
+  -v ./scripts:/workspace/custom-tools \
+  codexos-lite
+```
+
+---
 
 ## Contributing
 

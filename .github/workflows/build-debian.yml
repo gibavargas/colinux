@@ -1,0 +1,81 @@
+name: Build Debian Desktop ISO
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-debian:
+    name: Debian Desktop ISO
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+          df -h /
+
+      - name: Install live-build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            live-build debootstrap squashfs-tools xorriso \
+            dpkg-dev fakeroot cpio dosfstools mtools \
+            grub-efi-amd64-bin grub-pc-bin syslinux \
+            isolinux systemd-container
+
+      - name: Build Debian ISO
+        run: |
+          sudo bash scripts/build-debian.sh
+        env:
+          CODEX_DESKTOP_VERSION: latest
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          if [ -d work/debian-build/output ]; then
+            cp -v work/debian-build/output/*.iso dist/ 2>/dev/null || true
+            cp -v work/debian-build/output/*.img* dist/ 2>/dev/null || true
+          fi
+          ls -lh dist/ || echo "No artifacts found"
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum codexos-desktop-* > SHA256SUMS-debian.txt 2>/dev/null || true
+          cat SHA256SUMS-debian.txt 2>/dev/null || echo "No desktop artifacts to checksum"
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-desktop-iso
+          path: |
+            dist/codexos-desktop-*.iso
+            dist/codexos-desktop-*.img.gz
+            dist/SHA256SUMS-debian.txt
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload as release asset (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/codexos-desktop-*.iso
+            dist/codexos-desktop-*.img.gz
+            dist/SHA256SUMS-debian.txt
+          draft: false
+          prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

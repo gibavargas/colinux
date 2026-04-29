@@ -1,0 +1,45 @@
+# CODEOWNERS — CodexOS
+#
+# These individuals or teams will be automatically requested for review
+# when pull requests modify files in the listed paths.
+#
+# Syntax reference: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @colinux/core
+
+# Build system
+/build.sh                 @colinux/core
+/Makefile                  @colinux/core
+/scripts/build-*.sh        @colinux/core
+/scripts/release.sh        @colinux/core
+
+# CI/CD
+/.github/workflows/*.yml   @colinux/core
+
+# Disk safety — critical security domain
+/disk/                     @colinux/core
+/profiles/alpine/overlay/usr/local/bin/safe-*   @colinux/core
+/profiles/alpine/overlay/usr/local/bin/codex-mount-*  @colinux/core
+/docs/DISK_SAFETY.md       @colinux/core
+
+# Security & authentication
+/profiles/alpine/overlay/etc/doas.conf  @colinux/core
+/docs/SECURITY.md          @colinux/core
+
+# AI agent rules
+/AGENTS.md                 @colinux/core
+
+# Docker
+/Dockerfile                @colinux/core
+/docker-compose.yml        @colinux/core
+
+# Documentation
+/README.md                 @colinux/core
+/docs/                     @colinux/core
+
+# Installer
+/installer/                @colinux/core
+
+# Persistence & encryption
+/profiles/alpine/overlay/usr/local/bin/*persist*  @colinux/core
