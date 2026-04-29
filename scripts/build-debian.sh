@@ -125,63 +125,8 @@ setup_build_dir() {
 
 # ── Download Codex Desktop ───────────────────────────────────────────────────
 download_codex_desktop() {
-    step "Downloading Codex Desktop (Electron)"
-
-    if $QUICK && [ -d "$BUILD_DIR/codex-desktop-cache" ]; then
-        log "Using cached Codex Desktop (--quick)"
-        return 0
-    fi
-
-    local cache_dir="$BUILD_DIR/codex-desktop-cache"
-    mkdir -p "$cache_dir"
-
-    log "Cloning codex-desktop-linux repository..."
-    if [ ! -d "$cache_dir/codex-desktop-linux" ]; then
-        git clone --depth 1 https://github.com/ilysenko/codex-desktop-linux.git \
-            "$cache_dir/codex-desktop-linux" 2>&1 || {
-            warn "Clone failed — will retry during build"
-            return 0
-        }
-    else
-        (cd "$cache_dir/codex-desktop-linux" && git pull 2>/dev/null) || true
-    fi
-
-    # Download latest Codex release (for the binary)
-    log "Checking latest Codex release..."
-    local latest_release
-    latest_release="$(curl -fsSL -H "Accept: application/vnd.github+json" \
-        https://api.github.com/repos/openai/codex/releases/latest 2>/dev/null \
-        | jq -r '.tag_name // "latest"' 2>/dev/null)" || latest_release="latest"
-
-    log "Latest Codex release: $latest_release"
-
-    # Download macOS Codex app (the source for the Electron wrapper)
-    local codex_url
-    codex_url="https://github.com/openai/codex/releases/download/${latest_release}/codex-macos.zip"
-    local codex_zip="$cache_dir/codex-macos.zip"
-
-    if [ ! -f "$codex_zip" ]; then
-        log "Downloading Codex desktop release..."
-        if curl -fsSL --connect-timeout 30 -o "$codex_zip" "$codex_url" 2>/dev/null; then
-            local dl_size
-            dl_size="$(stat -c%s "$codex_zip" 2>/dev/null || echo 0)"
-            if [ "$dl_size" -lt 1048576 ]; then
-                warn "Download seems too small ($(numfmt --to=iec "$dl_size")), will retry during build"
-                rm -f "$codex_zip"
-            else
-                ok "Downloaded Codex v$latest_release ($(numfmt --to=iec "$dl_size"))"
-            fi
-        else
-            warn "Codex download failed — will retry during build"
-        fi
-    else
-        ok "Using cached Codex download"
-    fi
-
-    # Record version for later use
-    echo "$latest_release" > "$cache_dir/version.txt"
-
-    ok "Codex Desktop source prepared"
+    step "Skipping Codex Desktop (out of Lite MVP)"
+    warn "Debian compatibility builds do not download or wrap Codex Desktop in the production baseline."
 }
 
 # ── Configure live-build ─────────────────────────────────────────────────────

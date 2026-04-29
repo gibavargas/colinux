@@ -30,12 +30,12 @@ The default and recommended edition. A headless TTY appliance that boots directl
 
 - Alpine Linux base (busybox, musl, OpenRC)
 - Linux LTS kernel
-- Codex CLI (Node.js runtime)
+- Codex CLI standalone musl binary
 - Disk tools: `lsblk`, `parted`, `fdisk`, `fsck`, `ntfs-3g`, `cryptsetup`, `mdadm`, `testdisk`
 - Network: `dhcpcd`, `iwd` (WiFi), `openssh`, `curl`
 - Utilities: `jq`, `less`, `htop`, `vim`
 - `codexctl` control surface
-- All disk safety wrappers (`safe-mount`, `safe-write`, `disk-inventory`)
+- All disk safety wrappers (`codex-mount-ro`, `codex-mount-rw`, `codex-disk-inventory`, `codex-forensic`)
 - OpenRC init scripts (firstboot, disk-inventory, auto-update)
 
 ### Use cases

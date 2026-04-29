@@ -24,7 +24,8 @@ CODEX_RUNTIME="/run/codex"
 CODEX_CONFIG="$CODEX_PERSIST/config"
 CODEX_LOGS="$CODEX_PERSIST/logs"
 CODEX_DATA="$CODEX_PERSIST/data"
-FIRST_BOOT_FLAG="$CODEX_PERSIST/.first-boot-done"
+CODEX_SYSTEM_STATE="$CODEX_PERSIST/.codexos-system"
+FIRST_BOOT_FLAG="$CODEX_SYSTEM_STATE/first-boot-done"
 MOTD_FILE="/etc/motd"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -43,6 +44,31 @@ log_info()  { log "INFO"  "$@"; }
 log_warn()  { log "WARN"  "$@"; }
 log_error() { log "ERROR" "$@"; }
 
+valid_secret_value() {
+    case "$1" in
+        ""|*[!A-Za-z0-9._=:/,+@%-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+write_auth_file() {
+    local auth_file="$1"
+    local api_key="$2"
+
+    if ! valid_secret_value "$api_key"; then
+        log_error "API key contains unsupported characters; refusing to write shell config."
+        return 1
+    fi
+
+    cat > "$auth_file" <<EOF
+# CodexOS authentication configuration
+# Created: $(date -Iseconds)
+export OPENAI_API_KEY="$api_key"
+EOF
+    chmod 600 "$auth_file"
+    chown codex:codex "$auth_file" 2>/dev/null || true
+}
+
 # ── Step 1: Create runtime directories ────────────────────────────────────────
 setup_runtime_dirs() {
     log_info "Creating runtime directories..."
@@ -54,10 +80,16 @@ setup_runtime_dirs() {
     mkdir -p "$CODEX_DATA"
     mkdir -p "$CODEX_PERSIST/backups"
     mkdir -p "$CODEX_PERSIST/ssh"
+    mkdir -p "$CODEX_PERSIST/state"
+    mkdir -p "$CODEX_SYSTEM_STATE"
 
     # Set permissions
-    chown -R codex:codex "$CODEX_WORKSPACE" 2>/dev/null || true
-    chown -R codex:codex "$CODEX_PERSIST" 2>/dev/null || true
+    chown root:root "$CODEX_PERSIST" "$CODEX_SYSTEM_STATE" 2>/dev/null || true
+    chmod 0755 "$CODEX_PERSIST" 2>/dev/null || true
+    chmod 0700 "$CODEX_SYSTEM_STATE" 2>/dev/null || true
+    chown codex:codex "$CODEX_WORKSPACE" "$CODEX_CONFIG" "$CODEX_DATA" \
+        "$CODEX_PERSIST/backups" "$CODEX_PERSIST/ssh" "$CODEX_PERSIST/state" \
+        "$CODEX_LOGS" 2>/dev/null || true
     chmod 700 "$CODEX_PERSIST/ssh" 2>/dev/null || true
 
     log_info "Runtime directories created."
@@ -70,10 +102,17 @@ generate_disk_inventory() {
     local inventory_file="$CODEX_RUNTIME/disk-inventory.json"
 
     if command -v codex-disk-inventory >/dev/null 2>&1; then
-        codex-disk-inventory > "$inventory_file" 2>&1 || {
+        if codex-disk-inventory >/tmp/codex-disk-inventory.out 2>&1; then
+            if [ -f "$CODEX_RUNTIME/disks.json" ]; then
+                cp "$CODEX_RUNTIME/disks.json" "$inventory_file"
+            else
+                log_warn "codex-disk-inventory did not create disks.json"
+                generate_disk_inventory_manual
+            fi
+        else
             log_warn "codex-disk-inventory failed — generating manually"
             generate_disk_inventory_manual
-        }
+        fi
     else
         generate_disk_inventory_manual
     fi
@@ -231,18 +270,9 @@ setup_codex_auth() {
         return 0
     fi
 
-    # Source any existing environment
-    [ -f "$auth_file" ] && . "$auth_file" 2>/dev/null || true
-
     if [ -n "${OPENAI_API_KEY:-}" ]; then
         log_info "OPENAI_API_KEY found in environment."
-        cat > "$auth_file" <<EOF
-# CodexOS authentication configuration
-# Created: $(date -Iseconds)
-export OPENAI_API_KEY="${OPENAI_API_KEY}"
-EOF
-        chmod 600 "$auth_file"
-        chown codex:codex "$auth_file" 2>/dev/null || true
+        write_auth_file "$auth_file" "$OPENAI_API_KEY"
         return 0
     fi
 
@@ -266,16 +296,12 @@ EOF
         read -rp "  Choice [1/2/3]: " choice
         case "$choice" in
             1)
-                read -rp "  Enter OpenAI API key: " api_key
+                read -rsp "  Enter OpenAI API key: " api_key
+                echo ""
                 if [ -n "$api_key" ]; then
-                    cat > "$auth_file" <<EOF
-# CodexOS authentication configuration
-# Created: $(date -Iseconds)
-export OPENAI_API_KEY="${api_key}"
-EOF
-                    chmod 600 "$auth_file"
-                    chown codex:codex "$auth_file" 2>/dev/null || true
-                    log_info "API key saved to $auth_file"
+                    if write_auth_file "$auth_file" "$api_key"; then
+                        log_info "API key saved to $auth_file"
+                    fi
                 fi
                 ;;
             2)
@@ -354,7 +380,12 @@ setup_cron() {
 
 # ── Mark first boot complete ─────────────────────────────────────────────────
 mark_complete() {
+    mkdir -p "$CODEX_SYSTEM_STATE"
+    chown root:root "$CODEX_SYSTEM_STATE" 2>/dev/null || true
+    chmod 0700 "$CODEX_SYSTEM_STATE" 2>/dev/null || true
     date -Iseconds > "$FIRST_BOOT_FLAG"
+    chown root:root "$FIRST_BOOT_FLAG" 2>/dev/null || true
+    chmod 0600 "$FIRST_BOOT_FLAG" 2>/dev/null || true
     log_info "First boot initialization complete."
 }
 

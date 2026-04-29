@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Placeholder for the Codex Desktop Electron app
-# This will be replaced by the actual setup-codex-desktop.sh install
+# Placeholder for the disabled Codex Desktop Electron app
 
-echo "Codex Desktop is not yet installed."
-echo "Run 'codexctl setup' or 'sudo /opt/codexos-setup/setup-codex-desktop.sh' to install."
+echo "Codex Desktop is disabled in the CodexOS Lite production baseline."
+echo "Use the Codex CLI appliance flow instead."
 exit 1

@@ -6,7 +6,7 @@
 # edition. Sets up /persist, user environment, and triggers initial setup.
 #
 # Called by: systemd service (codex-firstboot.service)
-# Guarded by: /persist/.first-boot-done
+# Guarded by: /persist/.codexos-system/first-boot-done
 # =============================================================================
 set -euo pipefail
 
@@ -14,6 +14,8 @@ PERSIST_DIR="/persist"
 LOG_FILE="/persist/logs/first-boot.log"
 USER="codex"
 USER_HOME="/home/codex"
+SYSTEM_STATE="$PERSIST_DIR/.codexos-system"
+FIRSTBOOT_DONE="$SYSTEM_STATE/first-boot-done"
 
 log() {
     local ts
@@ -27,6 +29,7 @@ setup_persist() {
     log "Setting up persistent storage..."
 
     mkdir -p "$PERSIST_DIR"/{logs,data,backups,state,config,ssh,.gnupg}
+    mkdir -p "$SYSTEM_STATE"
 
     # Persist Codex Desktop state
     mkdir -p "$PERSIST_DIR"/state/codex-desktop
@@ -44,6 +47,9 @@ setup_persist() {
     done
 
     # Ensure correct ownership
+    chown root:root "$PERSIST_DIR" "$SYSTEM_STATE"
+    chmod 0755 "$PERSIST_DIR"
+    chmod 0700 "$SYSTEM_STATE"
     chown -R "$USER:$USER" "$PERSIST_DIR"/{home,data,backups,state,config,ssh,.gnupg,logs}
 }
 
@@ -88,6 +94,11 @@ BASHEOF
 # ── Setup Codex Desktop ─────────────────────────────────────────────────────
 setup_codex_desktop() {
     log "Setting up Codex Desktop app..."
+
+    if [ "${CODEX_DESKTOP_ENABLE_SETUP:-false}" != "true" ]; then
+        log "Codex Desktop setup disabled by default for the Lite production baseline."
+        return 0
+    fi
 
     # Run the setup script if present
     if [ -x /opt/codexos-setup/setup-codex-desktop.sh ]; then
@@ -142,8 +153,11 @@ setup_ssh() {
 # ── Finalize ─────────────────────────────────────────────────────────────────
 finalize() {
     log "Creating first-boot marker..."
-    touch "$PERSIST_DIR/.first-boot-done"
-    chown "$USER:$USER" "$PERSIST_DIR/.first-boot-done"
+    mkdir -p "$SYSTEM_STATE"
+    touch "$FIRSTBOOT_DONE"
+    chown root:root "$SYSTEM_STATE" "$FIRSTBOOT_DONE"
+    chmod 0700 "$SYSTEM_STATE"
+    chmod 0600 "$FIRSTBOOT_DONE"
 
     log "=== CodexOS Desktop first boot complete ==="
 
@@ -158,7 +172,7 @@ finalize() {
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
     # Guard against re-running
-    if [ -f "$PERSIST_DIR/.first-boot-done" ]; then
+    if [ -f "$FIRSTBOOT_DONE" ]; then
         log "First boot already completed. Skipping."
         exit 0
     fi

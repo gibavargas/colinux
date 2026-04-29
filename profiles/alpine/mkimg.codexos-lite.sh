@@ -172,4 +172,44 @@ profile_codexos_lite_overlay() {
     # Ensure proper permissions
     chown -R root:root "$WORKDIR"
     chmod 755 "$WORKDIR"/home/codex
+
+    # Create the non-root appliance user in the image itself. The Dockerfile is
+    # only a development harness; production ISOs must not depend on it.
+    if ! grep -q '^codex:' "$WORKDIR/etc/group" 2>/dev/null; then
+        echo 'codex:x:1000:' >> "$WORKDIR/etc/group"
+    fi
+    if ! grep -q '^codex:' "$WORKDIR/etc/passwd" 2>/dev/null; then
+        echo 'codex:x:1000:1000:CodexOS User:/home/codex:/usr/local/bin/codex-shell' >> "$WORKDIR/etc/passwd"
+    fi
+    if [ -f "$WORKDIR/etc/shadow" ] && ! grep -q '^codex:' "$WORKDIR/etc/shadow"; then
+        echo 'codex:!:::::::' >> "$WORKDIR/etc/shadow"
+        chmod 600 "$WORKDIR/etc/shadow"
+    fi
+
+    mkdir -p "$WORKDIR/home/codex"
+    chown -R 1000:1000 "$WORKDIR/home/codex"
+
+    if [ -f "$WORKDIR/etc/shells" ] && ! grep -q '^/usr/local/bin/codex-shell$' "$WORKDIR/etc/shells"; then
+        echo '/usr/local/bin/codex-shell' >> "$WORKDIR/etc/shells"
+    fi
+
+    # TTY-first appliance UX: tty1 autologins as codex and launches codex-shell.
+    mkdir -p "$WORKDIR/etc"
+    if [ -f "$WORKDIR/etc/inittab" ]; then
+        sed -i 's#^tty1:.*#tty1::respawn:/sbin/agetty --autologin codex --noclear tty1 linux#' "$WORKDIR/etc/inittab"
+        if ! grep -q '^tty1::respawn:/sbin/agetty --autologin codex' "$WORKDIR/etc/inittab"; then
+            echo 'tty1::respawn:/sbin/agetty --autologin codex --noclear tty1 linux' >> "$WORKDIR/etc/inittab"
+        fi
+    else
+        cat > "$WORKDIR/etc/inittab" <<'EOF'
+::sysinit:/sbin/openrc sysinit
+::wait:/sbin/openrc boot
+::wait:/sbin/openrc default
+tty1::respawn:/sbin/agetty --autologin codex --noclear tty1 linux
+tty2::respawn:/sbin/getty 38400 tty2
+tty3::respawn:/sbin/getty 38400 tty3
+::ctrlaltdel:/sbin/reboot
+::shutdown:/sbin/openrc shutdown
+EOF
+    fi
 }

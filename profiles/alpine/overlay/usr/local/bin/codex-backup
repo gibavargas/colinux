@@ -32,6 +32,36 @@ die() {
     exit 1
 }
 
+validate_restore_archive() {
+    local archive="$1"
+    local bad_path=""
+
+    if [[ "$(id -u)" -eq 0 ]]; then
+        die "Refusing to restore archives as root. Restore must run as the codex user."
+    fi
+
+    if ! tar tzf "$archive" >/dev/null 2>&1; then
+        die "Backup archive is not readable: $archive"
+    fi
+
+    bad_path="$(tar tzf "$archive" | awk '
+        BEGIN { bad = "" }
+        $0 == "" { next }
+        $0 ~ /^\// { bad = $0; exit }
+        $0 ~ /(^|\/)\.\.(\/|$)/ { bad = $0; exit }
+        $0 !~ /^(persist|workspace)(\/|$)/ { bad = $0; exit }
+        $0 ~ /^persist\/\.codexos-system(\/|$)/ { bad = $0; exit }
+        END { if (bad != "") print bad }
+    ')"
+    if [[ -n "$bad_path" ]]; then
+        die "Backup contains an unsafe path: $bad_path"
+    fi
+
+    if tar tvzf "$archive" | awk '$1 ~ /^[lh]/ { bad = 1 } END { exit bad ? 0 : 1 }'; then
+        die "Backup contains links; refusing restore to avoid path traversal."
+    fi
+}
+
 # ── Defaults ──────────────────────────────────────────────────────────────
 BACKUP_PERSIST=true
 BACKUP_WORKSPACE=true
@@ -142,8 +172,12 @@ if [[ -n "$RESTORE_FILE" ]]; then
     echo "Restoring $RESTORE_FILE..."
     log_action "restore_start file=$local_f"
 
-    # Extract to /
-    tar xzf "$RESTORE_FILE" -C / --recursive-unlink --warning=no-file-changed 2>&1 || {
+    validate_restore_archive "$RESTORE_FILE"
+
+    # Extract only appliance-owned trees. Never use recursive-unlink here: it can
+    # turn a backup into a root filesystem overwrite primitive.
+    tar xzf "$RESTORE_FILE" -C / --no-same-owner --no-same-permissions \
+        --delay-directory-restore --warning=no-file-changed 2>&1 || {
         echo "✗ Restore completed with warnings. Some files may not have been restored."
         log_action "restore_partial file=$local_f"
     }

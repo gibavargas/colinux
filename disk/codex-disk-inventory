@@ -19,9 +19,41 @@ log_msg() {
     echo "[$ts] inventory: $*" >> "$LOGFILE" 2>/dev/null || true
 }
 
+parent_device() {
+    local dev="$1"
+    local real_dev name pkname slave
+
+    real_dev="$(readlink -f "$dev" 2>/dev/null || printf '%s' "$dev")"
+    name="${real_dev##*/}"
+    if [[ -d "/sys/class/block/${name}/slaves" ]]; then
+        for slave in /sys/class/block/"${name}"/slaves/*; do
+            [[ -e "$slave" ]] || continue
+            parent_device "/dev/${slave##*/}"
+            return
+        done
+    fi
+
+    pkname="$(lsblk -n -o PKNAME "$real_dev" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    if [[ -n "$pkname" ]]; then
+        printf '/dev/%s\n' "$pkname"
+        return
+    fi
+
+    if [[ "$real_dev" =~ ^/dev/(nvme[0-9]+n[0-9]+)p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$real_dev" =~ ^/dev/([a-z]+)[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$real_dev" =~ ^/dev/(mmcblk[0-9]+)p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    else
+        printf '%s\n' "$real_dev"
+    fi
+}
+
 # ── Identify the boot device ──────────────────────────────────────────────
 find_boot_device() {
     local root_dev=""
+    local mp source_dev
 
     # Method 1: parse /proc/cmdline for root= parameter
     if [[ -f /proc/cmdline ]]; then
@@ -46,20 +78,19 @@ find_boot_device() {
         root_dev="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
     fi
 
-    # Resolve partition device to parent disk
+    if [[ "$root_dev" != /dev/* ]]; then
+        root_dev=""
+        for mp in /boot /media/cdrom /media/usb /persist; do
+            source_dev="$(findmnt -n -o SOURCE "$mp" 2>/dev/null | head -1 || true)"
+            if [[ "$source_dev" == /dev/* ]]; then
+                root_dev="$source_dev"
+                break
+            fi
+        done
+    fi
+
     if [[ -n "$root_dev" ]]; then
-        # If it's a partition like /dev/sda1 or /dev/nvme0n1p3, get the parent
-        if [[ "$root_dev" =~ ^/dev/(nvme[0-9]+n[0-9]+)p[0-9]+$ ]]; then
-            echo "/dev/${BASH_REMATCH[1]}"
-        elif [[ "$root_dev" =~ ^/dev/([a-z]+)[0-9]+$ ]]; then
-            echo "/dev/${BASH_REMATCH[1]}"
-        elif [[ "$root_dev" =~ ^/dev/(mmcblk[0-9]+)p[0-9]+$ ]]; then
-            echo "/dev/${BASH_REMATCH[1]}"
-        elif [[ "$root_dev" =~ ^/dev/(loop[0-9]+)$ ]]; then
-            echo "$root_dev"  # loop device — no parent
-        else
-            echo "$root_dev"
-        fi
+        parent_device "$root_dev"
     else
         echo ""
     fi
@@ -110,14 +141,14 @@ collect_device_info() {
     # Partition and filesystem info
     local partitions="[]"
     local part_json
-    part_json="$(lsblk -b -n -o NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT "${dev}" -J 2>/dev/null || echo '{"blockdevices":[]}')"
+    part_json="$(lsblk -b -o NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT "${dev}" -J 2>/dev/null || echo '{"blockdevices":[]}')"
 
     # Build partition array
     partitions="$(echo "$part_json" | jq -c '
-        if .blockdevices | length > 1 then
-            [.blockdevices[1:][] | {
+        if (.blockdevices | length) > 0 then
+            [.blockdevices[0].children[]? | {
                 name: .name,
-                size: (if .size then (./1024/1024/1024 | tostring + "G") else "0G" end),
+                size: (if .size then ((.size | tonumber)/1024/1024/1024 | tostring + "G") else "0G" end),
                 filesystem: (if .fstype then .fstype else "none" end),
                 label: (if .label then .label else "" end),
                 uuid: (if .uuid then .uuid else "" end),
@@ -289,34 +320,32 @@ echo "$FULL_JSON" | jq '.' > "${RUN_DIR}/disks.json"
     echo "---"
     echo ""
 
-    echo "$FULL_JSON" | jq -r '.devices[] | '
-    '## \(.device)  \(.is_boot | if . then "★ BOOT" else "" end)\(.is_removable | if . then " 🔌 USB" else "" end)"
-
-    echo ""
-    echo "| Property | Value |"
-    echo "|----------|-------|"
-    echo "| Model | \(.model // "Unknown") |"
-    echo "| Serial | `\(.serial // "N/A")` |"
-    echo "| Size | \(.size) |"
-    echo "| Transport | \(.transport // "N/A") |"
-    echo "| Partition Table | \(.partition_table // "none") |"
-    echo "| Mount Status | \(.mount_status) |"
-    echo "| LUKS | \(.has_luks | if . then "Yes (\(.luks_status))" else "No" end) |"
-    echo "| BitLocker | \(.has_bitlocker | if . then "⚠ Yes" else "No" end) |"
-    echo "| SMART | \(.smart_summary) |"
-    echo ""
-    if (.partitions | length > 0) then
-        "### Partitions"
-        echo ""
-        "| # | Name | Size | FS | Label | UUID | Mount |"
-        echo "|---|------|------|----|-------|------|-------|"
-        (.partitions | to_entries[] |
-            "| \(.key + 1) | \(.value.name) | \(.value.size) | \(.value.filesystem) | \(.value.label // "-") | `\(.value.uuid // "-")` | \(.value.mountpoint // "-") |"
-        )
-        echo ""
-    end
-    echo "---"
-    echo ""'
+    echo "$FULL_JSON" | jq -r '
+        .devices[] |
+        "## \(.device)  \(if .is_boot then "[BOOT]" else "" end)\(if .is_removable then " [USB]" else "" end)\n" +
+        "\n| Property | Value |\n" +
+        "|----------|-------|\n" +
+        "| Model | \(.model // "Unknown") |\n" +
+        "| Serial | `\(.serial // "N/A")` |\n" +
+        "| Size | \(.size) |\n" +
+        "| Transport | \(.transport // "N/A") |\n" +
+        "| Partition Table | \(.partition_table // "none") |\n" +
+        "| Mount Status | \(.mount_status) |\n" +
+        "| LUKS | \(if .has_luks then "Yes (\(.luks_status))" else "No" end) |\n" +
+        "| BitLocker | \(if .has_bitlocker then "Yes" else "No" end) |\n" +
+        "| SMART | \(.smart_summary) |\n" +
+        (if (.partitions | length) > 0 then
+            "\n### Partitions\n\n" +
+            "| # | Name | Size | FS | Label | UUID | Mount |\n" +
+            "|---|------|------|----|-------|------|-------|\n" +
+            (.partitions | to_entries | map(
+                "| \(.key + 1) | \(.value.name) | \(.value.size) | \(.value.filesystem) | \(.value.label // "-") | `\(.value.uuid // "-")` | \(.value.mountpoint // "-") |"
+            ) | join("\n")) + "\n"
+        else
+            ""
+        end) +
+        "\n---\n"
+    '
 
 } > "${RUN_DIR}/disks.md"
 

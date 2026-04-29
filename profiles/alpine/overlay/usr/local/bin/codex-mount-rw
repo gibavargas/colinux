@@ -20,6 +20,134 @@ log_action() {
     echo "[$ts] mount-rw: $*" >> "$LOGFILE"
 }
 
+sanitize_component() {
+    local value="$1"
+    value="${value//\//_}"
+    value="${value//$'\n'/_}"
+    value="${value//$'\r'/_}"
+    printf '%s' "$value"
+}
+
+blkid_value() {
+    local field="$1"
+    blkid -s "$field" -o value "$DEVICE" 2>/dev/null | head -1 || true
+}
+
+parent_device() {
+    local dev="$1"
+    local pkname=""
+    local real_dev name slave
+
+    real_dev="$(readlink -f "$dev" 2>/dev/null || printf '%s' "$dev")"
+    name="${real_dev##*/}"
+    if [[ -d "/sys/class/block/${name}/slaves" ]]; then
+        for slave in /sys/class/block/"${name}"/slaves/*; do
+            [[ -e "$slave" ]] || continue
+            parent_device "/dev/${slave##*/}"
+            return
+        done
+    fi
+
+    pkname="$(lsblk -n -o PKNAME "$real_dev" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    if [[ -n "$pkname" ]]; then
+        printf '/dev/%s\n' "$pkname"
+        return
+    fi
+
+    if [[ "$real_dev" =~ ^/dev/(nvme[0-9]+n[0-9]+)p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$real_dev" =~ ^/dev/([a-z]+)[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$real_dev" =~ ^/dev/(mmcblk[0-9]+)p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    else
+        printf '%s\n' "$real_dev"
+    fi
+}
+
+boot_device() {
+    local root_dev=""
+    local cmdline_root=""
+    local mp source_dev
+
+    if [[ -f /proc/cmdline ]]; then
+        cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
+        case "$cmdline_root" in
+            PARTUUID=*) root_dev="$(blkid -t "$cmdline_root" -o device 2>/dev/null | head -1 || true)" ;;
+            UUID=*)     root_dev="$(blkid -t "$cmdline_root" -o device 2>/dev/null | head -1 || true)" ;;
+            /dev/*)     root_dev="$cmdline_root" ;;
+        esac
+    fi
+
+    if [[ -z "$root_dev" ]]; then
+        root_dev="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
+    fi
+    if [[ "$root_dev" != /dev/* ]]; then
+        root_dev=""
+        for mp in /boot /media/cdrom /media/usb /persist; do
+            source_dev="$(findmnt -n -o SOURCE "$mp" 2>/dev/null | head -1 || true)"
+            if [[ "$source_dev" == /dev/* ]]; then
+                root_dev="$source_dev"
+                break
+            fi
+        done
+    fi
+
+    case "$root_dev" in
+        /dev/*) parent_device "$(readlink -f "$root_dev" 2>/dev/null || printf '%s' "$root_dev")" ;;
+        *)      printf '\n' ;;
+    esac
+}
+
+forensic_mode_active() {
+    [[ -e /run/codex/forensic.lock || -e /persist/state/forensic.lock ]]
+}
+
+tty_prompt() {
+    if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+        echo "ERROR: read-write mount requires an interactive TTY." >&2
+        log_action "FAILED no_tty device=$DEVICE"
+        exit 1
+    fi
+}
+
+human_confirm() {
+    local nonce phrase answer
+    nonce="$(hexdump -n 4 -e '/1 "%02X"' /dev/urandom 2>/dev/null || date +%s)"
+    phrase="I AUTHORIZE WRITE TO ${ACTUAL_NORMALIZED} ${nonce}"
+
+    tty_prompt
+    {
+        echo ""
+        echo "Read-write mount requested:"
+        echo "  Device: $DEVICE"
+        echo "  Parent: $PARENT_DEV"
+        echo "  Serial: $ACTUAL_SERIAL"
+        echo ""
+        echo "Type this exact phrase to continue:"
+        echo "  $phrase"
+        printf "> "
+    } > /dev/tty
+
+    IFS= read -r answer < /dev/tty
+    if [[ "$answer" != "$phrase" ]]; then
+        echo "ERROR: safety phrase mismatch. Aborting." >&2
+        log_action "FAILED phrase_mismatch device=$DEVICE parent=$PARENT_DEV"
+        exit 1
+    fi
+}
+
+schedule_ro_timer() {
+    local mount_point="$1"
+    (
+        sleep 1800
+        if mountpoint -q "$mount_point" 2>/dev/null; then
+            mount -o remount,ro "$mount_point" 2>/dev/null && \
+                echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] mount-rw: AUTO_RO mountpoint=$mount_point" >> "$LOGFILE"
+        fi
+    ) &
+}
+
 usage() {
     echo "Usage: codex-mount-rw --confirm SERIAL <device>"
     echo ""
@@ -79,6 +207,17 @@ if [[ -z "$DEVICE" ]]; then
     usage
 fi
 
+DEVICE="$(readlink -f "$DEVICE" 2>/dev/null || printf '%s' "$DEVICE")"
+
+case "$DEVICE" in
+    /dev/*) ;;
+    *)
+        echo "ERROR: device must resolve under /dev." >&2
+        log_action "FAILED invalid_device_path device=$DEVICE"
+        exit 1
+        ;;
+esac
+
 if [[ -z "$CONFIRM_SERIAL" ]]; then
     echo "ERROR: --confirm SERIAL is required for read-write mounts." >&2
     echo "" >&2
@@ -96,14 +235,19 @@ if [[ ! -b "$DEVICE" ]]; then
 fi
 
 # ── Retrieve actual disk serial ───────────────────────────────────────────
-# Resolve partition to parent disk for serial check
-PARENT_DEV="$DEVICE"
-if [[ "$DEVICE" =~ ^/dev/(nvme[0-9]+n[0-9]+)p[0-9]+$ ]]; then
-    PARENT_DEV="/dev/${BASH_REMATCH[1]}"
-elif [[ "$DEVICE" =~ ^/dev/([a-z]+)[0-9]+$ ]]; then
-    PARENT_DEV="/dev/${BASH_REMATCH[1]}"
-elif [[ "$DEVICE" =~ ^/dev/(mmcblk[0-9]+)p[0-9]+$ ]]; then
-    PARENT_DEV="/dev/${BASH_REMATCH[1]}"
+PARENT_DEV="$(parent_device "$DEVICE")"
+
+BOOT_DEV="$(boot_device)"
+if [[ -n "$BOOT_DEV" && "$PARENT_DEV" == "$BOOT_DEV" ]]; then
+    echo "ERROR: refusing read-write mount of the boot device ($BOOT_DEV)." >&2
+    log_action "FAILED boot_device device=$DEVICE parent=$PARENT_DEV boot=$BOOT_DEV"
+    exit 1
+fi
+
+if forensic_mode_active; then
+    echo "ERROR: forensic mode is active; read-write mounts are disabled." >&2
+    log_action "FAILED forensic_mode device=$DEVICE parent=$PARENT_DEV"
+    exit 1
 fi
 
 ACTUAL_SERIAL=""
@@ -125,8 +269,9 @@ ACTUAL_NORMALIZED="$(echo "$ACTUAL_SERIAL" | tr -d '[:space:]' | tr '[:lower:]' 
 if [[ -z "$ACTUAL_NORMALIZED" ]]; then
     echo "WARNING: Could not read serial number from $PARENT_DEV." >&2
     echo "The device may not report a serial number." >&2
-    echo "Proceeding with caution..." >&2
-    log_action "WARNING no_serial device=$DEVICE parent=$PARENT_DEV confirm=$CONFIRM_SERIAL"
+    echo "Refusing read-write mount through the CodexOS safety wrapper." >&2
+    log_action "FAILED no_serial device=$DEVICE parent=$PARENT_DEV confirm=$CONFIRM_SERIAL"
+    exit 1
 else
     if [[ "$CONFIRM_NORMALIZED" != "$ACTUAL_NORMALIZED" ]]; then
         echo "ERROR: Serial number mismatch!" >&2
@@ -139,6 +284,8 @@ else
     fi
     echo "Serial confirmed: ${ACTUAL_SERIAL}"
 fi
+
+human_confirm
 
 DEVNAME="${DEVICE##*/}"
 MOUNT_POINT="${MOUNT_BASE}/by-device/${DEVNAME}"
@@ -155,16 +302,14 @@ FS_TYPE=""
 LABEL=""
 UUID=""
 
-eval "$(blkid -o export "$DEVICE" 2>/dev/null || true)"
-
 if [[ -z "$FS_TYPE" ]]; then
-    FS_TYPE="$(blkid -s TYPE -o value "$DEVICE" 2>/dev/null || echo "")"
+    FS_TYPE="$(blkid_value TYPE)"
 fi
 if [[ -z "$LABEL" ]]; then
-    LABEL="$(blkid -s LABEL -o value "$DEVICE" 2>/dev/null || echo "")"
+    LABEL="$(blkid_value LABEL)"
 fi
 if [[ -z "$UUID" ]]; then
-    UUID="$(blkid -s UUID -o value "$DEVICE" 2>/dev/null || echo "")"
+    UUID="$(blkid_value UUID)"
 fi
 
 if [[ -z "$FS_TYPE" ]]; then
@@ -180,6 +325,7 @@ MOUNT_OPTS="rw,nosuid,nodev${EXTRA_OPTS}"
 if mount -o "$MOUNT_OPTS" "$DEVICE" "$MOUNT_POINT"; then
     echo "Mounted $DEVICE (rw) at $MOUNT_POINT"
     log_action "OK device=$DEVICE fs=$FS_TYPE mountpoint=$MOUNT_POINT serial=$ACTUAL_SERIAL"
+    schedule_ro_timer "$MOUNT_POINT"
 else
     echo "ERROR: Failed to mount $DEVICE read-write." >&2
     log_action "FAILED mount_error device=$DEVICE fs=$FS_TYPE"
@@ -188,18 +334,20 @@ fi
 
 # ── Create by-label symlink ───────────────────────────────────────────────
 if [[ -n "$LABEL" ]]; then
-    local_symlink_path="${MOUNT_BASE}/by-label/${LABEL}"
+    safe_label="$(sanitize_component "$LABEL")"
+    local_symlink_path="${MOUNT_BASE}/by-label/${safe_label}"
     [[ -L "$local_symlink_path" ]] && rm -f "$local_symlink_path"
     ln -s "$MOUNT_POINT" "$local_symlink_path"
-    echo "  → symlink: by-label/${LABEL}"
+    echo "  -> symlink: by-label/${safe_label}"
 fi
 
 # ── Create by-uuid symlink ────────────────────────────────────────────────
 if [[ -n "$UUID" ]]; then
-    local_symlink_path="${MOUNT_BASE}/by-uuid/${UUID}"
+    safe_uuid="$(sanitize_component "$UUID")"
+    local_symlink_path="${MOUNT_BASE}/by-uuid/${safe_uuid}"
     [[ -L "$local_symlink_path" ]] && rm -f "$local_symlink_path"
     ln -s "$MOUNT_POINT" "$local_symlink_path"
-    echo "  → symlink: by-uuid/${UUID}"
+    echo "  -> symlink: by-uuid/${safe_uuid}"
 fi
 
 echo "Done."

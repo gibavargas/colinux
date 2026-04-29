@@ -96,7 +96,7 @@ DEV
         echo ""
         echo "Disk safety: all disks mounted read-only by default"
         echo "Use codex-mount-ro to safely mount for reading"
-        echo "Use codex-backup to create backups before any writes"
+        echo "Create backups from a trusted root console before any writes"
     } > "$INVENTORY_TXT"
 
     log "Inventory written: $INVENTORY_FILE"

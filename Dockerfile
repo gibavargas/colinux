@@ -71,7 +71,7 @@ RUN mkdir -p /run/codex \
 
 # Create codex user
 RUN adduser -D -s /bin/bash -h /home/codex codex && \
-    echo "codex ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/codex && \
+    rm -f /etc/sudoers.d/codex && \
     chown -R codex:codex /home/codex /workspace /persist
 
 # Install doas config

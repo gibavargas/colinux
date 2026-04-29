@@ -44,6 +44,7 @@ ENABLED=true
 INTERVAL=6
 CHANNEL="stable"
 LOCK_WAIT=3600
+AUTO_INSTALL=false
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 log() {
@@ -92,13 +93,14 @@ load_config() {
             value="$(echo "$value" | xargs)"
 
             case "$key" in
-                enabled)   ENABLED="$value" ;;
-                interval)  INTERVAL="$value" ;;
-                channel)   CHANNEL="$value" ;;
-                lock_wait) LOCK_WAIT="$value" ;;
+                enabled|ENABLED)             ENABLED="$value" ;;
+                interval|INTERVAL)           INTERVAL="$value" ;;
+                channel|CHANNEL)             CHANNEL="$value" ;;
+                lock_wait|LOCK_WAIT)         LOCK_WAIT="$value" ;;
+                auto_install|AUTO_INSTALL)   AUTO_INSTALL="$value" ;;
             esac
         done < "$CONFIG_FILE"
-        log_debug "Config loaded: enabled=$ENABLED interval=${INTERVAL}h channel=$CHANNEL"
+        log_debug "Config loaded: enabled=$ENABLED interval=${INTERVAL}h channel=$CHANNEL auto_install=$AUTO_INSTALL"
     fi
 }
 
@@ -182,13 +184,16 @@ version_gte() {
     [ "$sorted" = "$v2" ]
 }
 
+normalize_version() {
+    sed 's/^rust-v//;s/^v//'
+}
+
 # ── Perform the update ───────────────────────────────────────────────────────
 do_update() {
     local new_version="$1"
 
     log_info "Updating Codex CLI to $new_version..."
 
-    # Use the setup script if available
     if [ -x "$SETUP_SCRIPT" ]; then
         log_debug "Using setup-codex.sh for update"
         if FORCE_OUTPUT="$(FORCE=true CODEX_VERSION="$new_version" CHANNEL="$CHANNEL" "$SETUP_SCRIPT" 2>&1)"; then
@@ -200,72 +205,8 @@ do_update() {
         fi
     fi
 
-    # Fallback: direct download
-    log_info "Downloading Codex CLI $new_version..."
-
-    local arch_triple
-    case "$(uname -m)" in
-        x86_64|amd64)  arch_triple="x86_64-unknown-linux-musl" ;;
-        aarch64|arm64) arch_triple="aarch64-unknown-linux-musl" ;;
-        *)
-            log_error "Unsupported architecture: $(uname -m)"
-            return 1
-            ;;
-    esac
-
-    local filename="codex-${arch_triple}.tar.gz"
-    local url="https://github.com/${GITHUB_REPO}/releases/download/${new_version}/${filename}"
-
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
-    trap _cleanup EXIT
-
-    # Download
-    if ! curl -fsSL --connect-timeout 30 -o "$tmpdir/$filename" "$url"; then
-        log_error "Download failed: $url"
-        return 1
-    fi
-
-    # Verify size
-    local dl_size
-    dl_size="$(stat -c%s "$tmpdir/$filename" 2>/dev/null || echo 0)"
-    if [ "$dl_size" -lt 1048576 ]; then
-        log_error "Downloaded file too small (${dl_size} bytes) — possible error page"
-        return 1
-    fi
-
-    # Extract and install
-    tar xzf "$tmpdir/$filename" -C "$tmpdir" 2>/dev/null || {
-        log_error "Extraction failed"
-        return 1
-    }
-
-    local binary
-    binary="$(find "$tmpdir" -name 'codex' -type f ! -name '*.tar.gz' | head -1)"
-    if [ -z "$binary" ]; then
-        log_error "Binary not found in archive"
-        return 1
-    fi
-
-    # Backup current binary
-    if [ -x "$CODEX_BIN" ]; then
-        cp "$CODEX_BIN" "${CODEX_BIN}.bak.$(date +%s)"
-    fi
-
-    # Install new binary
-    cp "$binary" "$CODEX_BIN"
-    chmod 755 "$CODEX_BIN"
-
-    # Verify
-    local new_ver
-    new_ver="$("$CODEX_BIN" --version 2>/dev/null | head -1 || echo "unknown")"
-    log_info "Codex CLI updated to: $new_ver"
-
-    # Cleanup old backups (keep last 3)
-    ls -t "${CODEX_BIN}".bak.* 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
-
-    return 0
+    log_error "Verified setup helper not found: $SETUP_SCRIPT"
+    return 1
 }
 
 # ── Log rotation ─────────────────────────────────────────────────────────────
@@ -314,9 +255,13 @@ main() {
     log_info "Current: ${current:-not installed}"
     log_info "Latest:  $latest ($CHANNEL channel)"
 
+    local current_norm latest_norm
+    current_norm="$(printf '%s' "$current" | normalize_version)"
+    latest_norm="$(printf '%s' "$latest" | normalize_version)"
+
     # Check mode: report and exit
     if $CHECK_ONLY; then
-        if [ "$current" = "$latest" ]; then
+        if [ "$current_norm" = "$latest_norm" ]; then
             echo "STATUS: up-to-date ($latest)"
             exit 0
         else
@@ -326,13 +271,18 @@ main() {
     fi
 
     # Compare versions
-    if [ "$current" = "$latest" ] && [ "$FORCE" != "true" ]; then
+    if [ "$current_norm" = "$latest_norm" ] && [ "$FORCE" != "true" ]; then
         log_info "Already up to date. No action needed."
         exit 0
     fi
 
-    if version_gte "$current" "$latest" && [ "$FORCE" != "true" ]; then
+    if version_gte "$current_norm" "$latest_norm" && [ "$FORCE" != "true" ]; then
         log_info "Current version ($current) >= latest ($latest). No action needed."
+        exit 0
+    fi
+
+    if [ "$AUTO_INSTALL" != "true" ] && [ "$FORCE" != "true" ]; then
+        log_info "Update available ($current -> $latest), but auto_install is disabled."
         exit 0
     fi
 

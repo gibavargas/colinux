@@ -24,10 +24,10 @@ This document describes the security architecture, threat model, and guarantees 
 | **Accidental data destruction** by AI or user | Multi-step write escalation with typed safety phrase |
 | **Unauthorized writes** to attached disks | Read-only-first mount policy; explicit write confirmation |
 | **Data at rest exposure** on USB drive | LUKS2 encryption (AES-256-XTS) for persistence partition |
-| **Boot device tampering** | Boot device is immutable from within the running system |
+| **Boot device tampering** | Write wrappers refuse boot-device targets and persistence is separated from the read-only system image |
 | **Privilege escalation** beyond Codex wrappers | doas whitelist; Codex user has no raw root access |
-| **Silent operations** on disks | All disk operations are logged with timestamps and SHA-256 verification |
-| **Compromised Codex CLI version** | Auto-update from verified channels; optional pinned versions |
+| **Silent operations** on disks | Privileged disk wrappers log actions to encrypted persistence |
+| **Compromised Codex CLI version** | Auto-install is disabled by default; updates use exact release assets with SHA-256 digest verification |
 
 ### What CodexOS Lite does NOT protect against
 
@@ -45,15 +45,15 @@ This document describes the security architecture, threat model, and guarantees 
 
 CodexOS Lite provides the following *safety invariants*:
 
-1. **No disk is ever written to without explicit human confirmation.** This is enforced at the `safe-mount` and `safe-write` wrapper level, not just by convention.
+1. **No foreign disk is ever written to without explicit human confirmation.** This is enforced in the privileged `codex-mount-rw`, installer, and persistence wrappers, not just by convention.
 
-2. **The boot device cannot be modified from within the running system.** The boot device is excluded from all disk inventory and write operations.
+2. **The boot device cannot be write-mounted or targeted by shipping installers from within the running system.** Inventory still shows the boot device so the operator can identify it.
 
-3. **All write operations are logged** with timestamp, target device, operation type, and (where applicable) SHA-256 checksums before and after.
+3. **Privileged write operations are logged** with timestamp, target device, operation type, and target identifiers.
 
 4. **A typed safety phrase is required** for destructive operations (formatting, partitioning, block-level writes). This prevents AI-initiated destructive actions without human intent.
 
-5. **Forensic mode blocks all writes** at the kernel level using block device freeze.
+5. **Forensic mode blocks normal write access** by setting non-boot block devices read-only at runtime and making `codex-mount-rw` refuse write mounts while the forensic lock is present.
 
 See [`DISK_SAFETY.md`](DISK_SAFETY.md) for the full specification.
 
@@ -76,22 +76,17 @@ The `codex` user's `doas.conf` restricts privilege escalation to a strict whitel
 # /etc/doas.conf
 # CodexOS Lite — doas rules for the codex user
 
-# Allow codex to run disk safety wrappers
-permit nopass codex as root cmd /usr/local/bin/safe-mount
-permit nopass codex as root cmd /usr/local/bin/safe-write
-permit nopass codex as root cmd /usr/local/bin/disk-inventory
-
-# Allow codex to manage persistence
-permit nopass codex as root cmd /usr/local/bin/codex-persistence
-
-# Allow codex to run system info commands
-permit nopass codex as root cmd /usr/bin/lsblk
-permit nopass codex as root cmd /usr/bin/blkid
-permit nopass codex as root cmd /usr/bin/hwinfo
-
-# Allow codex to manage services
-permit nopass codex as root cmd /usr/bin/rc-service
-permit nopass codex as root cmd /usr/bin/rc-update
+# Allow codex to run narrow CodexOS wrappers only.
+permit nopass codex as root cmd /usr/local/bin/codex-disk-inventory
+permit nopass codex as root cmd /usr/local/bin/codex-mount-ro
+permit nopass codex as root cmd /usr/local/bin/codex-mount-rw
+permit nopass codex as root cmd /usr/local/bin/codex-usb-persist
+permit nopass codex as root cmd /usr/local/bin/codex-install-usb
+permit nopass codex as root cmd /usr/local/bin/codex-install-pc
+permit nopass codex as root cmd /usr/local/bin/codex-network
+permit nopass codex as root cmd /usr/local/bin/codex-update
+permit nopass codex as root cmd /usr/local/bin/codex-forensic
+permit nopass codex as root cmd /usr/local/bin/codex-logs
 
 # Deny everything else
 deny codex
@@ -141,7 +136,7 @@ Parallelism:   4
 When a write operation is requested (either by the user or by Codex CLI), the following sequence occurs:
 
 ```
-1. safe-mount --write /dev/sdX1 /mnt/target
+1. codex-mount-rw --confirm SERIAL /dev/sdX1
    │
 2. └─► Check: Is /dev/sdX the boot device?
        │    YES → DENY (hardcoded, cannot override)
@@ -151,28 +146,24 @@ When a write operation is requested (either by the user or by Codex CLI), the fo
        │    YES → DENY
        │    NO  → continue
        │
-4. └─► Prompt: "Mount /dev/sdX1 read-write on /mnt/target? [y/N]"
-       │    NO  → abort
-       │    YES → continue
-       │
-5. └─► Prompt: "Type the safety phrase shown below to confirm:"
-       │    (Display a random 3-word phrase from the safety phrase bank)
+4. └─► Prompt on /dev/tty: "Type this exact phrase to continue:"
+       │    (Display operation-specific phrase with random nonce)
        │    MISMATCH → abort
        │    MATCH    → continue
        │
-6. └─► Log: timestamp, device, operation, user, confirmation method
+5. └─► Log: timestamp, device, operation, confirmation method
        │
-7. └─► Execute: mount -o rw /dev/sdX1 /mnt/target
+6. └─► Execute: mount -o rw /dev/sdX1 /mnt/disks/by-device/sdX1
        │
-8. └─► Set a 30-minute auto-remount-read-only timer
+7. └─► Set a 30-minute auto-remount-read-only timer
 ```
 
-For destructive operations (format, partition, dd):
+For destructive installer and persistence operations:
 
-- Steps 1–5 are the same.
-- Step 5 requires a **longer safety phrase** (5 words).
-- A **10-second countdown** with a final "ARE YOU SURE?" prompt is added before execution.
-- A SHA-256 checksum of the target device's first 1 MiB is recorded *before* the operation.
+- The wrapper displays device path, model, serial, and size.
+- The operator must type the target path exactly.
+- The operator must type the generated operation-specific phrase.
+- Shipping wrappers do not expose a noninteractive confirmation bypass.
 
 ---
 
@@ -180,11 +171,11 @@ For destructive operations (format, partition, dd):
 
 When forensic mode is activated (`codexctl forensic on`):
 
-1. **All block devices are frozen** via `blockdev --setro`.
-2. **No mount operation with write access** is possible, even with root privileges.
-3. **All device nodes under `/dev/`** for block devices are chmod'd to `0444`.
-4. **The freeze is enforced at runtime** — a watchdog script checks every 60 seconds that all devices remain read-only.
-5. **Imaging operations** (e.g., `codexctl image`) are still available for creating bit-perfect copies with SHA-256 verification.
+1. **Non-boot block devices are set read-only** via `blockdev --setro`.
+2. **The CodexOS read-write mount wrapper refuses escalation** while the forensic lock is present.
+3. **Disabling forensic mode requires an interactive generated phrase** on `/dev/tty`.
+4. **The forensic lock persists** in `/persist/state/forensic.lock` when persistence is available.
+5. **Read-only collection operations** remain available through `codex-mount-ro` and normal user-space copy tools after mounting evidence read-only.
 6. **Forensic mode persists** across sessions until explicitly disabled with `codexctl forensic off`.
 
 ---

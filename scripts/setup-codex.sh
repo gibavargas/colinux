@@ -100,24 +100,41 @@ check_existing() {
     return 1
 }
 
-# ── Get latest release version from GitHub ───────────────────────────────────
-get_latest_version() {
-    local url="https://api.github.com/repos/${GITHUB_REPO}/releases/${CHANNEL}"
+# ── Release metadata helpers ─────────────────────────────────────────────────
+fetch_release_json() {
+    local version="$1"
+    local json=""
 
-    # If channel is "preview", use "latest" endpoint but filter
-    if [ "$CHANNEL" = "preview" ]; then
-        url="https://api.github.com/repos/${GITHUB_REPO}/releases"
+    if [ "$version" = "latest" ]; then
+        curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+        return
     fi
 
-    local version
-    version="$(curl -fsSL "$url" 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^ "]+"' | sed 's/.*"//;s/"$//' | head -1)"
+    json="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${version}" 2>/dev/null || true)"
+    if [ -z "$json" ] && [[ "$version" =~ ^[0-9] ]]; then
+        json="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/rust-v${version}" 2>/dev/null || true)"
+    fi
+    if [ -z "$json" ] && [[ "$version" =~ ^v[0-9] ]]; then
+        json="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/rust-${version}" 2>/dev/null || true)"
+    fi
 
-    if [ -z "$version" ]; then
-        log_error "Could not determine latest version from GitHub API."
+    if [ -z "$json" ]; then
+        log_error "Could not fetch Codex release metadata for: $version"
         exit 1
     fi
+    printf '%s\n' "$json"
+}
 
-    echo "$version"
+release_tag_from_json() {
+    jq -r '.tag_name // empty'
+}
+
+asset_info_from_json() {
+    local asset_name="$1"
+    jq -r --arg name "$asset_name" '
+        .assets[]? | select(.name == $name) |
+        [.browser_download_url, (.digest // "")] | @tsv
+    ' | head -1
 }
 
 # ── Download Codex CLI ──────────────────────────────────────────────────────
@@ -126,13 +143,29 @@ download_codex() {
     arch_triple="$(detect_arch)"
 
     local version="$CODEX_VERSION"
-    if [ "$version" = "latest" ]; then
-        version="$(get_latest_version)"
-        log_info "Latest version: $version"
+    local release_json
+    release_json="$(fetch_release_json "$version")"
+    version="$(printf '%s\n' "$release_json" | release_tag_from_json)"
+    if [ -z "$version" ]; then
+        log_error "Release metadata did not include a tag name."
+        exit 1
     fi
+    log_info "Resolved version: $version"
 
     local filename="codex-${arch_triple}.tar.gz"
-    local download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${filename}"
+    local asset_info download_url digest expected_sha
+    asset_info="$(printf '%s\n' "$release_json" | asset_info_from_json "$filename")"
+    if [ -z "$asset_info" ]; then
+        log_error "Release $version does not contain asset: $filename"
+        exit 1
+    fi
+    download_url="$(printf '%s\n' "$asset_info" | cut -f1)"
+    digest="$(printf '%s\n' "$asset_info" | cut -f2)"
+    expected_sha="${digest#sha256:}"
+    if [ -z "$expected_sha" ] || [ "$expected_sha" = "$digest" ]; then
+        log_error "Release asset has no SHA-256 digest: $filename"
+        exit 1
+    fi
 
     log_info "Downloading Codex CLI $version for $arch_triple..."
     log_info "URL: $download_url"
@@ -170,6 +203,12 @@ download_codex() {
         exit 1
     fi
 
+    log_info "Verifying SHA-256 digest..."
+    (cd "$tmpdir" && printf '%s  %s\n' "$expected_sha" "$filename" | sha256sum -c - >/dev/null) || {
+        log_error "SHA-256 verification failed for $filename."
+        exit 1
+    }
+
     # Extract
     log_info "Extracting archive..."
     tar xzf "$tmpdir/$filename" -C "$tmpdir" 2>/dev/null || {
@@ -179,7 +218,7 @@ download_codex() {
 
     # Find the binary
     local binary
-    binary="$(find "$tmpdir" -name 'codex' -type f ! -name '*.tar.gz' | head -1)"
+    binary="$(find "$tmpdir" \( -name "codex-${arch_triple}" -o -name 'codex' \) -type f ! -name '*.tar.gz' | head -1)"
     if [ -z "$binary" ]; then
         log_error "Could not find codex binary in extracted archive."
         log_error "Archive contents:"
@@ -197,8 +236,7 @@ download_codex() {
 
     # Install
     mkdir -p "$INSTALL_DIR"
-    cp "$binary" "$INSTALL_PATH"
-    chmod 755 "$INSTALL_PATH"
+    install -m 0755 "$binary" "$INSTALL_PATH"
 
     log_info "Codex CLI $version installed to $INSTALL_PATH"
     echo "$version"
@@ -241,6 +279,11 @@ main() {
 
     if ! command -v tar >/dev/null 2>&1; then
         log_error "tar is required but not found."
+        exit 1
+    fi
+
+    if ! command -v jq >/dev/null 2>&1; then
+        log_error "jq is required for release metadata verification."
         exit 1
     fi
 

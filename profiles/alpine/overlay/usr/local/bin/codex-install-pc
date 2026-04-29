@@ -36,6 +36,69 @@ die() {
     exit 1
 }
 
+parent_device() {
+    local dev="$1"
+    local real_dev name pkname slave
+
+    real_dev="$(readlink -f "$dev" 2>/dev/null || printf '%s' "$dev")"
+    name="${real_dev##*/}"
+    if [[ -d "/sys/class/block/${name}/slaves" ]]; then
+        for slave in /sys/class/block/"${name}"/slaves/*; do
+            [[ -e "$slave" ]] || continue
+            parent_device "/dev/${slave##*/}"
+            return
+        done
+    fi
+
+    pkname="$(lsblk -n -o PKNAME "$real_dev" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    if [[ -n "$pkname" ]]; then
+        printf '/dev/%s\n' "$pkname"
+        return
+    fi
+
+    if [[ "$real_dev" =~ ^/dev/(nvme[0-9]+n[0-9]+)p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$real_dev" =~ ^/dev/([a-z]+)[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$real_dev" =~ ^/dev/(mmcblk[0-9]+)p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    else
+        printf '%s\n' "$real_dev"
+    fi
+}
+
+boot_device() {
+    local root_dev="" cmdline_root="" mp source_dev
+
+    if [[ -f /proc/cmdline ]]; then
+        cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
+        case "$cmdline_root" in
+            PARTUUID=*) root_dev="$(blkid -t "$cmdline_root" -o device 2>/dev/null | head -1 || true)" ;;
+            UUID=*)     root_dev="$(blkid -t "$cmdline_root" -o device 2>/dev/null | head -1 || true)" ;;
+            /dev/*)     root_dev="$cmdline_root" ;;
+        esac
+    fi
+
+    if [[ -z "$root_dev" ]]; then
+        root_dev="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
+    fi
+    if [[ "$root_dev" != /dev/* ]]; then
+        root_dev=""
+        for mp in /boot /media/cdrom /media/usb /persist; do
+            source_dev="$(findmnt -n -o SOURCE "$mp" 2>/dev/null | head -1 || true)"
+            if [[ "$source_dev" == /dev/* ]]; then
+                root_dev="$source_dev"
+                break
+            fi
+        done
+    fi
+
+    case "$root_dev" in
+        /dev/*) parent_device "$root_dev" ;;
+        *)      printf '\n' ;;
+    esac
+}
+
 usage() {
     cat <<EOF
 Usage: codex-install-pc [OPTIONS] /dev/nvmeXnX | /dev/sdX
@@ -48,7 +111,6 @@ Options:
   --dual-boot       Preserve existing OS — only add CodexOS partitions
   --efi-size N      Size in MB for EFI partition (default: 512)
   --system-size N   Size in MB for system partition (default: 4096)
-  --no-confirm      Skip interactive confirmation (DANGEROUS)
   --help            Show this help
 
 Examples:
@@ -70,7 +132,6 @@ SYSTEM_SIZE=4096
 VOLUME_LABEL="CODEXOS"
 DUAL_BOOT=false
 EXTERNAL=false
-NO_CONFIRM=false
 
 # ── Parse arguments ───────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -101,10 +162,6 @@ while [[ $# -gt 0 ]]; do
             VOLUME_LABEL="${2:?--label requires an argument}"
             shift 2
             ;;
-        --no-confirm)
-            NO_CONFIRM=true
-            shift
-            ;;
         --help|-h)
             usage
             ;;
@@ -126,8 +183,19 @@ if [[ -z "$DEVICE" ]]; then
     die "No device specified. Usage: codex-install-pc /dev/nvmeXnX"
 fi
 
+DEVICE="$(readlink -f "$DEVICE" 2>/dev/null || printf '%s' "$DEVICE")"
+case "$DEVICE" in
+    /dev/*) ;;
+    *) die "Device must resolve under /dev." ;;
+esac
+
 if [[ ! -b "$DEVICE" ]]; then
     die "$DEVICE is not a valid block device."
+fi
+
+BOOT_DEV="$(boot_device)"
+if [[ -n "$BOOT_DEV" && "$(parent_device "$DEVICE")" == "$BOOT_DEV" ]]; then
+    die "Refusing to install to the currently booted device ($DEVICE)."
 fi
 
 DEVNAME="${DEVICE##*/}"
@@ -141,25 +209,6 @@ else
     PART_SUFFIX=""
 fi
 
-# ── Check if currently booted from this device ────────────────────────────
-BOOT_DEV=""
-if [[ -f /proc/cmdline ]]; then
-    cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
-    if [[ "$cmdline_root" == /dev/* ]]; then
-        BOOT_DEV="${cmdline_root%%[0-9]*}"
-        BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
-    fi
-fi
-if [[ -z "$BOOT_DEV" ]]; then
-    BOOT_DEV="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
-    BOOT_DEV="${BOOT_DEV%%[0-9]*}"
-    BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
-fi
-
-if [[ "$DEVICE" == "$BOOT_DEV" ]]; then
-    die "Cannot install to the currently booted device ($DEVICE). Boot from USB first."
-fi
-
 # ── Check mounted partitions ──────────────────────────────────────────────
 if lsblk -n -o MOUNTPOINT "$DEVICE" 2>/dev/null | grep -q .; then
     die "Device $DEVICE has mounted partitions. Unmount all partitions first."
@@ -169,7 +218,8 @@ fi
 SIZE_BYTES="$(lsblk -d -b -n -o SIZE "$DEVICE" 2>/dev/null || echo 0)"
 SIZE_GB="$(echo "$SIZE_BYTES" | awk '{printf "%.1f", $1/1024/1024/1024}')"
 MODEL="$(lsblk -d -n -o MODEL "$DEVICE" 2>/dev/null | xargs || echo "Unknown")"
-SERIAL="$(lsblk -d -n -o SERIAL "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
+SERIAL="$(lsblk -d -n -o SERIAL "$DEVICE" 2>/dev/null | xargs || true)"
+[[ -z "$SERIAL" ]] && SERIAL="UNAVAILABLE"
 TRANSPORT="$(lsblk -d -n -o TRAN "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
 ROTATIONAL="$(lsblk -d -n -o ROTA "$DEVICE" 2>/dev/null | xargs || echo "1")"
 
@@ -203,28 +253,26 @@ fi
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 
-if [[ "$NO_CONFIRM" != true ]]; then
-    echo -n "Type the serial number to confirm [${SERIAL}]: "
-    read -r CONFIRM_INPUT
-    if [[ "$CONFIRM_INPUT" != "$SERIAL" ]]; then
-        die "Serial confirmation failed. Aborting."
-    fi
+echo -n "Type the target device path exactly [$DEVICE]: "
+read -r CONFIRM_INPUT
+if [[ "$CONFIRM_INPUT" != "$DEVICE" ]]; then
+    die "Device confirmation failed. Aborting."
+fi
 
-    if [[ "$DUAL_BOOT" != true ]]; then
-        echo -n "Type YES to destroy all data on $DEVICE: "
-        read -r WIPE_CONFIRM
-        if [[ "$WIPE_CONFIRM" != "YES" ]]; then
-            echo "Aborted."
-            exit 0
-        fi
-    else
-        echo -n "Confirm installation alongside existing OS [yes]: "
-        read -r CONFIRM_DUAL
-        if [[ "$CONFIRM_DUAL" != "yes" ]]; then
-            echo "Aborted."
-            exit 0
-        fi
-    fi
+CONFIRM_NONCE="$(hexdump -n 4 -e '/1 "%02X"' /dev/urandom 2>/dev/null || date +%s)"
+if [[ "$DUAL_BOOT" != true ]]; then
+    SAFETY_PHRASE="I AUTHORIZE WIPE OF ${DEVICE} ${CONFIRM_NONCE}"
+    echo "Type this exact phrase to destroy all data on $DEVICE:"
+else
+    SAFETY_PHRASE="I AUTHORIZE PARTITION CHANGES TO ${DEVICE} ${CONFIRM_NONCE}"
+    echo "Type this exact phrase to modify partitions on $DEVICE:"
+fi
+echo "  $SAFETY_PHRASE"
+printf "> "
+read -r WIPE_CONFIRM
+if [[ "$WIPE_CONFIRM" != "$SAFETY_PHRASE" ]]; then
+    echo "Aborted."
+    exit 0
 fi
 
 log_action "START mode=$MODE device=$DEVICE serial=$SERIAL size=${SIZE_GB}GB external=$EXTERNAL"
@@ -330,7 +378,7 @@ if [[ "$LUKS_PASSPHRASE" != "$LUKS_CONFIRM" ]]; then
 fi
 
 echo -n "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 \
-    --pbkdf argon2id --pbkdf-force-iterations 5 \
+    --label codex-persist --pbkdf argon2id --pbkdf-force-iterations 5 \
     "$PART3" -q -
 echo -n "$LUKS_PASSPHRASE" | cryptsetup open "$PART3" codex-persist-install -
 

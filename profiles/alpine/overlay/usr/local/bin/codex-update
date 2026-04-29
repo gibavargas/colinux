@@ -19,6 +19,7 @@ STATE_DIR="${PERSIST_DIR}/state"
 LOGFILE="${LOG_DIR}/update.log"
 STATE_FILE="${STATE_DIR}/update-state.json"
 CODEX_BIN="/usr/local/bin/codex"
+SETUP_CODEX="/usr/local/bin/setup-codex"
 CODEX_REPO="openai/codex"
 CODEX_VERSION_FILE="${STATE_DIR}/codex-version"
 
@@ -76,8 +77,6 @@ get_latest_codex_version() {
             | jq -r '.tag_name // .name' 2>/dev/null || true)"
     fi
 
-    # Strip leading 'v' if present
-    version="${version#v}"
     echo "$version"
 }
 
@@ -89,13 +88,19 @@ get_current_codex_version() {
     fi
 }
 
+normalize_version() {
+    sed 's/^rust-v//;s/^v//'
+}
+
 # ── Update Codex CLI ──────────────────────────────────────────────────────
 update_codex() {
     log_action "codex_update_start"
 
-    local latest_version current_version
+    local latest_version current_version latest_norm current_norm
     latest_version="$(get_latest_codex_version)"
     current_version="$(get_current_codex_version)"
+    latest_norm="$(printf '%s' "$latest_version" | normalize_version)"
+    current_norm="$(printf '%s' "$current_version" | normalize_version)"
 
     if [[ -z "$latest_version" ]]; then
         echo "Could not determine latest Codex version. Check network connectivity."
@@ -107,7 +112,7 @@ update_codex() {
     echo "  Current: $current_version"
     echo "  Latest:  $latest_version"
 
-    if [[ "$current_version" == "$latest_version" ]] && [[ "$FORCE" != true ]]; then
+    if [[ "$current_norm" == "$latest_norm" ]] && [[ "$FORCE" != true ]]; then
         echo "  → Already up to date."
         log_action "codex_update_skip already_current=$current_version"
         return 0
@@ -118,82 +123,9 @@ update_codex() {
         return 0
     fi
 
-    echo "  → Downloading Codex CLI v${latest_version}..."
-
-    # Detect architecture
-    local arch
-    arch="$(uname -m)"
-    case "$arch" in
-        x86_64)  arch="x86_64" ;;
-        aarch64) arch="aarch64" ;;
-        armv7l)  arch="armv7" ;;
-        *)
-            echo "WARNING: Unsupported architecture $arch. Attempting x86_64 binary."
-            arch="x86_64"
-            ;;
-    esac
-
-    # Try to download musl static binary
-    local download_url="https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}-musl.tar.gz"
-    local tmp_dir
-    tmp_dir="$(mktemp -d)"
-
-    # Try direct binary URL patterns
-    local downloaded=false
-    for url_pattern in \
-        "https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}-musl" \
-        "https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}" \
-        "https://github.com/${CODEX_REPO}/releases/latest/download/codex-linux-${arch}"; do
-
-        echo "  Trying: $url_pattern"
-        if curl -sfL -o "${tmp_dir}/codex" "${url_pattern}" 2>/dev/null; then
-            # Check if it's a valid binary
-            if file "${tmp_dir}/codex" 2>/dev/null | grep -qi 'ELF\|executable'; then
-                downloaded=true
-                break
-            fi
-        fi
-        rm -f "${tmp_dir}/codex"
-    done
-
-    # Try tarball
-    if [[ "$downloaded" != true ]]; then
-        for url_pattern in \
-            "https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}-musl.tar.gz" \
-            "https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}.tar.gz"; do
-
-            echo "  Trying: $url_pattern"
-            if curl -sfL -o "${tmp_dir}/codex.tar.gz" "${url_pattern}" 2>/dev/null; then
-                if tar xzf "${tmp_dir}/codex.tar.gz" -C "${tmp_dir}" 2>/dev/null; then
-                    # Find the binary inside extracted files
-                    local extracted_bin
-                    extracted_bin="$(find "${tmp_dir}" -name 'codex' -type f -executable 2>/dev/null | head -1 || true)"
-                    if [[ -n "$extracted_bin" ]]; then
-                        mv "$extracted_bin" "${tmp_dir}/codex"
-                        downloaded=true
-                        break
-                    fi
-                fi
-            fi
-            rm -f "${tmp_dir}/codex.tar.gz"
-        done
-    fi
-
-    if [[ "$downloaded" != true ]]; then
-        echo "  ✗ Failed to download Codex binary."
-        echo "  Manual install: Visit https://github.com/${CODEX_REPO}/releases"
-        log_action "codex_update_fail download_failed version=$latest_version"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    # Install
-    chmod +x "${tmp_dir}/codex"
-
-    if ! "${tmp_dir}/codex" --version &>/dev/null; then
-        echo "  ✗ Downloaded binary does not work."
-        log_action "codex_update_fail binary_invalid version=$latest_version"
-        rm -rf "$tmp_dir"
+    if [[ ! -x "$SETUP_CODEX" ]]; then
+        echo "  ✗ Verified setup helper not found: $SETUP_CODEX"
+        log_action "codex_update_fail setup_helper_missing version=$latest_version"
         return 1
     fi
 
@@ -202,8 +134,10 @@ update_codex() {
         cp "$CODEX_BIN" "${CODEX_BIN}.bak.${current_version}"
     fi
 
-    mv "${tmp_dir}/codex" "$CODEX_BIN"
-    rm -rf "$tmp_dir"
+    if ! "$SETUP_CODEX" --version "$latest_version" --force; then
+        log_action "codex_update_fail setup_helper_failed version=$latest_version"
+        return 1
+    fi
 
     # Record version
     echo "$latest_version" > "$CODEX_VERSION_FILE"

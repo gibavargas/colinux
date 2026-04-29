@@ -1,0 +1,154 @@
+#!/bin/bash
+# codex-forensic — runtime read-only lock for attached block devices
+set -euo pipefail
+
+RUN_DIR="/run/codex"
+PERSIST_STATE="/persist/state"
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+
+mkdir -p "$RUN_DIR" "$PERSIST_STATE" "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] forensic: $*" >> "$LOGFILE"
+}
+
+usage() {
+    echo "Usage: codex-forensic {on|off|status}"
+    exit 1
+}
+
+parent_device() {
+    local dev="$1"
+    local pkname=""
+    local real_dev name slave
+
+    real_dev="$(readlink -f "$dev" 2>/dev/null || printf '%s' "$dev")"
+    name="${real_dev##*/}"
+    if [[ -d "/sys/class/block/${name}/slaves" ]]; then
+        for slave in /sys/class/block/"${name}"/slaves/*; do
+            [[ -e "$slave" ]] || continue
+            parent_device "/dev/${slave##*/}"
+            return
+        done
+    fi
+
+    pkname="$(lsblk -n -o PKNAME "$real_dev" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    if [[ -n "$pkname" ]]; then
+        printf '/dev/%s\n' "$pkname"
+        return
+    fi
+    if [[ "$real_dev" =~ ^/dev/(nvme[0-9]+n[0-9]+)p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$real_dev" =~ ^/dev/([a-z]+)[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$real_dev" =~ ^/dev/(mmcblk[0-9]+)p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${BASH_REMATCH[1]}"
+    else
+        printf '%s\n' "$real_dev"
+    fi
+}
+
+boot_device() {
+    local root_dev=""
+    local cmdline_root=""
+    local mp source_dev
+    if [[ -f /proc/cmdline ]]; then
+        cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
+        case "$cmdline_root" in
+            PARTUUID=*) root_dev="$(blkid -t "$cmdline_root" -o device 2>/dev/null | head -1 || true)" ;;
+            UUID=*)     root_dev="$(blkid -t "$cmdline_root" -o device 2>/dev/null | head -1 || true)" ;;
+            /dev/*)     root_dev="$cmdline_root" ;;
+        esac
+    fi
+    if [[ -z "$root_dev" ]]; then
+        root_dev="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
+    fi
+    if [[ "$root_dev" != /dev/* ]]; then
+        root_dev=""
+        for mp in /boot /media/cdrom /media/usb /persist; do
+            source_dev="$(findmnt -n -o SOURCE "$mp" 2>/dev/null | head -1 || true)"
+            if [[ "$source_dev" == /dev/* ]]; then
+                root_dev="$source_dev"
+                break
+            fi
+        done
+    fi
+    case "$root_dev" in
+        /dev/*) parent_device "$(readlink -f "$root_dev" 2>/dev/null || printf '%s' "$root_dev")" ;;
+        *)      printf '\n' ;;
+    esac
+}
+
+block_devices() {
+    for b in /sys/block/*; do
+        local name="${b##*/}"
+        case "$name" in
+            loop*|ram*|zram*|fd*) continue ;;
+        esac
+        [[ -b "/dev/$name" ]] && printf '/dev/%s\n' "$name"
+    done
+}
+
+confirm_off() {
+    local nonce phrase answer
+    if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+        echo "ERROR: disabling forensic mode requires an interactive TTY." >&2
+        exit 1
+    fi
+    nonce="$(hexdump -n 4 -e '/1 "%02X"' /dev/urandom 2>/dev/null || date +%s)"
+    phrase="I AUTHORIZE FORENSIC OFF ${nonce}"
+    echo "Type this exact phrase to disable forensic mode:" > /dev/tty
+    echo "  $phrase" > /dev/tty
+    printf "> " > /dev/tty
+    IFS= read -r answer < /dev/tty
+    [[ "$answer" == "$phrase" ]]
+}
+
+cmd_on() {
+    local boot
+    boot="$(boot_device)"
+    touch "$RUN_DIR/forensic.lock" "$PERSIST_STATE/forensic.lock"
+    chmod 0600 "$RUN_DIR/forensic.lock" "$PERSIST_STATE/forensic.lock" 2>/dev/null || true
+
+    while IFS= read -r dev; do
+        [[ -n "$boot" && "$dev" == "$boot" ]] && continue
+        blockdev --setro "$dev" 2>/dev/null || true
+    done < <(block_devices)
+
+    log_action "ON boot=$boot"
+    echo "FORENSIC MODE ENABLED"
+}
+
+cmd_off() {
+    if ! confirm_off; then
+        echo "Aborted."
+        exit 0
+    fi
+
+    while IFS= read -r dev; do
+        blockdev --setrw "$dev" 2>/dev/null || true
+    done < <(block_devices)
+
+    rm -f "$RUN_DIR/forensic.lock" "$PERSIST_STATE/forensic.lock"
+    log_action "OFF"
+    echo "FORENSIC MODE DISABLED"
+}
+
+cmd_status() {
+    if [[ -e "$RUN_DIR/forensic.lock" || -e "$PERSIST_STATE/forensic.lock" ]]; then
+        echo "forensic: on"
+    else
+        echo "forensic: off"
+    fi
+}
+
+case "${1:-}" in
+    on) cmd_on ;;
+    off) cmd_off ;;
+    status|"") cmd_status ;;
+    help|--help|-h) usage ;;
+    *) usage ;;
+esac

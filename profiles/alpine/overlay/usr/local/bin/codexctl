@@ -15,6 +15,7 @@
 #   persist         Show persistence partition status
 #   update          Update Codex CLI and Alpine packages
 #   update --check  Check for updates only
+#   forensic        Enable, disable, or inspect forensic read-only mode
 #   install-usb     Install CodexOS to USB drive
 #   install-pc      Install CodexOS to internal disk
 #   network         Network setup / status
@@ -46,19 +47,28 @@ cmd_exists() {
 }
 
 try_root() {
-    # Check if running as root; if not, try with sudo/doas
+    local cmd="$1"
+    shift
+
+    if [[ "$cmd" != */* ]]; then
+        cmd="$(command -v "$cmd" 2>/dev/null || true)"
+    fi
+    if [[ -z "$cmd" ]]; then
+        echo "ERROR: command not found." >&2
+        return 1
+    fi
+
+    # Check if running as root; if not, use the doas wrapper whitelist.
     if [[ "$(id -u)" -ne 0 ]]; then
         if command -v doas &>/dev/null; then
-            doas "$@"
-        elif command -v sudo &>/dev/null; then
-            sudo "$@"
+            doas "$cmd" "$@"
         else
             echo "ERROR: This command requires root privileges." >&2
-            echo "Install sudo or doas, or run as root." >&2
+            echo "Install doas, or run from a trusted root console." >&2
             return 1
         fi
     else
-        "$@"
+        "$cmd" "$@"
     fi
 }
 
@@ -212,6 +222,11 @@ cmd_mount_rw() {
 
 # ── Command: persist ──────────────────────────────────────────────────────
 cmd_persist() {
+    if [[ "${1:-}" == "open" || "${1:-}" == "close" || "${1:-}" == "mount" || "${1:-}" == "unmount" ]]; then
+        try_root codex-usb-persist "$@"
+        return
+    fi
+
     echo "=== Persistence Status ==="
     echo ""
 
@@ -249,29 +264,10 @@ cmd_persist() {
         echo "Total: $(du -sh "$PERSIST_DIR" 2>/dev/null | awk '{print $1}')"
     fi
 
-    # Handle sub-commands
-    if [[ "${1:-}" == "open" ]]; then
-        echo ""
-        local luks_part="${2:-}"
-        if [[ -z "$luks_part" ]]; then
-            luks_part="$(blkid -t LABEL=codex-persist -o device 2>/dev/null | head -1 || true)"
-        fi
-        if [[ -z "$luks_part" ]]; then
-            echo "Usage: codexctl persist open /dev/sdX3"
-            echo "       codexctl persist open  (auto-detect)"
-            exit 1
-        fi
-        echo "Opening LUKS persistence: $luks_part"
-        try_root cryptsetup open "$luks_part" codex-persist
-        echo "✓ Persistence unlocked at /dev/mapper/codex-persist"
-        echo "  Mount with: mount /dev/mapper/codex-persist /persist"
-    elif [[ "${1:-}" == "close" ]]; then
-        echo ""
-        if mountpoint -q /persist 2>/dev/null; then
-            try_root umount /persist
-        fi
-        try_root cryptsetup close codex-persist
-        echo "✓ Persistence closed."
+    if [[ -n "${1:-}" ]]; then
+        echo "Unsupported persist command: $1" >&2
+        echo "Use: codexctl persist [open|close|mount|unmount]" >&2
+        exit 1
     fi
 }
 
@@ -279,6 +275,12 @@ cmd_persist() {
 cmd_update() {
     shift  # remove 'update'
     try_root codex-update "$@"
+}
+
+# ── Command: forensic ─────────────────────────────────────────────────────
+cmd_forensic() {
+    shift  # remove 'forensic'
+    try_root codex-forensic "$@"
 }
 
 # ── Command: install-usb ──────────────────────────────────────────────────
@@ -342,6 +344,9 @@ case "$COMMAND" in
     update)
         cmd_update "$@"
         ;;
+    forensic)
+        cmd_forensic "$@"
+        ;;
     install-usb)
         cmd_install_usb "$@"
         ;;
@@ -378,6 +383,8 @@ Commands:
                       Mount device read-write
   persist [open|close]
                       Persistence partition management
+  forensic [on|off|status]
+                      Runtime read-only lock for attached disks
   update [--check]    Update Codex CLI and Alpine
   install-usb         Install to USB drive
   install-pc          Install to internal disk
@@ -387,7 +394,7 @@ Commands:
   usb-persist         USB persistence management
   version             Show version info
 
-Most commands require root. codexctl will use sudo/doas automatically.
+Most commands require root. codexctl will use doas for whitelisted wrappers.
 EOF
         ;;
     *)

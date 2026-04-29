@@ -41,16 +41,16 @@ When a disk or partition is detected, the default behavior is:
 | Partition table modification | 🔒 Requires elevated escalation |
 | Low-level block writes (`dd`) | 🔒 Requires elevated escalation |
 
-### The `safe-mount` wrapper
+### The mount wrappers
 
-All mounting is done through `/usr/local/bin/safe-mount`, which enforces these defaults:
+Mounting is done through `/usr/local/bin/codex-mount-ro` and `/usr/local/bin/codex-mount-rw`, which enforce these defaults:
 
 ```bash
 # Read-only mount — always allowed
-safe-mount /dev/sdb1 /mnt/target
+codex-mount-ro /dev/sdb1
 
 # Read-write mount — triggers escalation flow
-safe-mount --write /dev/sdb1 /mnt/target
+codex-mount-rw --confirm SERIAL /dev/sdb1
 ```
 
 The wrapper:
@@ -89,7 +89,7 @@ To switch to read-write, the user must explicitly request it and complete the wr
 ┌─────────────────────────────────────────────────┐
 │              Write Escalation Flow               │
 │                                                   │
-│  1. safe-mount --write /dev/sdb1 /mnt/target     │
+│  1. codex-mount-rw --confirm SERIAL /dev/sdb1   │
 │                    │                              │
 │  2. ┌─────────────▼──────────────┐               │
 │  │   Boot device check           │               │
@@ -124,8 +124,6 @@ To switch to read-write, the user must explicitly request it and complete the wr
 After a successful write escalation:
 - A 30-minute timer starts.
 - After 30 minutes, the device is automatically remounted read-only.
-- A warning is displayed at 5 minutes and 1 minute before expiry.
-- The timer can be reset with `safe-mount --extend /dev/sdb1`.
 - There is no way to disable the timer permanently.
 
 ---
@@ -136,32 +134,21 @@ After a successful write escalation:
 
 The safety phrase prevents accidental confirmation — it requires the operator to read and type a specific phrase, proving deliberate intent rather than a reflexive "yes" or Enter key press.
 
-### Phrase bank
+### Phrase format
 
-Phrases are randomly selected from `/usr/share/codexos/safety-phrases`:
+The active wrappers generate exact, operation-specific phrases with a random nonce, for example:
 
+```text
+I AUTHORIZE WRITE TO WD-WMC4T0123456 A1B2C3D4
+I AUTHORIZE WIPE OF /dev/sdX A1B2C3D4
+I AUTHORIZE RESIZE PERSISTENCE /dev/sdX3 A1B2C3D4
 ```
-# 3-word phrases (standard operations)
-crimson river fox
-silent oak bridge
-painted desert wind
-iron mountain lake
-frozen amber sky
-...
-```
-
-Each phrase is:
-- 3 words for standard operations (mount RW, file writes).
-- 5 words for destructive operations (format, partition, dd).
-- Generated from a pool of 200+ unique words.
-- Displayed with randomized capitalization and spacing to prevent clipboard attacks.
 
 ### Anti-automation measures
 
 - The phrase changes on every request.
-- Phrases are never repeated within a session.
-- The input is compared case-insensitively but must match exactly in word order.
-- The phrase prompt includes a random prefix/suffix to make it harder to predict.
+- The input must match exactly, including case, target, and nonce.
+- The prompt is read from `/dev/tty`, so noninteractive AI sessions cannot complete the escalation by passing only command arguments.
 
 ---
 
@@ -171,23 +158,19 @@ The following operations are classified as **destructive** and require the eleva
 
 | Operation | Wrapper | Phrase Length | Additional Safeguards |
 |---|---|---|---|
-| Format filesystem | `safe-write --format` | 5 words | Pre-image checksum |
-| Create/modify partition table | `safe-write --partition` | 5 words | Pre-image checksum |
-| Block-level write (`dd`) | `safe-write --block` | 5 words | Pre-image checksum + countdown |
-| Delete files (`rm -rf`) | `safe-write --delete` | 5 words | File count preview |
-| LUKS operations | `safe-write --crypt` | 5 words | Header backup prompt |
+| Install to USB | `codex-install-usb` | Exact generated phrase | Target path and serial display |
+| Install to PC | `codex-install-pc` | Exact generated phrase | Target path and serial display |
+| Resize persistence | `codex-usb-persist resize` | Exact generated phrase | LUKS-only target check |
+| Read-write mount | `codex-mount-rw` | Exact generated phrase | Serial confirmation, boot-device and forensic checks |
 
 ### Destructive escalation flow
 
 ```
-1. Pre-operation SHA-256 checksum of target device (first 1 MiB)
-2. Standard write escalation (confirmation + 5-word phrase)
-3. 10-second countdown with progress bar:
-   "Operation will execute in 10s... Press Ctrl+C to abort"
-4. Final prompt: "LAST CHANCE. Type YES to proceed:"
-5. Execute operation
-6. Post-operation SHA-256 checksum
-7. Log: timestamps, checksums (before/after), operator, operation details
+1. Display target device path, model, serial, size, and operation mode.
+2. Require typing the target device path exactly.
+3. Require typing the generated operation-specific phrase from `/dev/tty`.
+4. Execute only the narrow wrapper operation.
+5. Log timestamps, operation details, and target identifiers.
 ```
 
 ---
@@ -201,36 +184,35 @@ Forensic mode provides the strongest disk safety guarantees. It is intended for 
 ```bash
 codexctl forensic on
 # Output: FORENSIC MODE ENABLED
-# - All block devices frozen
+# - Non-boot block devices set read-only
 # - Write operations blocked
 # - Read-only imaging available
-# - Watchdog active (60s interval)
 ```
 
 ### Behavior
 
 | Feature | State |
 |---|---|
-| All block devices | `blockdev --setro` applied |
-| Device node permissions | `0444` (read-only) |
-| Mount with write | ❌ Blocked (kernel-level) |
+| Non-boot block devices | `blockdev --setro` applied |
+| Device node permissions | Unchanged |
+| Mount with write | ❌ Blocked by `codex-mount-rw` and by block-device read-only state |
 | Mount read-only | ✅ Allowed |
-| Disk imaging (read) | ✅ Allowed (with SHA-256) |
+| Disk reads and user-space copying | ✅ Allowed from read-only mounts |
 | Write escalation | ❌ Bypassed — forensic lock takes precedence |
-| Forensic watchdog | Runs every 60 seconds, verifies all devices remain RO |
+| Persistent lock | Stored in `/run/codex/forensic.lock` and `/persist/state/forensic.lock` |
 
 ### Deactivation
 
 ```bash
 codexctl forensic off
-# Output: "Type: [5-word safety phrase]"
+# Output: "Type this exact phrase to disable forensic mode:"
 # After correct phrase:
 # FORENSIC MODE DISABLED
-# - Block devices unfrozen
+# - Block devices returned to read-write mode
 # - Normal safety model restored
 ```
 
-Deactivation requires a 5-word safety phrase and logs the event.
+Deactivation requires an interactive generated phrase and logs the event.
 
 ---
 
@@ -238,10 +220,10 @@ Deactivation requires a 5-word safety phrase and logs the event.
 
 The boot device (the USB drive or medium from which CodexOS Lite booted) receives special, non-bypassable protection:
 
-1. **Identification**: At boot, the device containing `/boot/` or the ISO label is recorded in `/run/codexos/boot-device`.
-2. **Hard exclusion**: The boot device is **always excluded** from disk inventory, mount operations, and write operations.
-3. **Immutable flag**: The boot device node is set to `immutable` via `chattr +i` (where supported by the filesystem).
-4. **No override**: There is no flag, argument, or configuration that can disable boot device protection.
+1. **Identification**: Wrappers resolve the root device through `/proc/cmdline`, `findmnt`, and parent-device lookup.
+2. **Hard exclusion**: Read-write mount requests and forensic block-device changes skip or deny the boot device.
+3. **Read-only system**: The base system is delivered as a read-only image with mutable state separated into encrypted persistence.
+4. **No write escalation override**: Shipping installers and write-mount wrappers have no noninteractive confirmation bypass.
 
 This is the one absolute, non-negotiable safety rule in CodexOS Lite.
 
@@ -249,16 +231,16 @@ This is the one absolute, non-negotiable safety rule in CodexOS Lite.
 
 ## Logging
 
-All disk operations are logged to `/persist/logs/disk-operations.log`:
+Privileged disk operations are logged to `/persist/logs/disk-actions.log`:
 
 ```
 2025-06-15 14:23:01 [INFO] disk-inventory: scan completed, 3 devices found
-2025-06-15 14:23:15 [INFO] safe-mount: /dev/sdb1 mounted RO on /mnt/target by codex
-2025-06-15 14:25:30 [WARN] safe-mount: write request for /dev/sdb1 on /mnt/target
-2025-06-15 14:25:32 [INFO] safe-mount: write escalation confirmed for /dev/sdb1 (phrase matched)
-2025-06-15 14:25:32 [INFO] safe-mount: /dev/sdb1 mounted RW on /mnt/target, timer=1800s
-2025-06-15 14:55:32 [INFO] safe-mount: auto-remount-RO timer expired for /dev/sdb1
-2025-06-15 14:55:32 [INFO] safe-mount: /dev/sdb1 remounted RO on /mnt/target
+2025-06-15 14:23:15 [INFO] codex-mount-ro: /dev/sdb1 mounted RO on /mnt/disks/by-device/sdb1 by codex
+2025-06-15 14:25:30 [WARN] codex-mount-rw: write request for /dev/sdb1
+2025-06-15 14:25:32 [INFO] codex-mount-rw: write escalation confirmed for /dev/sdb1
+2025-06-15 14:25:32 [INFO] codex-mount-rw: /dev/sdb1 mounted RW on /mnt/disks/by-device/sdb1, timer=1800s
+2025-06-15 14:55:32 [INFO] codex-mount-rw: auto-remount-RO timer expired for /dev/sdb1
+2025-06-15 14:55:32 [INFO] codex-mount-rw: /dev/sdb1 remounted RO on /mnt/disks/by-device/sdb1
 ```
 
 ### Log format
@@ -288,7 +270,7 @@ YYYY-MM-DD HH:MM:SS [LEVEL] component: message
 
 1. **Immediately freeze all block devices:**
    ```bash
-   codexctl emergency-freeze
+   codexctl forensic on
    ```
    This runs `blockdev --setro` on all block devices except the boot device.
 
@@ -319,7 +301,7 @@ YYYY-MM-DD HH:MM:SS [LEVEL] component: message
    ```
    boot: codexos nopersist
    ```
-3. Then create a new persistence partition with `codexctl persistence setup`.
+3. Then create a new persistence partition with `codex-install-usb` or `codex-usb-persist`.
 
 ### Immediate shutdown
 

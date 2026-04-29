@@ -113,6 +113,7 @@ install_build_deps() {
                 curl \
                 ca-certificates \
                 git \
+                jq \
                 qemu-img \
                 openssl
             ;;
@@ -130,9 +131,10 @@ install_build_deps() {
                 curl \
                 ca-certificates \
                 git \
+                jq \
                 qemu-utils \
                 openssl \
-                sgdisk
+                gdisk
             ;;
     esac
 
@@ -161,6 +163,64 @@ clone_aports() {
 }
 
 # ── Step 3: Install custom profile into aports ──────────────────────────────
+codex_arch_triple() {
+    case "$ARCH" in
+        x86_64)  echo "x86_64-unknown-linux-musl" ;;
+        aarch64) echo "aarch64-unknown-linux-musl" ;;
+        *) log_error "Unsupported Codex architecture: $ARCH"; exit 1 ;;
+    esac
+}
+
+fetch_codex_release_json() {
+    if [ "$CODEX_VERSION" = "latest" ]; then
+        curl -fsSL "https://api.github.com/repos/openai/codex/releases/latest"
+    else
+        curl -fsSL "https://api.github.com/repos/openai/codex/releases/tags/${CODEX_VERSION}" 2>/dev/null || \
+        curl -fsSL "https://api.github.com/repos/openai/codex/releases/tags/rust-v${CODEX_VERSION#v}"
+    fi
+}
+
+download_codex_binary() {
+    local dest="$1"
+    local arch_triple filename release_json asset_info download_url digest expected_sha tmpdir binary
+
+    arch_triple="$(codex_arch_triple)"
+    filename="codex-${arch_triple}.tar.gz"
+    release_json="$(fetch_codex_release_json)"
+    asset_info="$(printf '%s\n' "$release_json" | jq -r --arg name "$filename" '
+        .assets[]? | select(.name == $name) |
+        [.browser_download_url, (.digest // "")] | @tsv
+    ' | head -1)"
+
+    if [ -z "$asset_info" ]; then
+        log_error "Codex release does not contain required asset: $filename"
+        exit 1
+    fi
+
+    download_url="$(printf '%s\n' "$asset_info" | cut -f1)"
+    digest="$(printf '%s\n' "$asset_info" | cut -f2)"
+    expected_sha="${digest#sha256:}"
+    if [ -z "$expected_sha" ] || [ "$expected_sha" = "$digest" ]; then
+        log_error "Codex release asset has no SHA-256 digest: $filename"
+        exit 1
+    fi
+
+    tmpdir="$(mktemp -d)"
+    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
+    trap _cleanup EXIT
+
+    log_info "Downloading verified Codex asset: $filename"
+    curl -fsSL --retry 3 --retry-delay 5 -o "$tmpdir/$filename" "$download_url"
+    (cd "$tmpdir" && printf '%s  %s\n' "$expected_sha" "$filename" | sha256sum -c - >/dev/null)
+    tar xzf "$tmpdir/$filename" -C "$tmpdir"
+    binary="$(find "$tmpdir" \( -name "codex-${arch_triple}" -o -name codex \) -type f | head -1)"
+    if [ -z "$binary" ]; then
+        log_error "Could not find Codex binary in $filename"
+        exit 1
+    fi
+    install -m 0755 "$binary" "$dest"
+}
+
 install_profile() {
     log_step "Installing codexos-lite profile into aports"
 
@@ -180,6 +240,13 @@ install_profile() {
         local overlay_dest="$APORTS_DIR/scripts/codexos-lite/overlay"
         rm -rf "$overlay_dest"
         cp -a "$PROFILE_DIR/overlay" "$overlay_dest"
+
+        mkdir -p "$overlay_dest/usr/local/bin" "$overlay_dest/usr/share/codexos"
+        install -m 0755 "$PROJECT_ROOT/scripts/first-boot.sh" "$overlay_dest/usr/local/bin/first-boot"
+        install -m 0755 "$PROJECT_ROOT/scripts/setup-codex.sh" "$overlay_dest/usr/local/bin/setup-codex"
+        install -m 0755 "$PROJECT_ROOT/scripts/cron-codex-update.sh" "$overlay_dest/usr/local/bin/cron-codex-update"
+        install -m 0644 "$PROJECT_ROOT/AGENTS.md" "$overlay_dest/usr/share/codexos/AGENTS.md"
+        download_codex_binary "$overlay_dest/usr/local/bin/codex"
     fi
 
     log_info "Profile installed."
@@ -222,106 +289,8 @@ run_mkimage() {
 
 # ── Step 5: Download and inject Codex CLI binary ────────────────────────────
 inject_codex() {
-    log_step "Downloading and injecting Codex CLI"
-
-    # Determine the download filename for the architecture
-    local codex_arch codex_filename
-    case "$ARCH" in
-        x86_64)
-            codex_arch="x86_64-unknown-linux-musl"
-            codex_filename="codex-${codex_arch}.tar.gz"
-            ;;
-        aarch64)
-            codex_arch="aarch64-unknown-linux-musl"
-            codex_filename="codex-${codex_arch}.tar.gz"
-            ;;
-    esac
-
-    # Resolve version
-    local download_url
-    if [ "$CODEX_VERSION" = "latest" ]; then
-        download_url="https://github.com/openai/codex/releases/latest/download/${codex_filename}"
-    else
-        download_url="https://github.com/openai/codex/releases/download/${CODEX_VERSION}/${codex_filename}"
-    fi
-
-    log_info "Downloading Codex CLI from: $download_url"
-
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
-    trap _cleanup EXIT
-
-    # Download
-    curl -fsSL --retry 3 --retry-delay 5 -o "$tmpdir/$codex_filename" "$download_url" || {
-        log_error "Failed to download Codex CLI binary."
-        exit 1
-    }
-
-    # Extract
-    tar xzf "$tmpdir/$codex_filename" -C "$tmpdir" || {
-        log_error "Failed to extract Codex CLI archive."
-        exit 1
-    }
-
-    # Find the binary
-    local codex_bin
-    codex_bin="$(find "$tmpdir" -name 'codex' -type f -executable | head -1)"
-    if [ -z "$codex_bin" ]; then
-        log_error "Could not find codex binary in archive."
-        log_error "Contents of archive:"
-        find "$tmpdir" -type f | head -20
-        exit 1
-    fi
-
-    # Find the ISO and mount it to inject the binary
-    local iso_file
-    iso_file="$(find "$OUTDIR" -name 'codexos-lite-*.iso' | head -1)"
-    if [ -z "$iso_file" ]; then
-        log_error "Could not find built ISO in $OUTDIR"
-        exit 1
-    fi
-
-    log_info "Mounting ISO to inject Codex binary..."
-
-    local mount_dir
-    mount_dir="$(mktemp -d)"
-    mount -o loop "$iso_file" "$mount_dir" || {
-        # If loop mount fails (e.g. in container), try to rebuild with the binary
-        log_warn "Cannot loop-mount ISO (might be in a container)."
-        log_info "Codex binary saved to: $codex_bin"
-        log_info "You can inject it manually or use setup-codex.sh on first boot."
-        return 0
-    }
-
-    # Copy binary into the ISO filesystem
-    mkdir -p "$mount_dir/usr/local/bin"
-    cp "$codex_bin" "$mount_dir/usr/local/bin/codex"
-    chmod 755 "$mount_dir/usr/local/bin/codex"
-
-    # Also copy setup-codex.sh for first-boot use
-    if [ -f "$PROJECT_ROOT/scripts/setup-codex.sh" ]; then
-        cp "$PROJECT_ROOT/scripts/setup-codex.sh" "$mount_dir/usr/local/bin/setup-codex"
-        chmod 755 "$mount_dir/usr/local/bin/setup-codex"
-    fi
-
-    # Copy first-boot.sh
-    if [ -f "$PROJECT_ROOT/scripts/first-boot.sh" ]; then
-        cp "$PROJECT_ROOT/scripts/first-boot.sh" "$mount_dir/usr/local/bin/first-boot"
-        chmod 755 "$mount_dir/usr/local/bin/first-boot"
-    fi
-
-    # Copy cron update script
-    if [ -f "$PROJECT_ROOT/scripts/cron-codex-update.sh" ]; then
-        cp "$PROJECT_ROOT/scripts/cron-codex-update.sh" "$mount_dir/usr/local/bin/cron-codex-update"
-        chmod 755 "$mount_dir/usr/local/bin/cron-codex-update"
-    fi
-
-    sync
-    umount "$mount_dir"
-    rmdir "$mount_dir"
-
-    log_info "Codex CLI injected into ISO."
+    log_step "Codex CLI already staged in overlay"
+    log_info "Skipping post-build ISO mutation; release assets are verified before mkimage runs."
 }
 
 # ── Step 6: Create raw disk image from ISO ───────────────────────────────────
@@ -374,8 +343,7 @@ EOF
     sync
 
     umount "$iso_mount"
-    umount "$boot_mount"
-    rmdir "$iso_mount" "$boot_mount"
+    rmdir "$iso_mount"
 
     # Install GRUB
     local esp_mount
@@ -406,7 +374,9 @@ EOF
 
     sync
     umount "$esp_mount"
+    umount "$boot_mount"
     rmdir "$esp_mount"
+    rmdir "$boot_mount"
 
     losetup -d "$loop_dev"
 

@@ -145,26 +145,27 @@ codexos/
 │   │       ├── usr/
 │   │       │   ├── local/bin/         # Custom scripts
 │   │       │   │   ├── codexctl       # Codex control surface
-│   │       │   │   ├── safe-mount     # Safe mount wrapper
-│   │       │   │   ├── safe-write     # Write escalation gate
-│   │       │   │   ├── disk-inventory # Disk inventory collector
+│   │       │   │   ├── codex-mount-ro # Safe read-only mount wrapper
+│   │       │   │   ├── codex-mount-rw # Human-gated write mount wrapper
+│   │       │   │   ├── codex-forensic # Runtime read-only lock
+│   │       │   │   ├── codex-disk-inventory # Disk inventory collector
 │   │       │   │   └── first-boot.sh  # First-boot setup
-│   │       │   └── share/codexos/     # Shared resources
-│   │       │       └── safety-phrases # Safety phrase bank
 │   │       └── var/                   # Runtime state
 │   └── debian/                        # Debian-based compat profile
 ├── scripts/
-│   ├── qemu-test.sh                   # QEMU test runner
-│   ├── usb-write.sh                   # Safe USB imaging script
-│   └── create-persistence.sh          # LUKS persistence setup
+│   ├── build-alpine.sh                # Alpine ISO/raw image build
+│   ├── build-qemu.sh                  # QEMU helper image build
+│   ├── test-iso.sh                    # QEMU smoke test runner
+│   ├── setup-codex.sh                 # Verified Codex CLI installer
+│   └── cron-codex-update.sh           # Opt-in Codex update checker
 ├── docs/
 │   ├── SECURITY.md                    # Security documentation
 │   ├── DISK_SAFETY.md                 # Disk safety model
 │   ├── BUILD.md                       # Build instructions
 │   └── EDITIONS.md                    # Edition comparison
-└── tests/
-    ├── disk-safety.bats               # Disk safety tests
-    └── integration.bats               # Integration test suite
+└── installer/                         # Standalone installer wrappers
+    ├── codex-install-usb
+    └── codex-install-pc
 ```
 
 ## Building from Source
@@ -210,22 +211,23 @@ EXTRA_PACKAGES="vim htop tmux"
 # Identify your USB drive
 lsblk
 
-# Write the image
-sudo ./scripts/usb-write.sh /dev/sdX
-
-# (Optional) Create encrypted persistence partition
-sudo ./scripts/create-persistence.sh /dev/sdX
+# From a trusted CodexOS session, install to the target USB drive.
+# This is destructive and requires a generated confirmation phrase.
+codexctl install-usb /dev/sdX
 ```
 
 ### PC Installation
 
-CodexOS Lite is designed as a *live appliance* — it runs entirely from USB without touching the host machine's disks. There is no "install to disk" flow.
+CodexOS Lite is designed as a *live appliance* — it runs from USB without touching host disks unless the operator explicitly starts an installer.
 
-If you want persistent local storage:
+For MVP production use, install only to a whole disk or external SSD:
 
-1. Boot from the USB drive.
-2. Run `sudo setup-persistence` to create an encrypted LUKS partition on a designated drive.
-3. Your Codex config, session history, and logs will persist across reboots.
+```bash
+codexctl install-pc /dev/nvme0n1
+codexctl install-pc --external /dev/sdX
+```
+
+Both flows display the target model, serial, and size, then require typing the exact generated confirmation phrase before partitioning.
 
 > 🔒 Persistence uses LUKS2 with AES-256-XTS. You'll set a passphrase on first setup.
 
@@ -236,7 +238,7 @@ When you boot CodexOS Lite for the first time:
 1. **Bootloader** — syslinux presents a brief boot menu (Live, Forensic, Debug).
 2. **Kernel + initramfs** — boots into Alpine's initramfs, loads modules.
 3. **Overlay mount** — the squashfs root filesystem is mounted read-only; an `overlayfs` tmpfs provides writable space.
-4. **First-boot script** — if `/persist/.first-boot-done` doesn't exist:
+4. **First-boot script** — if `/persist/.codexos-system/first-boot-done` doesn't exist:
    - Generates machine ID and host keys.
    - Initializes `/persist/` directory structure.
    - Prompts for OpenAI API key (stored in encrypted persistence).
@@ -258,7 +260,7 @@ CodexOS Lite treats **every disk as potentially valuable and dangerous by defaul
 | Mount filesystem | ⚠️ Read-only | Explicit write mount |
 | Write/modify files | ❌ Blocked | Multi-step confirmation |
 | Format/partition | ❌ Blocked | Multi-step + typed safety phrase |
-| Block-level write (dd) | ❌ Blocked | Multi-step + typed safety phrase + timeout |
+| Block-level write (dd) | ❌ Not exposed through CodexOS wrappers | Trusted root console only |
 | Boot device operations | ❌ Always blocked | Cannot be escalated |
 
 See [`docs/DISK_SAFETY.md`](docs/DISK_SAFETY.md) for the complete specification.
@@ -275,23 +277,20 @@ codexctl status
 codexctl disks
 
 # Mount a disk read-only
-codexctl mount /dev/sdb1 /mnt/target
+codexctl mount-ro /dev/sdb1
 
 # Request write access (triggers interactive confirmation)
-codexctl mount --write /dev/sdb1 /mnt/target
+codexctl mount-rw --confirm "WD-WMC4T0123456" /dev/sdb1
 
-# Enter forensic mode (all disks read-only, immutable)
+# Enter forensic mode (attached disks read-only)
 codexctl forensic on
 
-# Create a disk image with verification
-codexctl image /dev/sdb --output /persist/images/sdb.img
-
 # Manage persistence
-codexctl persistence setup /dev/sdc
-codexctl persistence status
+codexctl persist status
+codexctl usb-persist mount /dev/sdc3
 
 # Update Codex CLI
-codexctl update --channel stable
+codexctl update --check
 ```
 
 ## 🧑 For Humans
@@ -348,8 +347,6 @@ lsblk
 # Write the image (REPLACE /dev/sdX WITH YOUR DEVICE)
 sudo dd if=dist/codexos-lite-x86_64-*.iso of=/dev/sdX bs=4M status=progress && sync
 
-# Or use the safe helper script
-sudo ./scripts/usb-write.sh /dev/sdX
 ```
 
 > ⚠️ **This will erase all data on the target drive.** Double-check the device name.
@@ -440,10 +437,7 @@ codexctl mount-rw --confirm "WD-WMC4T0123456" /dev/sdb1
 # Copy files from a mounted drive to persistent storage
 cp -r /mnt/disks/by-device/sdb1/photos /persist/data/
 
-# Create a forensic disk image (with SHA-256 verification)
-codexctl image /dev/sdb --output /persist/images/evidence.img
-
-# Enter forensic mode (all operations read-only, immutable)
+# Enter forensic mode (attached disks read-only)
 codexctl forensic on
 
 # View mounted disks
@@ -476,7 +470,7 @@ curl -sS ifconfig.me
 | Won't boot from USB | Check BIOS/UEFI boot order; try "USB HDD" or "UEFI: <drive>" |
 | Black screen after boot | Reboot and select `Debug` from the boot menu; check graphics compatibility |
 | No network | Run `codexctl network`; try `ip link` to see interfaces; check cable/WiFi |
-| Codex says "API key invalid" | Run `setup-codex --key` to reconfigure your OpenAI API key |
+| Codex says "API key invalid" | Update `/persist/config/codex.conf` or export a valid `OPENAI_API_KEY` before launching Codex |
 | Can't write to USB drive | By design! Use `codexctl mount-rw --confirm <SERIAL> <device>` |
 | Disk won't mount | Try `codexctl mount-ro /dev/sdXN` first; run `fsck /dev/sdXN` to check |
 | Out of space on persistence | Run `df -h /persist`; clean up with `codexctl backup --list` |
@@ -497,7 +491,7 @@ A: Run `codexctl update` — it checks for new versions and updates automaticall
 A: Yes. `qemu-system-x86_64 -m 2048 -cdrom dist/codexos-lite-x86_64-*.iso -boot d` or use VirtualBox/VMware.
 
 **Q: How do I set up persistence?**
-A: Run `codexctl persist setup /dev/sdX` during a live session. It creates an encrypted partition for your config, logs, and data.
+A: Use `codexctl install-usb /dev/sdX` for a fresh USB with encrypted persistence, or `codexctl usb-persist mount /dev/sdX3` to open an existing CodexOS persistence partition.
 
 **Q: Is my API key stored securely?**
 A: Yes. API keys are stored in `/persist/config/` with 0600 permissions, owned by the `codex` user. If using LUKS persistence, the key is encrypted on disk.
@@ -564,7 +558,7 @@ codexctl backup --list          # List existing backups
 
 # Installation
 codexctl install-usb /dev/sdX   # Install CodexOS to USB
-codexctl install-pc             # Install to internal disk
+codexctl install-pc /dev/nvme0n1 # Install to internal disk
 ```
 
 ### Programmatic Disk Operations (JSON Output)
@@ -641,12 +635,8 @@ CODEX_VERSION=v0.1.0 ARCH=x86_64 bash scripts/build-alpine.sh
 ### Testing in CI/CD
 
 ```bash
-# Run the test suite
-make test
-
-# Or directly with bats
-bats tests/disk-safety.bats
-bats tests/integration.bats
+# Run shell syntax checks
+find profiles scripts disk installer -type f -perm -111 -print0 | xargs -0 -n1 bash -n
 
 # Quick smoke test in Docker
 docker run --rm codexos-lite codexctl version
@@ -670,10 +660,11 @@ kill %1
 **Pattern 1: Automated data recovery pipeline**
 
 ```bash
-# Boot CodexOS, mount evidence drive, image it, hash it
+# Boot CodexOS, enable forensic mode, then mount evidence read-only
+codexctl forensic on
 codexctl mount-ro /dev/sdb1
-codexctl image /dev/sdb --output /persist/images/evidence-$(date +%Y%m%d).img
-sha256sum /persist/images/evidence-*.img > /persist/images/evidence.sha256
+rsync -aHAX --numeric-ids /mnt/disks/by-device/sdb1/ /persist/evidence-copy/
+find /persist/evidence-copy -type f -print0 | sort -z | xargs -0 sha256sum > /persist/evidence-copy.sha256
 ```
 
 **Pattern 2: CI/CD infrastructure tool**

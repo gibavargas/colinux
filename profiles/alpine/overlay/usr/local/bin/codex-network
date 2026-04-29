@@ -29,6 +29,15 @@ log_action() {
     echo "[$ts] network: $*" >> "$LOGFILE"
 }
 
+safe_filename() {
+    local value="$1"
+    value="${value//\//_}"
+    value="${value//$'\n'/_}"
+    value="${value//$'\r'/_}"
+    value="${value//../_}"
+    printf '%s' "$value"
+}
+
 # ── Helper: find network interfaces ───────────────────────────────────────
 find_ethernet() {
     # Find Ethernet interfaces (skip lo, wlan, wwan)
@@ -307,14 +316,16 @@ _connect_iwd() {
     echo "Connecting via iwd..."
 
     # Create IWD config
-    cat > "${IWD_CONF_DIR}/${ssid}.psk" <<EOF
+    local ssid_file
+    ssid_file="$(safe_filename "$ssid")"
+    cat > "${IWD_CONF_DIR}/${ssid_file}.psk" <<EOF
 [Security]
 Passphrase=${passphrase}
 
 [Settings]
 AutoConnect=true
 EOF
-    chmod 600 "${IWD_CONF_DIR}/${ssid}.psk"
+    chmod 600 "${IWD_CONF_DIR}/${ssid_file}.psk"
 
     # Start iwd if not running
     if ! pgrep -x iwd &>/dev/null; then

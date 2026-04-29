@@ -40,7 +40,7 @@ INTERVAL=4
 CODEX_DESKTOP_CHANNEL="stable"
 CODEX_CLI_CHANNEL="stable"
 WRAPPER_BRANCH="main"
-AUTO_INSTALL=true
+AUTO_INSTALL=false
 NOTIFY=true
 ROLLBACK_COUNT=3
 API_DELAY=2
@@ -110,15 +110,15 @@ load_config() {
             key="$(echo "$key" | xargs)"
             value="$(echo "$value" | xargs)"
             case "$key" in
-                enabled)                ENABLED="$value" ;;
-                interval)               INTERVAL="$value" ;;
-                codex_desktop_channel)  CODEX_DESKTOP_CHANNEL="$value" ;;
-                codex_cli_channel)      CODEX_CLI_CHANNEL="$value" ;;
-                wrapper_branch)         WRAPPER_BRANCH="$value" ;;
-                auto_install)           AUTO_INSTALL="$value" ;;
-                notify)                 NOTIFY="$value" ;;
-                rollback_count)         ROLLBACK_COUNT="$value" ;;
-                api_delay)              API_DELAY="$value" ;;
+                enabled|ENABLED)                                  ENABLED="$value" ;;
+                interval|INTERVAL)                                INTERVAL="$value" ;;
+                codex_desktop_channel|CODEX_DESKTOP_CHANNEL)      CODEX_DESKTOP_CHANNEL="$value" ;;
+                codex_cli_channel|CODEX_CLI_CHANNEL)              CODEX_CLI_CHANNEL="$value" ;;
+                wrapper_branch|WRAPPER_BRANCH)                    WRAPPER_BRANCH="$value" ;;
+                auto_install|AUTO_INSTALL)                        AUTO_INSTALL="$value" ;;
+                notify|NOTIFY)                                    NOTIFY="$value" ;;
+                rollback_count|ROLLBACK_COUNT)                    ROLLBACK_COUNT="$value" ;;
+                api_delay|API_DELAY)                              API_DELAY="$value" ;;
             esac
         done < "$CONFIG_FILE"
         log_debug "Config loaded: enabled=$ENABLED interval=${INTERVAL}h"
@@ -210,72 +210,17 @@ update_codex_cli() {
     fi
 
     log_info "Updating Codex CLI to v$latest..."
-    notify_desktop "Updating Codex CLI" "Downloading v$latest..." "low"
+    notify_desktop "Updating Codex CLI" "Installing v$latest..." "low"
 
-    # Download latest Codex CLI
-    local arch
-    case "$(uname -m)" in
-        x86_64) arch="x86_64-unknown-linux-gnu" ;;
-        *)      arch="x86_64-unknown-linux-gnu" ;;
-    esac
-
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    trap "rm -rf $tmpdir" RETURN
-
-    # Try various download patterns for the Codex CLI binary
-    local downloaded=false
-    for url_pattern in \
-        "https://github.com/$CODEX_REPO/releases/download/$latest/codex-linux-x86_64.tar.gz" \
-        "https://github.com/$CODEX_REPO/releases/download/$latest/codex-${arch}.tar.gz" \
-        "https://github.com/$CODEX_REPO/releases/latest/download/codex-linux-x86_64.tar.gz"; do
-
-        if curl -fsSL --connect-timeout 30 -o "$tmpdir/codex.tar.gz" "$url_pattern" 2>/dev/null; then
-            local dl_size
-            dl_size="$(stat -c%s "$tmpdir/codex.tar.gz" 2>/dev/null || echo 0)"
-            if [ "$dl_size" -gt 1048576 ]; then
-                downloaded=true
-                break
-            fi
-        fi
-        rm -f "$tmpdir/codex.tar.gz"
-    done
-
-    if ! $downloaded; then
-        # Try npm install as fallback
-        log_warn "Binary download failed, trying npm..."
-        if command -v npm >/dev/null 2>&1; then
-            npm install -g @openai/codex 2>/dev/null || npm install -g codex 2>/dev/null || {
-                log_error "npm install also failed"
-                return 1
-            }
-        else
-            log_error "All download methods failed"
-            return 1
-        fi
-    else
-        # Extract and install binary
-        tar xzf "$tmpdir/codex.tar.gz" -C "$tmpdir" 2>/dev/null || {
-            log_error "Failed to extract Codex CLI archive"
-            return 1
-        }
-
-        local binary
-        binary="$(find "$tmpdir" -name 'codex' -type f ! -name '*.tar.gz' | head -1)"
-        if [ -z "$binary" ]; then
-            log_error "Could not find codex binary in archive"
-            return 1
-        fi
-
-        # Backup current
-        if [ -x "$CODEX_BIN" ]; then
-            cp "$CODEX_BIN" "${CODEX_BIN}.bak.$(date +%s)"
-        fi
-
-        mkdir -p "$(dirname "$CODEX_BIN")"
-        cp "$binary" "$CODEX_BIN"
-        chmod 755 "$CODEX_BIN"
+    if [ ! -x /usr/local/bin/setup-codex ]; then
+        log_error "Refusing unsafe Codex CLI update: verified setup-codex helper is not installed"
+        return 1
     fi
+
+    /usr/local/bin/setup-codex --version "$latest" --force || {
+        log_error "Verified Codex CLI update helper failed"
+        return 1
+    }
 
     # Record version
     mkdir -p "$STATE_DIR"
@@ -370,11 +315,13 @@ do_rollback() {
     rm -rf "${INSTALL_DIR:?}"/*
     cp -a "$rb_dir/app"/* "$INSTALL_DIR"/ 2>/dev/null || true
 
-    # Restore version info
+    # Restore version info without sourcing rollback-controlled shell.
     if [ -f "$rb_dir/version-info" ]; then
-        source "$rb_dir/version-info"
-        echo "${CODEX_VERSION:-unknown}" > "$STATE_DIR/current-version"
-        echo "${WRAPPER_VERSION:-unknown}" > "$STATE_DIR/wrapper-version"
+        local codex_version wrapper_version
+        codex_version="$(grep -E '^CODEX_VERSION=' "$rb_dir/version-info" | head -1 | cut -d= -f2- | tr -cd '[:alnum:]._-')"
+        wrapper_version="$(grep -E '^WRAPPER_VERSION=' "$rb_dir/version-info" | head -1 | cut -d= -f2- | tr -cd '[:alnum:]._-')"
+        echo "${codex_version:-unknown}" > "$STATE_DIR/current-version"
+        echo "${wrapper_version:-unknown}" > "$STATE_DIR/wrapper-version"
     fi
 
     log_info "Rollback complete from $rb_dir"

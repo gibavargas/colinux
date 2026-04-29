@@ -35,6 +35,28 @@ die() {
     exit 1
 }
 
+confirm_destructive() {
+    local action="$1"
+    local device="$2"
+    local nonce phrase answer
+
+    if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+        die "$action requires an interactive TTY."
+    fi
+
+    nonce="$(hexdump -n 4 -e '/1 "%02X"' /dev/urandom 2>/dev/null || date +%s)"
+    phrase="I AUTHORIZE ${action} ${device} ${nonce}"
+
+    echo "WARNING: $action can destroy data." > /dev/tty
+    echo "Device: $device" > /dev/tty
+    echo "Type this exact phrase to continue:" > /dev/tty
+    echo "  $phrase" > /dev/tty
+    printf "> " > /dev/tty
+    IFS= read -r answer < /dev/tty
+
+    [[ "$answer" == "$phrase" ]]
+}
+
 # ── Find the persistence partition ────────────────────────────────────────
 find_persist_part() {
     local specified="${1:-}"
@@ -260,6 +282,10 @@ cmd_resize() {
         die "Not a block device: $device"
     fi
 
+    if ! blkid -s TYPE -o value "$device" 2>/dev/null | grep -qi '^crypto_LUKS$'; then
+        die "Refusing to resize non-LUKS persistence partition: $device"
+    fi
+
     # We cannot resize a partition if LUKS is open and mounted
     if is_mounted; then
         die "Unmount persistence first: codex-usb-persist unmount"
@@ -268,13 +294,11 @@ cmd_resize() {
         die "Close LUKS first: codex-usb-persist close"
     fi
 
-    echo "⚠ WARNING: Resizing partitions is potentially destructive."
+    echo "WARNING: Resizing partitions is potentially destructive."
     echo "  Device: $device"
     echo "  New size: $new_size"
     echo ""
-    echo -n "Type RESIZE to confirm: "
-    read -r confirm
-    if [[ "$confirm" != "RESIZE" ]]; then
+    if ! confirm_destructive "RESIZE PERSISTENCE" "$device"; then
         echo "Aborted."
         return 0
     fi

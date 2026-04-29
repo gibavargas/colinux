@@ -3,7 +3,7 @@ Description=CodexOS Desktop First Boot Setup
 Documentation=https://github.com/colinux/codexos
 After=local-fs.target network.target NetworkManager.service
 Wants=network-online.target
-ConditionPathExists=!/persist/.first-boot-done
+ConditionPathExists=!/persist/.codexos-system/first-boot-done
 
 [Service]
 Type=oneshot

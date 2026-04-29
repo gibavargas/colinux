@@ -2,40 +2,19 @@
 # Provides passwordless access to disk operations, network, and updates.
 # Installed to: /etc/sudoers.d/codex-desktop
 
-# Disk operations (disk safety model)
+# Disk operations (wrapper-only safety model)
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-mount-ro
-codex ALL=(root) NOPASSWD: /usr/local/bin/codex-backup
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-disk-inventory
-codex ALL=(root) NOPASSWD: /bin/mount -o ro *
-codex ALL=(root) NOPASSWD: /bin/umount *
-codex ALL=(root) NOPASSWD: /usr/bin/udisksctl *
 
 # System updates
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-system-autoupdate
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-desktop-autoupdate
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-update
-codex ALL=(root) NOPASSWD: /usr/sbin/unattended-upgrade
 
 # Network (via NetworkManager)
-codex ALL=(root) NOPASSWD: /usr/bin/nmcli *
-codex ALL=(root) NOPASSWD: /usr/sbin/ifup *
-codex ALL=(root) NOPASSWD: /usr/sbin/ifdown *
-
-# System info (read-only)
-codex ALL=(root) NOPASSWD: /usr/bin/smartctl *
-codex ALL=(root) NOPASSWD: /usr/sbin/hdparm *
-codex ALL=(root) NOPASSWD: /usr/sbin/nvme *
-codex ALL=(root) NOPASSWD: /sbin/blkid
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-net-watchdog
 
 # Codex Desktop management
 codex ALL=(root) NOPASSWD: /usr/bin/systemctl restart codex-desktop.service
 codex ALL=(root) NOPASSWD: /usr/bin/systemctl stop codex-desktop.service
 codex ALL=(root) NOPASSWD: /usr/bin/systemctl start codex-desktop.service
-
-# First-boot re-run
-codex ALL=(root) NOPASSWD: /usr/local/bin/codex-firstboot-desktop
-
-# General system info (safe read commands)
-codex ALL=(root) NOPASSWD: /usr/bin/lsblk
-codex ALL=(root) NOPASSWD: /usr/bin/free
-codex ALL=(root) NOPASSWD: /usr/bin/dmidecode

@@ -161,13 +161,7 @@ cmd_rollback() {
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 cmd_setup() {
-    if [ -x /opt/codexos-setup/setup-codex-desktop.sh ]; then
-        info "Running Codex Desktop setup..."
-        sudo /opt/codexos-setup/setup-codex-desktop.sh
-    else
-        err "Setup script not found at /opt/codexos-setup/setup-codex-desktop.sh"
-        exit 1
-    fi
+    err "Codex Desktop setup is disabled in the production Lite baseline."
 }
 
 # ── Disks ────────────────────────────────────────────────────────────────────
@@ -193,29 +187,13 @@ cmd_mount_ro() {
     if [ -x /usr/local/bin/codex-mount-ro ]; then
         sudo /usr/local/bin/codex-mount-ro "$dev"
     else
-        # Fallback: manual read-only mount
-        local mntpnt="/media/codex/$(basename "$dev")"
-        sudo mkdir -p "$mntpnt"
-        sudo mount -o ro,noexec,nodev,nosuid,utf8 "$dev" "$mntpnt" && {
-            ok "Mounted $dev at $mntpnt (read-only)"
-        } || err "Mount failed"
+        err "Read-only mount wrapper not found"
     fi
 }
 
 # ── Backup ───────────────────────────────────────────────────────────────────
 cmd_backup() {
-    local dev="${1:-}"
-    if [ -z "$dev" ]; then
-        err "Usage: codexctl backup /dev/sdX"
-        exit 1
-    fi
-
-    if [ -x /usr/local/bin/codex-backup ]; then
-        sudo /usr/local/bin/codex-backup "$dev"
-    else
-        err "Backup tool not found"
-        exit 1
-    fi
+    err "Root disk imaging is disabled in the desktop compatibility profile. Use a trusted root console for imaging."
 }
 
 # ── Desktop app control ──────────────────────────────────────────────────────
@@ -364,7 +342,6 @@ Commands:
   setup                           Re-run Codex Desktop setup
   disks                           Show disk inventory
   mount-ro /dev/sdX               Mount device read-only (disk safety)
-  backup /dev/sdX                 Create disk backup image
   desktop start|stop|restart|status  Control Codex Desktop app
   network list|connect|scan       Network/Wi-Fi management
   logs [service|journal]          Show logs
@@ -380,7 +357,7 @@ Services:
 Disk Safety:
   All disks are mounted read-only by default.
   Use 'codexctl mount-ro' or 'codex-mount-ro' for safe access.
-  Use 'codexctl backup' before any write operations.
+  Create backups from a trusted root console before any write operations.
 HELP
 }
 

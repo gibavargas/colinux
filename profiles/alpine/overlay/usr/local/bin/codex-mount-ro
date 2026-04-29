@@ -21,6 +21,19 @@ log_action() {
     echo "[$ts] mount-ro: $*" >> "$LOGFILE"
 }
 
+sanitize_component() {
+    local value="$1"
+    value="${value//\//_}"
+    value="${value//$'\n'/_}"
+    value="${value//$'\r'/_}"
+    printf '%s' "$value"
+}
+
+blkid_value() {
+    local field="$1"
+    blkid -s "$field" -o value "$DEVICE" 2>/dev/null | head -1 || true
+}
+
 usage() {
     echo "Usage: codex-mount-ro <device>"
     echo ""
@@ -37,7 +50,16 @@ if [[ $# -lt 1 ]]; then
     usage
 fi
 
-DEVICE="$1"
+DEVICE="$(readlink -f "$1" 2>/dev/null || printf '%s' "$1")"
+
+case "$DEVICE" in
+    /dev/*) ;;
+    *)
+        echo "ERROR: device must resolve under /dev: $1" >&2
+        log_action "FAILED invalid_device_path input=$1 resolved=$DEVICE"
+        exit 1
+        ;;
+esac
 
 # Validate device exists
 if [[ ! -b "$DEVICE" ]]; then
@@ -61,19 +83,14 @@ FS_TYPE=""
 LABEL=""
 UUID=""
 
-if command -v blkid &>/dev/null; then
-    eval "$(blkid -o export "$DEVICE" 2>/dev/null || true)"
-fi
-
-# Fallback: parse blkid output directly
 if [[ -z "$FS_TYPE" ]]; then
-    FS_TYPE="$(blkid -s TYPE -o value "$DEVICE" 2>/dev/null || echo "")"
+    FS_TYPE="$(blkid_value TYPE)"
 fi
 if [[ -z "$LABEL" ]]; then
-    LABEL="$(blkid -s LABEL -o value "$DEVICE" 2>/dev/null || echo "")"
+    LABEL="$(blkid_value LABEL)"
 fi
 if [[ -z "$UUID" ]]; then
-    UUID="$(blkid -s UUID -o value "$DEVICE" 2>/dev/null || echo "")"
+    UUID="$(blkid_value UUID)"
 fi
 
 if [[ -z "$FS_TYPE" ]]; then
@@ -96,22 +113,24 @@ fi
 
 # ── Create by-label symlink ───────────────────────────────────────────────
 if [[ -n "$LABEL" ]]; then
-    local_symlink_path="${MOUNT_BASE}/by-label/${LABEL}"
+    safe_label="$(sanitize_component "$LABEL")"
+    local_symlink_path="${MOUNT_BASE}/by-label/${safe_label}"
     if [[ -L "$local_symlink_path" ]]; then
         rm -f "$local_symlink_path"
     fi
     ln -s "$MOUNT_POINT" "$local_symlink_path"
-    echo "  → symlink: by-label/${LABEL}"
+    echo "  -> symlink: by-label/${safe_label}"
 fi
 
 # ── Create by-uuid symlink ────────────────────────────────────────────────
 if [[ -n "$UUID" ]]; then
-    local_symlink_path="${MOUNT_BASE}/by-uuid/${UUID}"
+    safe_uuid="$(sanitize_component "$UUID")"
+    local_symlink_path="${MOUNT_BASE}/by-uuid/${safe_uuid}"
     if [[ -L "$local_symlink_path" ]]; then
         rm -f "$local_symlink_path"
     fi
     ln -s "$MOUNT_POINT" "$local_symlink_path"
-    echo "  → symlink: by-uuid/${UUID}"
+    echo "  -> symlink: by-uuid/${safe_uuid}"
 fi
 
 echo "Done."

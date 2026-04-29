@@ -78,6 +78,6 @@ else
         ok "Mounted $DEV at $MNT (read-only, basic options)"
         echo "To unmount: sudo umount $MNT"
     else
-        err "Failed to mount $DEV. Check filesystem or try: sudo mount -o ro $DEV $MNT"
+        err "Failed to mount $DEV. Check filesystem and retry through codex-mount-ro."
     fi
 fi

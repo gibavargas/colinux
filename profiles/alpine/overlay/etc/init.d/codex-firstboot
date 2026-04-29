@@ -4,7 +4,7 @@
 #
 # Runs on boot to initialize the appliance if this is the first time.
 # Creates persistence structure, configures Codex CLI, and sets up cron jobs.
-# Marks completion with /persist/.first-boot-done to skip on subsequent boots.
+# Marks completion with /persist/.codexos-system/first-boot-done to skip later.
 
 name="codex-firstboot"
 description="CodexOS Lite first-boot initialization"
@@ -16,18 +16,11 @@ depend() {
     before codex-auto-update
 }
 
-FIRSTBOOT_DONE="/persist/.first-boot-done"
+FIRSTBOOT_DONE="/persist/.codexos-system/first-boot-done"
 FIRSTBOOT_SCRIPT="/usr/local/bin/first-boot"
 FIRSTBOOT_LOG="/persist/logs/first-boot.log"
 
 start() {
-    # Check if persistence is available
-    if ! mountpoint -q /persist 2>/dev/null; then
-        einfo "No persistence partition found — skipping first-boot setup"
-        einfo "Run 'codexctl persistence setup /dev/sdX' to enable persistence"
-        return 0
-    fi
-
     # Check if first boot has already been done
     if [ -f "${FIRSTBOOT_DONE}" ]; then
         einfo "First boot already completed — skipping"
@@ -45,9 +38,6 @@ start() {
         local rc=$?
 
         if [ $rc -eq 0 ]; then
-            # Mark first boot as done
-            date -Iseconds > "${FIRSTBOOT_DONE}"
-            chmod 0644 "${FIRSTBOOT_DONE}"
             eend 0 "First-boot setup completed successfully"
         else
             eend $rc "First-boot setup failed (see ${FIRSTBOOT_LOG})"
