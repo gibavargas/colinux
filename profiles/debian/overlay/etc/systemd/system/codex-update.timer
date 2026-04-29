@@ -1,0 +1,19 @@
+[Unit]
+Description=CodexOS Desktop Auto-Update Timer
+Documentation=https://github.com/colinux/codexos
+After=network-online.target
+
+[Timer]
+# Check every 4 hours (overridden by config if changed)
+OnCalendar=*-*-* 00/4:00:00
+# Randomize by up to 15 minutes to avoid thundering herd
+RandomizedDelaySec=900
+# Start 5 minutes after boot
+OnBootSec=5min
+# Allow missed timers to run on next boot
+Persistent=true
+# Collect all missed runs and run them once (don't queue)
+AccurateSec=60s
+
+[Install]
+WantedBy=timers.target

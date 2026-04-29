@@ -1,0 +1,17 @@
+# CodexOS Desktop — Persistent Storage Mount Configuration
+# /persist is the encrypted overlay filesystem for user data, configs, and state.
+#
+# This is the default fstab for the live system. The actual encrypted persistence
+# is set up during live boot by casper or the first-boot script.
+
+# System mounts
+proc            /proc           proc    defaults          0 0
+sysfs           /sys            sysfs   defaults          0 0
+devpts          /dev/pts        devpts  defaults,gid=5,mode=620  0 0
+tmpfs           /tmp            tmpfs   defaults,nosuid,nodev  0 0
+
+# Persistence overlay (configured by first-boot or casper)
+# /dev/mapper/codex-persist  /persist  ext4  defaults,noatime  0 2
+
+# USB drives automount via udisks2/polkit (no fstab entries needed)
+# For manual mounts, use: codex-mount-ro /dev/sdX

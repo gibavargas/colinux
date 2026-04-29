@@ -1,0 +1,33 @@
+[Unit]
+Description=Codex Desktop Electron App Autostart Service
+Documentation=https://github.com/colinux/codexos
+After=graphical.target lightdm.service
+Wants=graphical.target
+ConditionPathExists=/opt/codex-desktop/codex-desktop
+ConditionPathIsReadWrite=/persist
+
+[Service]
+Type=simple
+ExecStart=/opt/codex-desktop/codex-desktop
+User=codex
+Group=codex
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/codex/.Xauthority
+Environment=ELECTRON_DISABLE_GPU_SANDBOX=1
+Environment=ELECTRON_OZONE_PLATFORM_HINT=auto
+Environment=CODEX_HOME=/home/codex
+Environment=CODEX_WORKSPACE=/workspace
+Environment=CODEX_PERSIST=/persist
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=codex-desktop
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+
+# Security: allow GPU and DRI access for Electron
+ProtectSystem=false
+ProtectHome=false
+
+[Install]
+WantedBy=graphical.target

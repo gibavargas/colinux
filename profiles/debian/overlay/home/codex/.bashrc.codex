@@ -1,0 +1,44 @@
+# CodexOS Desktop — Codex user home directory configuration
+
+# .profile additions (sourced by login shells)
+export PATH="$PATH:/usr/local/bin"
+export EDITOR="${EDITOR:-vim}"
+export VISUAL="${VISUAL:-vim}"
+
+# Codex Desktop paths
+export CODEX_HOME="/opt/codex-desktop"
+export CODEX_CONFIG_DIR="/persist/config/codex"
+export CODEX_LOG_DIR="/persist/logs"
+
+# XDG directories
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+
+# Shell prompt
+PS1='\[\033[01;32m\]codex\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+
+# Codex CLI shorthand
+codex() {
+    if [ -x /usr/local/bin/codex ]; then
+        /usr/local/bin/codex "$@"
+    elif [ -x /opt/codex-desktop/codex ]; then
+        /opt/codex-desktop/codex "$@"
+    else
+        echo "Codex not found. Run: codexctl setup" >&2
+        return 1
+    fi
+}
+
+# Aliases
+alias ll='ls -alF'
+alias la='ls -A'
+alias l='ls -CF'
+alias cls='clear'
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# CodexOS aliases
+alias disks='codexctl disks'
+alias status='codexctl status'
+alias update='codexctl update'

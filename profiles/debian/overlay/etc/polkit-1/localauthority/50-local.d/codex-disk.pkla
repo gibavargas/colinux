@@ -1,0 +1,46 @@
+# /etc/polkit-1/localauthority/50-local.d/codex-disk.pkla
+# CodexOS Desktop — Polkit rules for disk operations
+# Allows the 'codex' user to manage disks through udisks2 (GUI disk manager)
+# while maintaining the disk safety model through codex-* wrappers.
+
+[codex-disk-mount-readonly]
+Identity=unix-user:codex
+Action=org.freedesktop.udisks2.filesystem-mount-system;org.freedesktop.udisks2.filesystem-mount
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[codex-disk-unmount]
+Identity=unix-user:codex
+Action=org.freedesktop.udisks2.filesystem-unmount-others
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[codex-disk-eject]
+Identity=unix-user:codex
+Action=org.freedesktop.udisks2.eject-media;org.freedesktop.udisks2.power-off-drive
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[codex-smart-data]
+Identity=unix-user:codex
+Action=org.freedesktop.udisks2.ata-smart-update;org.freedesktop.udisks2.ata-smart-selftest
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[codex-network-manager]
+Identity=unix-user:codex
+Action=org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[codex-system-update]
+Identity=unix-user:codex
+Action=org.freedesktop.packagekit.system-update
+ResultAny=auth_admin
+ResultInactive=auth_admin
+ResultActive=auth_admin_keep

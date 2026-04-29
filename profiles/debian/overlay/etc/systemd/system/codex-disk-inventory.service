@@ -1,0 +1,18 @@
+[Unit]
+Description=CodexOS Desktop Disk Inventory Scanner
+Documentation=https://github.com/colinux/codexos
+After=local-fs.target
+Before=codex-update.service codex-firstboot.service
+ConditionPathExists=/usr/local/bin/codex-disk-inventory
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/codex-disk-inventory
+User=root
+Group=root
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=codex-disk-inventory
+
+[Install]
+WantedBy=multi-user.target

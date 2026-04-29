@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# =============================================================================
+# CodexOS Desktop — System Auto-Update Script
+# =============================================================================
+# Handles Debian package updates (security + optionally full) and coordinates
+# with the Codex Desktop updater.
+#
+# This is separate from codex-desktop-autoupdate which handles the Electron app.
+# This script handles the Debian system packages.
+#
+# Called by: systemd timer (codex-update.timer) via codex-update.service
+#
+# Usage:
+#   codex-system-autoupdate [--check] [--force] [--full]
+#   codex-system-autoupdate --security-only
+#
+# Configuration: /etc/codex-auto-update.conf
+# =============================================================================
+set -euo pipefail
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+CONFIG_FILE="${CODEX_CONFIG_DIR:-/etc}/codex-auto-update.conf"
+LOG_DIR="${CODEX_LOG_DIR:-/persist/logs}"
+LOG_FILE="$LOG_DIR/codex-system-autoupdate.log"
+LOCK_FILE="/run/lock/codex-system-update.lock"
+
+CHECK_ONLY=false
+FORCE=false
+FULL_UPDATE=false
+
+# ── Defaults ─────────────────────────────────────────────────────────────────
+ENABLED=true
+SYSTEM_UPDATES="security-only"
+LOG_ROTATE_DAYS=30
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+log() {
+    local level="$1"; shift
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S')"
+    local msg="[$ts] [$level] $*"
+    echo "$msg"
+    mkdir -p "$LOG_DIR"
+    echo "$msg" >> "$LOG_FILE"
+}
+
+log_info()  { log "INFO"  "$@"; }
+log_warn()  { log "WARN"  "$@"; }
+log_error() { log "ERROR" "$@"; }
+log_debug() { [ "${DEBUG:-0}" = "1" ] && log "DEBUG" "$@" || true; }
+
+# ── Desktop notification ─────────────────────────────────────────────────────
+notify_desktop() {
+    local title="$1"
+    local body="$2"
+    local urgency="${3:-normal}"
+
+    if command -v notify-send >/dev/null 2>&1; then
+        DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/1000/bus}" \
+        notify-send -u "$urgency" "$title" "$body" 2>/dev/null || true
+    fi
+}
+
+# ── Argument parsing ─────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --check)         CHECK_ONLY=true; shift ;;
+        --force)         FORCE=true; shift ;;
+        --full)          FULL_UPDATE=true; shift ;;
+        --security-only) FULL_UPDATE=false; shift ;;
+        --debug)         DEBUG=1; shift ;;
+        --help|-h)
+            echo "Usage: $0 [--check] [--force] [--full] [--security-only]"
+            exit 0
+            ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+# ── Load configuration ───────────────────────────────────────────────────────
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        while IFS='=' read -r key value; do
+            [[ "$key" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$key" ]] && continue
+            key="$(echo "$key" | xargs)"
+            value="$(echo "$value" | xargs)"
+            case "$key" in
+                enabled)        ENABLED="$value" ;;
+                system_updates) SYSTEM_UPDATES="$value" ;;
+            esac
+        done < "$CONFIG_FILE"
+    fi
+
+    if $FULL_UPDATE; then
+        SYSTEM_UPDATES="all"
+    fi
+}
+
+# ── Acquire lock ─────────────────────────────────────────────────────────────
+acquire_lock() {
+    mkdir -p "$(dirname "$LOCK_FILE")"
+    exec 200>"$LOCK_FILE"
+    if ! flock -w 60 200; then
+        log_warn "Could not acquire update lock (another update may be running)"
+        return 1
+    fi
+    return 0
+}
+
+# ── Update Debian packages ───────────────────────────────────────────────────
+update_debian_packages() {
+    log_info "Checking Debian packages (mode: $SYSTEM_UPDATES)..."
+
+    if $CHECK_ONLY; then
+        local updates
+        updates="$(apt list --upgradable 2>/dev/null | grep -c upgradable || echo 0)"
+        if [ "$updates" -gt 0 ]; then
+            log_info "$updates package(s) can be updated"
+            notify_desktop "System Updates Available" "$updates package(s) ready to install"
+        else
+            log_info "System packages are up to date"
+        fi
+        return 0
+    fi
+
+    # Configure unattended-upgrades for security updates
+    configure_unattended_upgrades
+
+    # Run apt update
+    log_info "Updating package lists..."
+    if ! apt-get update -qq 2>&1 | tee -a "$LOG_FILE"; then
+        log_error "apt update failed"
+        return 1
+    fi
+
+    # Check for updates
+    local upgradable
+    upgradable="$(apt list --upgradable 2>/dev/null | grep -c upgradable || echo 0)"
+    upgradable="$(echo "$upgradable" | tr -d ' ')"
+
+    if [ "$upgradable" = "0" ] && [ "$FORCE" != "true" ]; then
+        log_info "All packages up to date"
+        return 0
+    fi
+
+    log_info "$upgradable package(s) to update"
+    notify_desktop "Installing Updates" "Updating $upgradable package(s)..." "low"
+
+    # Install security updates (always)
+    log_info "Installing security updates..."
+    if unattended-upgrade -v 2>&1 | tee -a "$LOG_FILE"; then
+        log_info "Security updates installed"
+    else
+        log_warn "Some security updates failed"
+    fi
+
+    # Install full updates if configured
+    if [ "$SYSTEM_UPDATES" = "all" ]; then
+        log_info "Installing all available updates..."
+        DEBIAN_FRONTEND=noninteractive \
+            apt-get upgrade -y -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold" 2>&1 | tee -a "$LOG_FILE" || {
+            log_warn "Full upgrade had errors"
+        }
+
+        # Remove unused dependencies
+        DEBIAN_FRONTEND=noninteractive \
+            apt-get autoremove -y 2>/dev/null | tee -a "$LOG_FILE" || true
+    fi
+
+    notify_desktop "Updates Complete" "$upgradable package(s) updated" "normal"
+    log_info "System update complete"
+}
+
+# ── Configure unattended-upgrades ────────────────────────────────────────────
+configure_unattended_upgrades() {
+    local ua_dir="/etc/apt/apt.conf.d"
+    local ua_file="$ua_dir/50codexos-auto-upgrades"
+
+    cat > "$ua_file" <<'UACONF'
+// CodexOS Desktop — Unattended Upgrades Configuration
+// Automatically install security updates
+
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+};
+
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Skip-Updates-On-Metered-Connections "true";
+Unattended-Upgrade::Verbose "false";
+
+// Only install from security archive by default
+UACONF
+
+    log_debug "Unattended-upgrades configured"
+}
+
+# ── Clean up old kernels ─────────────────────────────────────────────────────
+cleanup_kernels() {
+    log_info "Checking for old kernels..."
+
+    # Keep only the 2 most recent kernels
+    local kernel_count
+    kernel_count="$(dpkg -l 'linux-image-*' 2>/dev/null | grep '^ii' | wc -l)"
+    if [ "$kernel_count" -gt 2 ]; then
+        log_info "Found $kernel_count kernels, cleaning up..."
+        DEBIAN_FRONTEND=noninteractive apt-get autoremove -y --purge \
+            -o Dpkg::Options::="--force-confdef" 2>/dev/null || true
+    fi
+}
+
+# ── Log rotation ─────────────────────────────────────────────────────────────
+rotate_logs() {
+    [ ! -f "$LOG_FILE" ] && return
+
+    # Rotate based on age
+    if command -v journalctl >/dev/null 2>&1; then
+        return  # systemd journal handles rotation
+    fi
+
+    local log_size
+    log_size="$(stat -c%s "$LOG_FILE" 2>/dev/null || echo 0)"
+    if [ "$log_size" -gt 10485760 ]; then
+        mv "$LOG_FILE" "${LOG_FILE}.1"
+        gzip "${LOG_FILE}.1" 2>/dev/null || true
+    fi
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+main() {
+    rotate_logs
+    log_info "=== CodexOS System Auto-Update ==="
+
+    load_config
+
+    if [ "$ENABLED" != "true" ]; then
+        log_info "System auto-update is disabled"
+        exit 0
+    fi
+
+    if ! acquire_lock; then
+        exit 0
+    fi
+
+    # Update Debian packages
+    update_debian_packages || log_warn "Debian update failed (non-fatal)"
+
+    # Clean up
+    cleanup_kernels
+
+    # Also trigger the Codex Desktop updater
+    if [ -x /usr/local/bin/codex-desktop-autoupdate ]; then
+        log_info "Triggering Codex Desktop update check..."
+        /usr/local/bin/codex-desktop-autoupdate 2>&1 || log_warn "Codex Desktop update check failed"
+    fi
+
+    log_info "=== System auto-update complete ==="
+}
+
+main "$@"

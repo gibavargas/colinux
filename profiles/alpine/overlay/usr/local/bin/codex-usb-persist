@@ -298,10 +298,10 @@ cmd_resize() {
         if [[ "$new_size" == "max" ]]; then
             # Delete and recreate partition to fill remaining space
             echo "Resizing to maximum..."
-            sgdisk -d "$part_num" "$device" 2>/dev/null
-            sgdisk -N "$part_num" "$device" 2>/dev/null
-            sgdisk -t "$part_num":8300 "$device" 2>/dev/null
-            sgdisk -c "$part_num":"CodexOS Persistence" "$device" 2>/dev/null
+            sgdisk -d "$part_num" "$disk" 2>/dev/null
+            sgdisk -N "$part_num" "$disk" 2>/dev/null
+            sgdisk -t "$part_num":8300 "$disk" 2>/dev/null
+            sgdisk -c "$part_num":"CodexOS Persistence" "$disk" 2>/dev/null
         else
             echo "Note: Precise partition resizing with sgdisk requires careful calculation."
             echo "Consider using 'max' for automatic resize, or use a partitioning tool."
@@ -328,7 +328,7 @@ cmd_resize() {
         log_action "resize_ok device=$device size=$new_size"
         echo "✓ Partition resized. Verify with: codex-usb-persist status $device"
     else
-        die "sgdisk required for partition resize. Install: apk add sgdisk"
+        die "sgdisk required for partition resize. Install: apk add gptfdisk"
     fi
 }
 

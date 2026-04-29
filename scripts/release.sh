@@ -56,7 +56,7 @@ if [ -z "$VERSION" ]; then
     local_iso="$(find "$OUTDIR" -maxdepth 1 -name 'codexos-lite-*.iso' 2>/dev/null | head -1)"
     if [ -n "$local_iso" ]; then
         # Extract version-like string from filename: codexos-lite-x86_64-3.21.0.iso
-        VERSION="$(basename "$local_iso" | grep -oP '[\d]+\.[\d]+(\.[\d]+)?' | head -1)"
+        VERSION="$(basename "$local_iso" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
     fi
 fi
 VERSION="${VERSION:-0.0.0}"

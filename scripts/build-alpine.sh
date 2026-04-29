@@ -17,6 +17,12 @@
 # =============================================================================
 set -euo pipefail
 
+# ── Cleanup ──────────────────────────────────────────────────────────────────
+_CLEANUP_DIRS=""
+_cleanup() {
+    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf $_CLEANUP_DIRS 2>/dev/null || true
+}
+
 # ── Defaults ─────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -102,7 +108,6 @@ install_build_deps() {
                 efibootmgr \
                 mtools \
                 dosfstools \
-                sfdisk \
                 util-linux \
                 bash \
                 curl \
@@ -172,7 +177,7 @@ install_profile() {
 
     # Copy overlay directory
     if [ -d "$PROFILE_DIR/overlay" ]; then
-        local overlay_dest="$APORTS_DIR/scripts/codexos-lite-overlay"
+        local overlay_dest="$APORTS_DIR/scripts/codexos-lite/overlay"
         rm -rf "$overlay_dest"
         cp -a "$PROFILE_DIR/overlay" "$overlay_dest"
     fi
@@ -190,8 +195,8 @@ run_mkimage() {
     if [ ! -f "$mkimage_script" ]; then
         log_error "mkimage.sh not found at $mkimage_script"
         exit 1
-    chmod +x "$mkimage_script"
     fi
+    chmod +x "$mkimage_script"
 
     # Build the ISO
     # --repository: Alpine package repos to use
@@ -244,7 +249,8 @@ inject_codex() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    trap "rm -rf '$tmpdir'" EXIT
+    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
+    trap _cleanup EXIT
 
     # Download
     curl -fsSL --retry 3 --retry-delay 5 -o "$tmpdir/$codex_filename" "$download_url" || {

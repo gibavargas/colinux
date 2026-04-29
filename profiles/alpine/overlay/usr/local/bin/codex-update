@@ -83,7 +83,7 @@ get_latest_codex_version() {
 
 get_current_codex_version() {
     if [[ -x "$CODEX_BIN" ]]; then
-        "$CODEX_BIN" --version 2>/dev/null | head -1 | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown"
+        "$CODEX_BIN" --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown"
     else
         echo "not-installed"
     fi

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# =============================================================================
+# CodexOS Desktop — Network Watchdog
+# =============================================================================
+# Monitors network connectivity and auto-reconnects Wi-Fi. Runs as a cron job
+# or can be triggered manually.
+#
+# Usage: codex-net-watchdog
+# =============================================================================
+set -euo pipefail
+
+LOG_FILE="/persist/logs/codex-net-watchdog.log"
+PING_HOST="8.8.8.8"
+PING_COUNT=3
+PING_TIMEOUT=5
+
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG_FILE"
+}
+
+# Check connectivity
+if ! ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$PING_HOST" >/dev/null 2>&1; then
+    log "Network connectivity lost"
+
+    # Try to reconnect
+    if command -v nmcli >/dev/null 2>&1; then
+        # Check if any connection is active
+        if ! nmcli -t con show --active 2>/dev/null | grep -q .; then
+            log "No active connections. Reconnecting..."
+            nmcli networking off 2>/dev/null
+            sleep 2
+            nmcli networking on 2>/dev/null
+            sleep 3
+
+            # Auto-connect to first available known connection
+            nmcli -t -f NAME con show 2>/dev/null | head -1 | while IFS=: read -r name; do
+                if [ -n "$name" ]; then
+                    nmcli con up "$name" 2>/dev/null && log "Reconnected to $name" && break
+                fi
+            done
+        else
+            log "Connection exists but ping failed — may be DNS or upstream issue"
+        fi
+    fi
+else
+    log "Network OK"
+fi

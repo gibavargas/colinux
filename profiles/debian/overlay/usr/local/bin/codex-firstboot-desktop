@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# =============================================================================
+# CodexOS Desktop — First Boot Initialization
+# =============================================================================
+# Runs once on first boot to set up the persistent environment for the desktop
+# edition. Sets up /persist, user environment, and triggers initial setup.
+#
+# Called by: systemd service (codex-firstboot.service)
+# Guarded by: /persist/.first-boot-done
+# =============================================================================
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+LOG_FILE="/persist/logs/first-boot.log"
+USER="codex"
+USER_HOME="/home/codex"
+
+log() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S')"
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$ts] $*" | tee -a "$LOG_FILE"
+}
+
+# ── Setup persistent directories ─────────────────────────────────────────────
+setup_persist() {
+    log "Setting up persistent storage..."
+
+    mkdir -p "$PERSIST_DIR"/{logs,data,backups,state,config,ssh,.gnupg}
+
+    # Persist Codex Desktop state
+    mkdir -p "$PERSIST_DIR"/state/codex-desktop
+    mkdir -p "$PERSIST_DIR"/state/system
+
+    # Persist user home directories
+    mkdir -p "$PERSIST_DIR"/home/codex
+
+    # Create symlinks from home to persistent storage
+    for d in Documents Downloads Pictures Music Desktop .config .local .codex; do
+        if [ ! -e "$USER_HOME/$d" ]; then
+            mkdir -p "$PERSIST_DIR/home/codex/$d"
+            ln -sf "$PERSIST_DIR/home/codex/$d" "$USER_HOME/$d"
+        fi
+    done
+
+    # Ensure correct ownership
+    chown -R "$USER:$USER" "$PERSIST_DIR"/{home,data,backups,state,config,ssh,.gnupg,logs}
+}
+
+# ── Setup user environment ──────────────────────────────────────────────────
+setup_user() {
+    log "Setting up user environment..."
+
+    # Ensure codex user exists
+    if ! id "$USER" &>/dev/null; then
+        useradd -m -s /bin/bash -G sudo,dip,plugdev,netdev,cdrom,floppy,audio,video,systemd-journal \
+            "$USER"
+    fi
+
+    # Set up bash profile additions
+    cat >> "$USER_HOME/.bashrc" <<'BASHEOF'
+
+# ── CodexOS Desktop additions ──
+export PATH="$PATH:/usr/local/bin"
+export EDITOR="${EDITOR:-vim}"
+export VISUAL="${VISUAL:-vim}"
+
+# Codex CLI helper
+codex() {
+    if [ -x /usr/local/bin/codex ]; then
+        /usr/local/bin/codex "$@"
+    elif [ -x /opt/codex-desktop/codex ]; then
+        /opt/codex-desktop/codex "$@"
+    else
+        echo "Codex not found. Run: codexctl setup" >&2
+        return 1
+    fi
+}
+
+# Disk safety aliases
+alias lsblk='lsblk -f'
+alias mount-ro='codex-mount-ro'
+BASHEOF
+
+    chown "$USER:$USER" "$USER_HOME/.bashrc"
+}
+
+# ── Setup Codex Desktop ─────────────────────────────────────────────────────
+setup_codex_desktop() {
+    log "Setting up Codex Desktop app..."
+
+    # Run the setup script if present
+    if [ -x /opt/codexos-setup/setup-codex-desktop.sh ]; then
+        log "Running Codex Desktop setup..."
+        /opt/codexos-setup/setup-codex-desktop.sh >> "$LOG_FILE" 2>&1 || {
+            log "WARN: Codex Desktop setup failed — will retry on next update cycle"
+        }
+    else
+        log "WARN: /opt/codexos-setup/setup-codex-desktop.sh not found"
+    fi
+}
+
+# ── Setup auto-update services ───────────────────────────────────────────────
+setup_updates() {
+    log "Enabling auto-update services..."
+
+    systemctl enable codex-update.timer 2>/dev/null || true
+    systemctl start codex-update.timer 2>/dev/null || true
+
+    log "Update timer enabled (4-hour interval)"
+}
+
+# ── Setup NetworkManager ────────────────────────────────────────────────────
+setup_network() {
+    log "Setting up NetworkManager..."
+
+    systemctl enable NetworkManager 2>/dev/null || true
+    systemctl start NetworkManager 2>/dev/null || true
+
+    # Enable Wi-Fi by default
+    nmcli radio wifi on 2>/dev/null || true
+}
+
+# ── Generate SSH keys ────────────────────────────────────────────────────────
+setup_ssh() {
+    if [ -f "$PERSIST_DIR/ssh/id_ed25519" ]; then
+        log "SSH keys already exist"
+        return
+    fi
+
+    log "Generating SSH keys..."
+    su - "$USER" -c "ssh-keygen -t ed25519 -f $PERSIST_DIR/ssh/id_ed25519 -N '' -C 'codexos-desktop'" \
+        2>/dev/null || true
+
+    # Fix permissions
+    chmod 700 "$PERSIST_DIR/ssh"
+    chmod 600 "$PERSIST_DIR/ssh"/id_* 2>/dev/null || true
+    chmod 644 "$PERSIST_DIR/ssh"/id_*.pub 2>/dev/null || true
+    chown -R "$USER:$USER" "$PERSIST_DIR/ssh"
+}
+
+# ── Finalize ─────────────────────────────────────────────────────────────────
+finalize() {
+    log "Creating first-boot marker..."
+    touch "$PERSIST_DIR/.first-boot-done"
+    chown "$USER:$USER" "$PERSIST_DIR/.first-boot-done"
+
+    log "=== CodexOS Desktop first boot complete ==="
+
+    # Show welcome notification
+    if command -v notify-send >/dev/null 2>&1; then
+        su - "$USER" -c "DISPLAY=:0 notify-send -u normal \
+            'Welcome to CodexOS Desktop' \
+            'System initialized. Codex Desktop will start shortly.'" 2>/dev/null || true
+    fi
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+main() {
+    # Guard against re-running
+    if [ -f "$PERSIST_DIR/.first-boot-done" ]; then
+        log "First boot already completed. Skipping."
+        exit 0
+    fi
+
+    log "=== CodexOS Desktop First Boot ==="
+    log "System: $(uname -a)"
+    log "Date: $(date)"
+
+    setup_persist
+    setup_user
+    setup_codex_desktop
+    setup_updates
+    setup_network
+    setup_ssh
+    finalize
+}
+
+main "$@"

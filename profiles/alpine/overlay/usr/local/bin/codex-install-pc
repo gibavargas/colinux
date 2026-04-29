@@ -144,7 +144,7 @@ fi
 # ── Check if currently booted from this device ────────────────────────────
 BOOT_DEV=""
 if [[ -f /proc/cmdline ]]; then
-    cmdline_root="$(grep -oP 'root=\K[^\s]+' /proc/cmdline 2>/dev/null || true)"
+    cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
     if [[ "$cmdline_root" == /dev/* ]]; then
         BOOT_DEV="${cmdline_root%%[0-9]*}"
         BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
@@ -232,7 +232,7 @@ log_action "START mode=$MODE device=$DEVICE serial=$SERIAL size=${SIZE_GB}GB ext
 # ── Check dependencies ────────────────────────────────────────────────────
 for cmd in sgdisk mkfs.vfat mkfs.ext4; do
     if ! command -v "$cmd" &>/dev/null; then
-        die "Required command not found: $cmd. Install with: apk add sgdisk dosfstools e2fsprogs"
+        die "Required command not found: $cmd. Install with: apk add gptfdisk dosfstools e2fsprogs"
     fi
 done
 

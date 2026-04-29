@@ -1,0 +1,10 @@
+# Codex Desktop — Electron App Configuration
+{
+    "app_name": "codex-desktop",
+    "version": "0.0.1",
+    "install_dir": "/opt/codex-desktop",
+    "electron_version": "latest",
+    "codex_binary": "/usr/local/bin/codex",
+    "auto_start": true,
+    "update_channel": "stable"
+}

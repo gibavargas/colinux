@@ -62,7 +62,7 @@ start() {
         case "${INTERVAL}" in
             1|2|3|4|6|8|12|24)
                 # Valid interval — update the crontab
-                sed -i "s|^\* /\* \* \* \*|* /${INTERVAL} * * *|" "${CRON_LINK}"
+                sed -i "s|^\* \*/[0-9]* \* \* \*|* */${INTERVAL} * * *|" "${CRON_LINK}"
                 ;;
             *)
                 ewarn "Invalid INTERVAL=${INTERVAL} in ${CONFIG_FILE}, using default (6)"

@@ -71,6 +71,13 @@ PERSIST_SIZE=0  # 0 = use remaining space
 VOLUME_LABEL="CODEXOS"
 NO_CONFIRM=false
 
+# ── Architecture detection ─────────────────────────────────────────────────
+case "$(uname -m)" in
+    x86_64) GRUB_TARGET="x86_64-efi"; EFI_BOOT="BOOTX64.EFI" ;;
+    aarch64) GRUB_TARGET="arm64-efi"; EFI_BOOT="BOOTAA64.EFI" ;;
+    *) die "Unsupported architecture: $(uname -m)" ;;
+esac
+
 # ── Parse arguments ───────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -204,7 +211,7 @@ log_action "START mode=$MODE device=$DEVICE serial=$SERIAL size=${SIZE_GB}GB"
 # ── Check dependencies ────────────────────────────────────────────────────
 for cmd in sgdisk mkfs.vfat mkfs.ext4; do
     if ! command -v "$cmd" &>/dev/null; then
-        die "Required command not found: $cmd. Install with: apk add sgdisk dosfstools e2fsprogs"
+        die "Required command not found: $cmd. Install with: apk add gptfdisk dosfstools e2fsprogs"
     fi
 done
 
@@ -367,10 +374,10 @@ if [[ -b "$PART1" ]]; then
     fi
 
     # Copy EFI stub or systemd-boot / GRUB
-    if [[ -f "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
+    if [[ -f "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/${EFI_BOOT}" ]]; then
         cp -a "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_EFI/EFI/BOOT/"
     elif command -v grub-install &>/dev/null; then
-        grub-install --target=x86_64-efi --efi-directory="$TEMP_EFI" \
+        grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_EFI" \
                      --boot-directory="$TEMP_EFI" --removable \
                      --recheck "$DEVICE" >/dev/null 2>&1 || true
     fi

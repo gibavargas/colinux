@@ -16,9 +16,9 @@ depend() {
     before net
 }
 
-INVENTORY_BIN="/usr/local/bin/disk-inventory"
-INVENTORY_DIR="/run/codexos"
-INVENTORY_FILE="${INVENTORY_DIR}/disk-inventory.json"
+INVENTORY_BIN="/usr/local/bin/codex-disk-inventory"
+INVENTORY_DIR="/run/codex"
+INVENTORY_FILE="${INVENTORY_DIR}/disks.json"
 INVENTORY_LOG="/persist/logs/disk-inventory.log"
 
 start() {
@@ -32,7 +32,7 @@ start() {
 
     # Run the inventory scanner
     if [ -x "${INVENTORY_BIN}" ]; then
-        "${INVENTORY_BIN}" --output "${INVENTORY_FILE}" >> "${INVENTORY_LOG}" 2>&1
+        "${INVENTORY_BIN}" >> "${INVENTORY_LOG}" 2>&1
         local rc=$?
 
         if [ $rc -eq 0 ]; then

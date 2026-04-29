@@ -1,0 +1,36 @@
+# CodexOS Lite — Docker Compose for development
+version: "3.8"
+
+services:
+  codexos-lite:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: codexos-lite
+    stdin_open: true
+    tty: true
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CODEX_VERSION=${CODEX_VERSION:-}
+      - CODEX_WORKSPACE=/workspace
+      - CODEX_PERSIST=/persist
+    volumes:
+      # Persist workspace and config across container restarts
+      - codexos-workspace:/workspace
+      - codexos-persist:/persist
+      # Mount host disks for testing (comment out if not needed)
+      # - /dev:/dev:ro
+      # - /mnt:/mnt/disks:ro
+    tmpfs:
+      - /run/codex:size=10m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_ADMIN  # Needed for mount operations in testing
+    restart: unless-stopped
+
+volumes:
+  codexos-workspace:
+  codexos-persist:

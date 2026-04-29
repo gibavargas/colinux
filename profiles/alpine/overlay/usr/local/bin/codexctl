@@ -29,7 +29,7 @@ PERSIST_DIR="/persist"
 LOG_DIR="${PERSIST_DIR}/logs"
 STATE_DIR="${PERSIST_DIR}/state"
 LOGFILE="${LOG_DIR}/codexctl.log"
-CODX_BIN="/usr/local/bin/codex"
+CODEX_BIN="/usr/local/bin/codex"
 CODEXOS_VERSION="${CODEXOS_VERSION:-0.1.0}"
 
 mkdir -p "$LOG_DIR" "$STATE_DIR"
@@ -69,7 +69,7 @@ cmd_version() {
     echo ""
 
     if cmd_exists codex; then
-        echo "Codex CLI:  $($CODX_BIN --version 2>/dev/null | head -1 || echo 'not found')"
+        echo "Codex CLI:  $($CODEX_BIN --version 2>/dev/null | head -1 || echo 'not found')"
     else
         echo "Codex CLI:  not installed"
     fi
@@ -89,7 +89,7 @@ cmd_status() {
         # JSON status output
         local codex_ver="null"
         if cmd_exists codex; then
-            codex_ver="\"$($CODX_BIN --version 2>/dev/null | head -1 || echo 'unknown')\""
+            codex_ver="\"$($CODEX_BIN --version 2>/dev/null | head -1 || echo 'unknown')\""
         fi
 
         jq -n \
@@ -118,7 +118,7 @@ cmd_status() {
     echo "║  CodexOS:  v${CODEXOS_VERSION}"
 
     if cmd_exists codex; then
-        echo "║  Codex:    $($CODX_BIN --version 2>/dev/null | head -1 | cut -c1-30 || echo 'unknown')"
+        echo "║  Codex:    $($CODEX_BIN --version 2>/dev/null | head -1 | cut -c1-30 || echo 'unknown')"
     else
         echo "║  Codex:    not installed"
     fi

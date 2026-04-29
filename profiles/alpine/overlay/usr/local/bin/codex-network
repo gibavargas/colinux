@@ -88,7 +88,7 @@ cmd_status() {
         fi
 
         local ip_addr
-        ip_addr="$(ip -4 addr show "$name" 2>/dev/null | grep -oP 'inet \K[0-9./]+' | head -1 || true)"
+        ip_addr="$(ip -4 addr show "$name" 2>/dev/null | grep -oE 'inet [0-9./]+' | sed 's/^inet //' | head -1 || true)"
         if [[ -n "$ip_addr" ]]; then
             echo "  IPv4:   $ip_addr"
         else
@@ -96,14 +96,14 @@ cmd_status() {
         fi
 
         local ip6_addr
-        ip6_addr="$(ip -6 addr show "$name" 2>/dev/null | grep -oP 'inet6 \K[0-9a-f:/]+' | head -1 || true)"
+        ip6_addr="$(ip -6 addr show "$name" 2>/dev/null | grep -oE 'inet6 [0-9a-f:/]+' | sed 's/^inet6 //' | head -1 || true)"
         if [[ -n "$ip6_addr" ]]; then
             echo "  IPv6:   $ip6_addr"
         fi
 
         if [[ -d "${iface}/wireless" ]]; then
             local ssid
-            ssid="$(iwconfig "$name" 2>/dev/null | grep -oP 'ESSID:"\K[^"]+' || true)"
+            ssid="$(iwconfig "$name" 2>/dev/null | grep -oE 'ESSID:"[^"]+"' | sed 's/^ESSID:"//;s/"$//' || true)"
             if [[ -n "$ssid" ]]; then
                 echo "  WiFi:   $ssid"
             fi
@@ -169,7 +169,7 @@ cmd_ethernet() {
     # Verify
     if iface_has_ip "$iface"; then
         local ip_addr
-        ip_addr="$(ip -4 addr show "$iface" 2>/dev/null | grep -oP 'inet \K[0-9./]+' | head -1)"
+        ip_addr="$(ip -4 addr show "$iface" 2>/dev/null | grep -oE 'inet [0-9./]+' | sed 's/^inet //' | head -1)"
         echo "✓ Connected: $iface — $ip_addr"
         log_action "OK ethernet iface=$iface ip=$ip_addr"
     else

@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# =============================================================================
+# CodexOS Desktop — Read-Only Mount Wrapper
+# =============================================================================
+# Safely mounts a block device read-only for inspection. Part of the disk-safety
+# model — all user-facing disk operations should go through this or codexctl.
+#
+# Usage: codex-mount-ro /dev/sdX [mount-point]
+# =============================================================================
+set -euo pipefail
+
+DEV="${1:-}"
+CUSTOM_MNT="${2:-}"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+err()  { echo -e "${RED}✗${NC} $*" >&2; exit 1; }
+ok()   { echo -e "${GREEN}✓${NC} $*"; }
+warn() { echo -e "${YELLOW}!${NC} $*"; }
+
+if [ -z "$DEV" ]; then
+    echo "Usage: codex-mount-ro /dev/sdX [mount-point]"
+    echo ""
+    echo "Available devices:"
+    lsblk -lnpo NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null
+    exit 1
+fi
+
+# Validate device
+if [ ! -b "$DEV" ]; then
+    err "Not a block device: $DEV"
+fi
+
+# Check if already mounted
+if findmnt -rn -o TARGET -S "$DEV" >/dev/null 2>&1; then
+    warn "$DEV is already mounted"
+    findmnt -rn -o TARGET,SOURCE,OPTIONS -S "$DEV" 2>/dev/null
+    exit 0
+fi
+
+# Determine mount options
+MNT_OPTS="ro,noexec,nodev,nosuid,utf8"
+
+# Detect filesystem for additional options
+FSTYPE="$(lsblk -dn -o FSTYPE "$DEV" 2>/dev/null | tr -d ' ')"
+case "$FSTYPE" in
+    ntfs)   MNT_OPTS="$MNT_OPTS,uid=1000,gid=1000" ;;
+    vfat)   MNT_OPTS="$MNT_OPTS,uid=1000,gid=1000,shortname=mixed" ;;
+    exfat)  MNT_OPTS="$MNT_OPTS,uid=1000,gid=1000" ;;
+esac
+
+# Determine mount point
+if [ -n "$CUSTOM_MNT" ]; then
+    MNT="$CUSTOM_MNT"
+else
+    MNT="/media/codex/$(basename "$DEV")"
+fi
+
+# Create mount point
+mkdir -p "$MNT"
+
+# Mount
+if mount -o "$MNT_OPTS" "$DEV" "$MNT" 2>/dev/null; then
+    ok "Mounted $DEV at $MNT (read-only)"
+    echo "  Filesystem: $FSTYPE"
+    echo "  Options:    $MNT_OPTS"
+    echo ""
+    echo "Contents:"
+    ls -la "$MNT" 2>/dev/null | head -20
+    echo ""
+    echo "To unmount: sudo umount $MNT"
+else
+    # Try with basic options
+    if mount -o ro "$DEV" "$MNT" 2>/dev/null; then
+        ok "Mounted $DEV at $MNT (read-only, basic options)"
+        echo "To unmount: sudo umount $MNT"
+    else
+        err "Failed to mount $DEV. Check filesystem or try: sudo mount -o ro $DEV $MNT"
+    fi
+fi

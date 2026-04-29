@@ -1,0 +1,28 @@
+# CodexOS Desktop — Shell profile for codex user
+# Installed to: /home/codex/.profile
+
+# CodexOS additions
+export PATH="$PATH:/usr/local/bin"
+export EDITOR="${EDITOR:-vim}"
+export VISUAL="${VISUAL:-vim}"
+
+# Codex Desktop
+export CODEX_HOME="/opt/codex-desktop"
+export CODEX_CONFIG_DIR="/persist/config/codex"
+export CODEX_LOG_DIR="/persist/logs"
+
+# XDG
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+
+# Source bashrc if running bash
+if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+fi
+
+# Start Codex Desktop in X sessions
+if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    # LightDM handles graphical login
+    true
+fi

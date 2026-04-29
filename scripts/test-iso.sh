@@ -223,6 +223,9 @@ run_tests_serial() {
     local serial_fifo
     serial_fifo="$(mktemp -u)"
 
+    mkfifo "$serial_fifo.in" 2>/dev/null || true
+    mkfifo "$serial_fifo.out" 2>/dev/null || true
+
     mkfifo "$serial_fifo" 2>/dev/null || {
         log_skip "Cannot create FIFO for serial capture"
         return 1
@@ -234,15 +237,30 @@ run_tests_serial() {
 
     # Launch QEMU
     log_info "Booting QEMU ($qemu_bin)..."
-    timeout "${TIMEOUT}" "$qemu_bin" \
-        ${ARCH:+-machine} ${ARCH/aarch64/virt} ${ARCH/x86_64/q35} \
-        -m "$MEMORY" \
-        -nographic \
-        -cdrom "$ISO_PATH" \
-        -serial "pipe:$serial_fifo" \
-        -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
-        -no-reboot \
-        &>/dev/null &
+    case "$ARCH" in
+        x86_64)
+            timeout "${TIMEOUT}" "$qemu_bin" \
+                -machine q35 \
+                -m "$MEMORY" \
+                -nographic \
+                -cdrom "$ISO_PATH" \
+                -serial "pipe:$serial_fifo" \
+                -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
+                -no-reboot \
+                &>/dev/null &
+            ;;
+        aarch64)
+            timeout "${TIMEOUT}" "$qemu_bin" \
+                -machine virt -cpu cortex-a57 \
+                -m "$MEMORY" \
+                -nographic \
+                -cdrom "$ISO_PATH" \
+                -serial "pipe:$serial_fifo" \
+                -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
+                -no-reboot \
+                &>/dev/null &
+            ;;
+    esac
     local qemu_pid=$!
 
     # Wait for boot

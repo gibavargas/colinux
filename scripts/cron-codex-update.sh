@@ -20,6 +20,12 @@
 # =============================================================================
 set -euo pipefail
 
+# ── Cleanup ──────────────────────────────────────────────────────────────────
+_CLEANUP_DIRS=""
+_cleanup() {
+    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf $_CLEANUP_DIRS 2>/dev/null || true
+}
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 CONFIG_FILE="${CODEX_CONFIG:-/persist/config}/auto-update.conf"
 LOG_DIR="${CODEX_LOGS:-/persist/logs}"
@@ -129,7 +135,7 @@ get_current_version() {
         return
     fi
 
-    "$CODEX_BIN" --version 2>/dev/null | head -1 | grep -oP 'v?[\d]+\.[\d]+\.[\d]+' | head -1 || echo ""
+    "$CODEX_BIN" --version 2>/dev/null | head -1 | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo ""
 }
 
 # ── Get latest available version from GitHub ─────────────────────────────────
@@ -150,7 +156,7 @@ get_latest_version() {
 
     local version
     version="$(curl -fsSL --connect-timeout 15 "$api_url" 2>/dev/null \
-        | grep -oP '"tag_name"\s*:\s*"\K[^"]+' | head -1)"
+        | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^ "]+"' | sed 's/.*"//;s/"$//' | head -1)"
 
     if [ -z "$version" ]; then
         log_error "Could not fetch latest version from GitHub"
@@ -212,7 +218,8 @@ do_update() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    trap "rm -rf '$tmpdir'" RETURN
+    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
+    trap _cleanup EXIT
 
     # Download
     if ! curl -fsSL --connect-timeout 30 -o "$tmpdir/$filename" "$url"; then

@@ -26,7 +26,7 @@ find_boot_device() {
     # Method 1: parse /proc/cmdline for root= parameter
     if [[ -f /proc/cmdline ]]; then
         local cmdline_root
-        cmdline_root="$(grep -oP 'root=\K[^\s]+' /proc/cmdline 2>/dev/null || true)"
+        cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
         if [[ -n "$cmdline_root" ]]; then
             # Resolve PARTUUID=, UUID=, /dev/... to a base block device
             if [[ "$cmdline_root" == PARTUUID=* ]]; then

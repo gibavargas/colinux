@@ -1,0 +1,20 @@
+# CodexOS Desktop — MOTD (Message of the Day)
+# Displayed on login terminal
+
+cat <<'MOTD'
+ _             _         _               _
+| | ___   __ _(_) __ _  | | __ _ _ __ __| |___
+| |/ _ \ / _` | |/ _` | | |/ _` | '__/ _` / __|
+| | (_) | (_| | | (_| | | | (_| | | | (_| \__ \
+|_|\___/ \__, |_|\__,_| |_|\__,_|_|  \__,_|___/
+         |___/
+  CodexOS Desktop Edition v1.0
+  ─────────────────────────────────────
+
+  Desktop:  XFCE4 with Codex Desktop (Electron)
+  Disk:     Read-only by default (codex-mount-ro)
+  Updates:  Auto (4h) — codexctl update --force
+  Help:     codexctl help
+
+  ⚡ OpenAI Codex is ready. Type 'codex' to start.
+MOTD

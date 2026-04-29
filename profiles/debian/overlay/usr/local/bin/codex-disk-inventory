@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# =============================================================================
+# CodexOS Desktop — Disk Inventory Scanner
+# =============================================================================
+# Scans all block devices and creates an inventory. Used for disk-safety model
+# and GUI display of available disks.
+#
+# Called by: systemd service (codex-disk-inventory.service) on boot
+# Also callable: codex-disk-inventory [--refresh] [--json]
+# =============================================================================
+set -euo pipefail
+
+STATE_DIR="/persist/state/disk"
+INVENTORY_FILE="$STATE_DIR/inventory.json"
+INVENTORY_TXT="$STATE_DIR/inventory.txt"
+LOG_DIR="/persist/logs"
+LOG_FILE="$LOG_DIR/codex-disk-inventory.log"
+
+REFRESH=false
+OUTPUT_JSON=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --refresh) REFRESH=true; shift ;;
+        --json)    OUTPUT_JSON=true; shift ;;
+        --help|-h)
+            echo "Usage: $0 [--refresh] [--json]"
+            exit 0
+            ;;
+        *) shift ;;
+    esac
+done
+
+log() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S')"
+    mkdir -p "$LOG_DIR"
+    echo "[$ts] $*" >> "$LOG_FILE"
+}
+
+# ── Scan block devices ──────────────────────────────────────────────────────
+scan_disks() {
+    log "Scanning block devices..."
+    mkdir -p "$STATE_DIR"
+
+    local ts
+    ts="$(date -Iseconds)"
+
+    # Build JSON inventory using lsblk + blkid
+    {
+        echo "{"
+        echo "  \"timestamp\": \"$ts\","
+        echo "  \"devices\": ["
+
+        local first=true
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+
+            local name size type model serial mountpoint
+            name="$(echo "$line" | awk '{print $1}')"
+            size="$(echo "$line" | awk '{print $4}')"
+            type="$(echo "$line" | awk '{print $6}')"
+            model="$(lsblk -dn -o MODEL "$name" 2>/dev/null | xargs || echo "Unknown")"
+            mountpoint="$(lsblk -dn -o MOUNTPOINT "$name" 2>/dev/null || echo "")"
+            serial="$(lsblk -dn -o SERIAL "$name" 2>/dev/null | xargs || echo "Unknown")"
+
+            # Skip empty lines
+            [ -z "$name" ] && continue
+
+            $first && first=false || echo ","
+
+            cat <<DEV
+    {
+      "name": "$name",
+      "size": "$size",
+      "type": "$type",
+      "model": "$model",
+      "serial": "$serial",
+      "mountpoint": "$mountpoint",
+      "readonly": $(if [ "$mountpoint" != "" ]; then mountpoint -q "$mountpoint" 2>/dev/null && echo "false" || echo "true"; else echo "false"; fi)
+    }
+DEV
+        done < <(lsblk -l -n -p 2>/dev/null | grep -E '^/dev/')
+
+        echo ""
+        echo "  ]"
+        echo "}"
+    } > "$INVENTORY_FILE"
+
+    # Build human-readable inventory
+    {
+        echo "=== CodexOS Disk Inventory — $ts ==="
+        echo ""
+        lsblk -f -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,SERIAL 2>/dev/null || \
+            lsblk -f 2>/dev/null
+        echo ""
+        echo "Disk safety: all disks mounted read-only by default"
+        echo "Use codex-mount-ro to safely mount for reading"
+        echo "Use codex-backup to create backups before any writes"
+    } > "$INVENTORY_TXT"
+
+    log "Inventory written: $INVENTORY_FILE"
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+main() {
+    # Check cache age (default: 1 hour)
+    if [ -f "$INVENTORY_FILE" ] && [ "$REFRESH" != "true" ]; then
+        local age
+        age=$(( $(date +%s) - $(stat -c%Y "$INVENTORY_FILE" 2>/dev/null || echo 0) ))
+        if [ "$age" -lt 3600 ]; then
+            if $OUTPUT_JSON; then
+                cat "$INVENTORY_FILE"
+            fi
+            exit 0
+        fi
+    fi
+
+    scan_disks
+
+    if $OUTPUT_JSON; then
+        cat "$INVENTORY_FILE"
+    fi
+}
+
+main "$@"

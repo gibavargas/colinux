@@ -1,0 +1,221 @@
+# =============================================================================
+# CodexOS Desktop — Debian Package List
+# =============================================================================
+# Packages for the codexos-desktop edition.
+# Based on Debian 12 (bookworm) with XFCE4 desktop and Electron Codex app.
+#
+# Organized by category. Comments explain why each package is included.
+# =============================================================================
+
+# --- Base System ---
+debian-standard
+initramfs-tools
+systemd
+systemd-sysv
+dbus
+locales
+keyboard-configuration
+console-setup
+
+# --- Boot & Firmware ---
+linux-image-amd64
+linux-headers-amd64
+grub-efi-amd64
+grub-pc-bin
+efibootmgr
+shim-signed
+linux-firmware
+firmware-linux-nonfree
+firmware-linux-free
+
+# --- XFCE4 Desktop Environment ---
+xfce4
+xfce4-goodies
+xfce4-terminal
+xfce4-whiskermenu-plugin
+xfce4-notifyd
+xfce4-taskmanager
+thunar-archive-plugin
+thunar-media-tags-plugin
+ristretto                     # Image viewer
+mousepad                      # Text editor
+
+# --- Display Manager (autologin) ---
+lightdm
+lightdm-gtk-greeter
+
+# --- Networking ---
+network-manager
+network-manager-gnome
+network-manager-openvpn
+network-manager-vpnc
+modemmanager
+mobile-broadband-provider-info
+wpasupplicant
+wireless-tools
+iw
+openssh-client
+openssh-server
+curl
+wget
+ca-certificates
+gnutls-bin
+rsync
+
+# --- Web Browser (for Codex auth + general use) ---
+firefox-esr
+
+# --- Node.js & Electron Runtime ---
+# Node.js from NodeSource (setup in build script)
+# npm is bundled with Node.js
+# Electron dependencies (prevents "lib not found" errors):
+libgbm1
+libnss3
+libatk1.0-0
+libatk-bridge2.0-0
+libcups2
+libdrm2
+libxkbcommon0
+libxcomposite1
+libxdamage1
+libxrandr2
+libgbm-dev
+libpango-1.0-0
+libcairo2
+libasound2
+libxshmfence1
+libatspi2.0-0
+
+# --- Build Tools (for Electron Codex wrapper) ---
+git
+build-essential
+dpkg-dev
+p7zip-full
+7z
+
+# --- Python ---
+python3
+python3-pip
+python3-venv
+
+# --- Disk & Filesystem Tools ---
+gparted
+ntfs-3g
+exfat-fuse
+exfatprogs
+dosfstools
+e2fsprogs
+btrfs-progs
+xfsprogs
+lvm2
+cryptsetup
+mdadm
+parted
+gptfdisk
+fdisk
+testdisk
+udisks2
+udisks2-btrfs
+gvfs-backends                # Thunar auto-mount support
+gvfs-fuse
+fuse3
+
+# --- SMART & Hardware Tools ---
+smartmontools
+nvme-cli
+hdparm
+pciutils
+usbutils
+lm-sensors
+hddtemp
+acpi
+acpid
+
+# --- Wi-Fi Firmware ---
+firmware-iwlwifi
+firmware-atheros
+firmware-b43-installer
+firmware-brcm80211
+firmware-realtek
+firmware-zd1211
+broadcom-sta-dkms
+
+# --- GPU Drivers ---
+mesa-utils
+mesa-vulkan-drivers
+xserver-xorg-video-intel
+xserver-xorg-video-amdgpu
+xserver-xorg-video-ati
+xserver-xorg-video-nouveau
+xserver-xorg-video-vesa
+xserver-xorg-input-libinput
+vulkan-tools
+
+# NVIDIA (optional — large, pull in via --extra-packages if needed)
+# nvidia-driver
+# nvidia-xconfig
+
+# --- Fonts ---
+fonts-dejavu-core
+fonts-dejavu-extra
+fonts-liberation
+fonts-noto-color-emoji
+
+# --- Utilities ---
+htop
+tmux
+vim
+nano
+jq
+less
+file
+tree
+htop
+ncdu
+strace
+lsof
+socat
+screen
+
+# --- Security ---
+apparmor
+apparmor-profiles
+apparmor-utils
+ufw
+polkitd
+polkit-1-pkexec
+sudo
+
+# --- Auto-Update ---
+unattended-upgrades
+apt-listchanges
+debian-archive-keyring
+
+# --- Archive & Compression ---
+p7zip-full
+unzip
+tar
+gzip
+xz-utils
+zstd
+
+# --- Miscellaneous ---
+xdg-utils
+xdg-user-dirs
+shared-mime-info
+mime-support
+desktop-file-utils
+hicolor-icon-theme
+adwaita-icon-theme-full
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-libav
+pulseaudio
+pulseaudio-utils
+alsa-utils
+blueman                       # Bluetooth manager
+power-management-icons
+xfce4-power-manager
+xfce4-battery-plugin
+tumbler                       # Thumbnail generation for Thunar
+poppler-utils                 # PDF preview

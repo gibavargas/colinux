@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# =============================================================================
+# CodexOS Desktop — Update Wrapper
+# =============================================================================
+# Simplified update entry point. Calls both system and desktop updaters.
+#
+# Usage:
+#   codex-update          # Check and install updates
+#   codex-update --check  # Check only, don't install
+#   codex-update --force  # Force update even if current
+# =============================================================================
+set -euo pipefail
+
+CMD="${1:-}"
+
+case "$CMD" in
+    --check|-c)
+        /usr/local/bin/codex-system-autoupdate --check 2>&1
+        /usr/local/bin/codex-desktop-autoupdate --check 2>&1
+        ;;
+    --force|-f)
+        /usr/local/bin/codex-system-autoupdate --force 2>&1
+        /usr/local/bin/codex-desktop-autoupdate --force 2>&1
+        ;;
+    --help|-h|"")
+        echo "Usage: codex-update [--check] [--force]"
+        ;;
+    *)
+        /usr/local/bin/codex-system-autoupdate 2>&1
+        /usr/local/bin/codex-desktop-autoupdate 2>&1
+        ;;
+esac

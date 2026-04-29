@@ -80,7 +80,7 @@ profile_codexos_lite() {
 # Phase: create_image()
 #   Sets up the disk image with partition table.
 profile_codexos_lite_create_image() {
-    local img_size_mb="${CODExOS_IMG_SIZE:-800}"
+    local img_size_mb="${CODEXOS_IMG_SIZE:-800}"
     local img_size_sectors=$((img_size_mb * 2048))
 
     # Create blank image
@@ -127,7 +127,7 @@ profile_codexos_lite_install_bootloader() {
 
     case "$ARCH" in
         x86_64)
-            cp "$ROOTDIR/usr/lib/grub/i386-efi/grub.efi" "$mnt/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true
+            cp "$ROOTDIR/usr/lib/grub/i386-efi/grubx64.efi" "$mnt/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true
             ;;
         aarch64)
             cp "$ROOTDIR/usr/lib/grub/arm64-efi/grub.efi" "$mnt/EFI/BOOT/BOOTAA64.EFI" 2>/dev/null || true
@@ -139,7 +139,7 @@ profile_codexos_lite_install_bootloader() {
 }
 
 # Phase: install_extlinux()  (fallback for BIOS boot on x86_64)
-profile_codexos_lite_install_syslinux() {
+profile_codexos_lite_install_extlinux() {
     # Only needed for legacy BIOS; EFI is primary
     return 0
 }

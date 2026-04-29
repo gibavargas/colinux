@@ -17,7 +17,7 @@ depend() {
 }
 
 FIRSTBOOT_DONE="/persist/.first-boot-done"
-FIRSTBOOT_SCRIPT="/usr/local/bin/first-boot.sh"
+FIRSTBOOT_SCRIPT="/usr/local/bin/first-boot"
 FIRSTBOOT_LOG="/persist/logs/first-boot.log"
 
 start() {

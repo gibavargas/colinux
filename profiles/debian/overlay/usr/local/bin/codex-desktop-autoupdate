@@ -1,0 +1,427 @@
+#!/usr/bin/env bash
+# =============================================================================
+# CodexOS Desktop — Codex Desktop Auto-Update Script
+# =============================================================================
+# Checks for updates to the codex-desktop-linux Electron wrapper and the
+# underlying Codex binary. Supports rollback, notifications, and channel control.
+#
+# This is the desktop-specific updater. For system/Debian package updates,
+# see codex-system-autoupdate.
+#
+# Called by: systemd timer (codex-update.timer) or manually
+#
+# Usage:
+#   codex-desktop-autoupdate [--check] [--force] [--channel stable|preview]
+#   codex-desktop-autoupdate --rollback        # Roll back to previous version
+#
+# Configuration: /etc/codex-auto-update.conf
+# =============================================================================
+set -euo pipefail
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+CONFIG_FILE="${CODEX_CONFIG_DIR:-/etc}/codex-auto-update.conf"
+LOG_DIR="${CODEX_LOG_DIR:-/persist/logs}"
+LOG_FILE="$LOG_DIR/codex-desktop-autoupdate.log"
+STATE_DIR="/var/lib/codex-desktop"
+INSTALL_DIR="/opt/codex-desktop"
+CODEX_BIN="/usr/local/bin/codex"
+GITHUB_API="https://api.github.com/repos"
+WRAPPER_REPO="ilysenko/codex-desktop-linux"
+CODEX_REPO="openai/codex"
+
+CHECK_ONLY=false
+FORCE=false
+DO_ROLLBACK=false
+CHANNEL=""
+
+# ── Defaults ─────────────────────────────────────────────────────────────────
+ENABLED=true
+INTERVAL=4
+CODEX_DESKTOP_CHANNEL="stable"
+CODEX_CLI_CHANNEL="stable"
+WRAPPER_BRANCH="main"
+AUTO_INSTALL=true
+NOTIFY=true
+ROLLBACK_COUNT=3
+API_DELAY=2
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+log() {
+    local level="$1"; shift
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S')"
+    local msg="[$ts] [$level] $*"
+    echo "$msg"
+    mkdir -p "$LOG_DIR"
+    echo "$msg" >> "$LOG_FILE"
+}
+
+log_info()  { log "INFO"  "$@"; }
+log_warn()  { log "WARN"  "$@"; }
+log_error() { log "ERROR" "$@"; }
+log_debug() { [ "${DEBUG:-0}" = "1" ] && log "DEBUG" "$@" || true; }
+
+# ── Desktop notification ─────────────────────────────────────────────────────
+notify_desktop() {
+    local title="$1"
+    local body="$2"
+    local urgency="${3:-normal}"
+    local icon="${4:-codex-desktop}"
+
+    if [ "$NOTIFY" != "true" ]; then
+        return 0
+    fi
+
+    # Try notify-send (XFCE4)
+    if command -v notify-send >/dev/null 2>&1; then
+        DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u codex 2>/dev/null || echo 1000)/bus}" \
+        notify-send -u "$urgency" -i "$icon" "$title" "$body" 2>/dev/null || true
+    fi
+
+    # Also log it
+    log_info "NOTIFY: $title — $body"
+}
+
+# ── Argument parsing ─────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --check)       CHECK_ONLY=true; shift ;;
+        --force)       FORCE=true; shift ;;
+        --rollback)    DO_ROLLBACK=true; shift ;;
+        --channel)     CHANNEL="$2"; shift 2 ;;
+        --debug)       DEBUG=1; shift ;;
+        --help|-h)
+            echo "Usage: $0 [--check] [--force] [--rollback] [--channel CH]"
+            echo "  --check    Check for updates without installing"
+            echo "  --force    Force update even if current"
+            echo "  --rollback Roll back to previous version"
+            exit 0
+            ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+# ── Load configuration ───────────────────────────────────────────────────────
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        while IFS='=' read -r key value; do
+            [[ "$key" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$key" ]] && continue
+            key="$(echo "$key" | xargs)"
+            value="$(echo "$value" | xargs)"
+            case "$key" in
+                enabled)                ENABLED="$value" ;;
+                interval)               INTERVAL="$value" ;;
+                codex_desktop_channel)  CODEX_DESKTOP_CHANNEL="$value" ;;
+                codex_cli_channel)      CODEX_CLI_CHANNEL="$value" ;;
+                wrapper_branch)         WRAPPER_BRANCH="$value" ;;
+                auto_install)           AUTO_INSTALL="$value" ;;
+                notify)                 NOTIFY="$value" ;;
+                rollback_count)         ROLLBACK_COUNT="$value" ;;
+                api_delay)              API_DELAY="$value" ;;
+            esac
+        done < "$CONFIG_FILE"
+        log_debug "Config loaded: enabled=$ENABLED interval=${INTERVAL}h"
+    fi
+
+    # Override channel from command line
+    if [ -n "$CHANNEL" ]; then
+        CODEX_DESKTOP_CHANNEL="$CHANNEL"
+        CODEX_CLI_CHANNEL="$CHANNEL"
+    fi
+}
+
+# ── GitHub API helper (with rate-limit handling) ─────────────────────────────
+github_api() {
+    local url="$1"
+    local response
+    response="$(curl -fsSL --connect-timeout 15 -H "Accept: application/vnd.github+json" \
+        "$url" 2>/dev/null)" || return 1
+
+    # Rate-limit check
+    local remaining
+    remaining="$(echo "$response" | jq -r '.rate_limit.remaining // "999"' 2>/dev/null)"
+    if [ "$remaining" = "0" ]; then
+        log_warn "GitHub API rate limit reached. Skipping update check."
+        return 1
+    fi
+
+    echo "$response"
+    sleep "$API_DELAY"
+}
+
+# ── Get versions ─────────────────────────────────────────────────────────────
+get_current_codex_version() {
+    if [ -f "$STATE_DIR/current-version" ]; then
+        cat "$STATE_DIR/current-version"
+    elif [ -x "$CODEX_BIN" ]; then
+        "$CODEX_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+    else
+        echo ""
+    fi
+}
+
+get_current_wrapper_version() {
+    if [ -f "$STATE_DIR/wrapper-version" ]; then
+        cat "$STATE_DIR/wrapper-version"
+    else
+        echo ""
+    fi
+}
+
+get_latest_codex_release() {
+    local api_url="$GITHUB_API/$CODEX_REPO/releases/latest"
+    github_api "$api_url" | jq -r '.tag_name // empty' 2>/dev/null
+}
+
+get_latest_wrapper_commit() {
+    github_api "$GITHUB_API/$WRAPPER_REPO/commits/$WRAPPER_BRANCH" \
+        | jq -r '.sha // empty' 2>/dev/null | head -c 12
+}
+
+# ── Update Codex CLI binary ──────────────────────────────────────────────────
+update_codex_cli() {
+    log_info "Checking Codex CLI binary..."
+
+    local current latest
+    current="$(get_current_codex_version)"
+    latest="$(get_latest_codex_release)" || {
+        log_warn "Could not check latest Codex CLI version"
+        return 1
+    }
+
+    log_info "Codex CLI: current=${current:-none} latest=$latest"
+
+    if [ "$current" = "$latest" ] && [ "$FORCE" != "true" ]; then
+        log_info "Codex CLI binary is up to date"
+        return 0
+    fi
+
+    if $CHECK_ONLY; then
+        notify_desktop "Codex CLI Update Available" "v${current:-none} → v${latest}" "normal"
+        return 0
+    fi
+
+    if [ "$AUTO_INSTALL" != "true" ]; then
+        notify_desktop "Codex CLI Update Available" \
+            "v${current:-none} → v${latest}\nClick to update" "normal"
+        log_info "Auto-install disabled. User notified."
+        return 0
+    fi
+
+    log_info "Updating Codex CLI to v$latest..."
+    notify_desktop "Updating Codex CLI" "Downloading v$latest..." "low"
+
+    # Download latest Codex CLI
+    local arch
+    case "$(uname -m)" in
+        x86_64) arch="x86_64-unknown-linux-gnu" ;;
+        *)      arch="x86_64-unknown-linux-gnu" ;;
+    esac
+
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap "rm -rf $tmpdir" RETURN
+
+    # Try various download patterns for the Codex CLI binary
+    local downloaded=false
+    for url_pattern in \
+        "https://github.com/$CODEX_REPO/releases/download/$latest/codex-linux-x86_64.tar.gz" \
+        "https://github.com/$CODEX_REPO/releases/download/$latest/codex-${arch}.tar.gz" \
+        "https://github.com/$CODEX_REPO/releases/latest/download/codex-linux-x86_64.tar.gz"; do
+
+        if curl -fsSL --connect-timeout 30 -o "$tmpdir/codex.tar.gz" "$url_pattern" 2>/dev/null; then
+            local dl_size
+            dl_size="$(stat -c%s "$tmpdir/codex.tar.gz" 2>/dev/null || echo 0)"
+            if [ "$dl_size" -gt 1048576 ]; then
+                downloaded=true
+                break
+            fi
+        fi
+        rm -f "$tmpdir/codex.tar.gz"
+    done
+
+    if ! $downloaded; then
+        # Try npm install as fallback
+        log_warn "Binary download failed, trying npm..."
+        if command -v npm >/dev/null 2>&1; then
+            npm install -g @openai/codex 2>/dev/null || npm install -g codex 2>/dev/null || {
+                log_error "npm install also failed"
+                return 1
+            }
+        else
+            log_error "All download methods failed"
+            return 1
+        fi
+    else
+        # Extract and install binary
+        tar xzf "$tmpdir/codex.tar.gz" -C "$tmpdir" 2>/dev/null || {
+            log_error "Failed to extract Codex CLI archive"
+            return 1
+        }
+
+        local binary
+        binary="$(find "$tmpdir" -name 'codex' -type f ! -name '*.tar.gz' | head -1)"
+        if [ -z "$binary" ]; then
+            log_error "Could not find codex binary in archive"
+            return 1
+        fi
+
+        # Backup current
+        if [ -x "$CODEX_BIN" ]; then
+            cp "$CODEX_BIN" "${CODEX_BIN}.bak.$(date +%s)"
+        fi
+
+        mkdir -p "$(dirname "$CODEX_BIN")"
+        cp "$binary" "$CODEX_BIN"
+        chmod 755 "$CODEX_BIN"
+    fi
+
+    # Record version
+    mkdir -p "$STATE_DIR"
+    echo "$latest" > "$STATE_DIR/current-version"
+
+    log_info "Codex CLI updated to v$latest"
+    notify_desktop "Codex CLI Updated" "Successfully updated to v$latest" "normal"
+}
+
+# ── Update Electron wrapper ──────────────────────────────────────────────────
+update_electron_wrapper() {
+    log_info "Checking codex-desktop-linux wrapper..."
+
+    local current_commit latest_commit
+    current_commit="$(get_current_wrapper_version)"
+    latest_commit="$(get_latest_wrapper_commit)" || {
+        log_warn "Could not check latest wrapper commit"
+        return 1
+    }
+
+    log_info "Wrapper: current=${current_commit:-none} latest=${latest_commit:-none}"
+
+    if [ "$current_commit" = "$latest_commit" ] && [ "$FORCE" != "true" ]; then
+        log_info "Electron wrapper is up to date"
+        return 0
+    fi
+
+    if $CHECK_ONLY; then
+        notify_desktop "Codex Desktop Update Available" \
+            "New wrapper version available" "normal"
+        return 0
+    fi
+
+    if [ "$AUTO_INSTALL" != "true" ]; then
+        notify_desktop "Codex Desktop Update Available" \
+            "New wrapper version available\nClick to update" "normal"
+        return 0
+    fi
+
+    log_info "Updating Electron wrapper..."
+    notify_desktop "Updating Codex Desktop" "Rebuilding Electron wrapper..." "low"
+
+    # Create rollback point
+    local rb_dir="$STATE_DIR/rollback/$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$rb_dir"
+    if [ -d "$INSTALL_DIR" ] && [ "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
+        cp -a "$INSTALL_DIR" "$rb_dir/app" 2>/dev/null || true
+    fi
+
+    # Clean up old rollback points
+    ls -td "$STATE_DIR/rollback"/*/ 2>/dev/null | tail -n +$((ROLLBACK_COUNT + 1)) \
+        | xargs rm -rf 2>/dev/null || true
+
+    # Run the setup script
+    if [ -x "/opt/codexos-setup/setup-codex-desktop.sh" ]; then
+        FORCE=true CODEX_DESKTOP_FORCE=true \
+            /opt/codexos-setup/setup-codex-desktop.sh || {
+            log_error "Electron wrapper update failed"
+            notify_desktop "Update Failed" "Codex Desktop wrapper update failed" "critical"
+            return 1
+        }
+    else
+        log_warn "Setup script not found. Wrapper update deferred."
+        return 1
+    fi
+
+    # Record new version
+    echo "$latest_commit" > "$STATE_DIR/wrapper-version"
+
+    log_info "Electron wrapper updated to commit $latest_commit"
+    notify_desktop "Codex Desktop Updated" "Wrapper updated successfully" "normal"
+}
+
+# ── Rollback ─────────────────────────────────────────────────────────────────
+do_rollback() {
+    log_info "Performing rollback..."
+
+    local rb_dir
+    rb_dir="$(ls -td "$STATE_DIR/rollback"/*/ 2>/dev/null | head -1)"
+    if [ -z "$rb_dir" ] || [ ! -d "$rb_dir/app" ]; then
+        log_error "No rollback points available"
+        notify_desktop "Rollback Failed" "No rollback points available" "critical"
+        return 1
+    fi
+
+    # Create pre-rollback point
+    local pre_rb="$STATE_DIR/rollback/$(date +%Y%m%d-%H%M%S)-pre-rollback"
+    mkdir -p "$pre_rb"
+    cp -a "$INSTALL_DIR" "$pre_rb/app" 2>/dev/null || true
+
+    # Restore
+    rm -rf "${INSTALL_DIR:?}"/*
+    cp -a "$rb_dir/app"/* "$INSTALL_DIR"/ 2>/dev/null || true
+
+    # Restore version info
+    if [ -f "$rb_dir/version-info" ]; then
+        source "$rb_dir/version-info"
+        echo "${CODEX_VERSION:-unknown}" > "$STATE_DIR/current-version"
+        echo "${WRAPPER_VERSION:-unknown}" > "$STATE_DIR/wrapper-version"
+    fi
+
+    log_info "Rollback complete from $rb_dir"
+    notify_desktop "Rollback Complete" "Codex Desktop has been rolled back" "normal"
+}
+
+# ── Log rotation ─────────────────────────────────────────────────────────────
+rotate_logs() {
+    [ ! -f "$LOG_FILE" ] && return
+
+    local log_size
+    log_size="$(stat -c%s "$LOG_FILE" 2>/dev/null || echo 0)"
+    local max_size="${LOG_MAX_SIZE:-10485760}"
+
+    if [ "$log_size" -gt "$max_size" ]; then
+        mv "$LOG_FILE" "${LOG_FILE}.1"
+        gzip "${LOG_FILE}.1" 2>/dev/null || true
+        log_info "Log rotated"
+    fi
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+main() {
+    rotate_logs
+    log_info "=== CodexOS Desktop Auto-Update ==="
+
+    load_config
+
+    if [ "$ENABLED" != "true" ]; then
+        log_info "Auto-update is disabled"
+        exit 0
+    fi
+
+    mkdir -p "$STATE_DIR" "$LOG_DIR"
+
+    if $DO_ROLLBACK; then
+        do_rollback
+        exit $?
+    fi
+
+    # Update Codex CLI binary
+    update_codex_cli || log_warn "Codex CLI update failed (non-fatal)"
+
+    # Update Electron wrapper
+    update_electron_wrapper || log_warn "Electron wrapper update failed (non-fatal)"
+
+    log_info "=== Auto-update check complete ==="
+}
+
+main "$@"

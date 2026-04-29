@@ -14,7 +14,7 @@ set -euo pipefail
 PERSIST_DIR="/persist"
 WORKSPACE_DIR="/workspace"
 LOG_DIR="${PERSIST_DIR}/logs"
-CODex_LOG="${LOG_DIR}/codex.log"
+CODEX_LOG="${LOG_DIR}/codex.log"
 CONTEXT_FILE="${WORKSPACE_DIR}/AGENTS.md"
 SESSION_NAME="codex"
 

@@ -6,6 +6,10 @@ alpine-base
 linux-lts
 linux-firmware
 eudev
+bash
+coreutils
+file
+iw
 
 # Security & privilege escalation
 doas

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Placeholder for the Codex Desktop Electron app
+# This will be replaced by the actual setup-codex-desktop.sh install
+
+echo "Codex Desktop is not yet installed."
+echo "Run 'codexctl setup' or 'sudo /opt/codexos-setup/setup-codex-desktop.sh' to install."
+exit 1

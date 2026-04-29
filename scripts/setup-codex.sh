@@ -13,6 +13,12 @@
 # =============================================================================
 set -euo pipefail
 
+# ── Cleanup ──────────────────────────────────────────────────────────────────
+_CLEANUP_DIRS=""
+_cleanup() {
+    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf $_CLEANUP_DIRS 2>/dev/null || true
+}
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"
 INSTALL_DIR="$INSTALL_PREFIX/bin"
@@ -78,7 +84,7 @@ check_existing() {
 
     # Check if current version matches desired
     local current_ver
-    current_ver="$("$INSTALL_PATH" --version 2>/dev/null | head -1 | grep -oP '[\d.]+' | head -1 || echo "")"
+    current_ver="$("$INSTALL_PATH" --version 2>/dev/null | head -1 | grep -oE '[0-9.]+' | head -1 || echo "")"
 
     if [ "$CODEX_VERSION" = "latest" ]; then
         # Always update if version is "latest"
@@ -104,7 +110,7 @@ get_latest_version() {
     fi
 
     local version
-    version="$(curl -fsSL "$url" 2>/dev/null | grep -oP '"tag_name"\s*:\s*"\K[^"]+' | head -1)"
+    version="$(curl -fsSL "$url" 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^ "]+"' | sed 's/.*"//;s/"$//' | head -1)"
 
     if [ -z "$version" ]; then
         log_error "Could not determine latest version from GitHub API."
@@ -126,20 +132,15 @@ download_codex() {
     fi
 
     local filename="codex-${arch_triple}.tar.gz"
-    local download_url
-
-    if [ "$CHANNEL" = "preview" ]; then
-        download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${filename}"
-    else
-        download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${filename}"
-    fi
+    local download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${filename}"
 
     log_info "Downloading Codex CLI $version for $arch_triple..."
     log_info "URL: $download_url"
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    trap "rm -rf '$tmpdir'" EXIT
+    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
+    trap _cleanup EXIT
 
     # Download with retry
     local attempts=0
