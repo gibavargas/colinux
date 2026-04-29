@@ -1,0 +1,43 @@
+# Build artifacts
+*.iso
+*.img
+*.qcow2
+*.raw
+*.tar.gz
+
+# Build directories
+.build/
+dist/
+release/
+
+# Node.js
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Environment and secrets
+.env
+.env.*
+secrets/
+*.pem
+*.key
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+test-disk.qcow2

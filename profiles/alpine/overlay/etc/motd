@@ -1,0 +1,29 @@
+
+ _   _            _____                     _       _
+| | | |          / ____|                   | |     (_)
+| |_| | ___  ___| |  __  ___  _   _ _ __ __| |_   ___ _ __
+|  _  |/ _ \/ _ \ | |_ |/ _ \| | | | '__/ _` \ \ / / | '_ \
+| | | |  __/  __/ |__| | (_) | |_| | | | (_| |\ V /| | | | |
+\_| |_/\___|\___|\_____|\___/ \__,_|_|  \__,_| \_/ |_|_| |_|
+
+  CodexOS Lite  ·  Alpine Linux + OpenAI Codex CLI
+  ─────────────────────────────────────────────────────────────
+
+  System:  Alpine $(cat /etc/alpine-release 2>/dev/null || echo unknown)
+  Kernel:  $(uname -r 2>/dev/null || echo unknown)
+  Arch:    $(uname -m 2>/dev/null || echo unknown)
+  Codex:   $(codex --version 2>/dev/null || echo "not installed")
+
+  Workspace: /workspace
+  Config:    /persist/config/
+  Logs:      /persist/logs/
+
+  Type 'codex' to start, or 'codexctl' for system commands.
+
+  ── Rules ──────────────────────────────────────────────────────
+  • Always run codex-disk-inventory before accessing foreign disks
+  • Mount unknown filesystems read-only first
+  • Log important actions to /persist/logs/
+  • See /workspace/AGENTS.md for full operating guidelines
+
+  ────────────────────────────────────────────────────────────────

@@ -1,0 +1,15 @@
+# /etc/codex-update-crontab
+# CodexOS Lite — Codex CLI auto-update schedule
+#
+# This crontab is installed by the codex-auto-update OpenRC service.
+# The interval is dynamically adjusted based on /etc/config/auto-update.conf.
+# Default: check every 6 hours.
+
+# ┌───────────── minute (0)
+# │ ┌───────────── hour (*/6 = every 6 hours)
+# │ │ ┌───────────── day of month (1-31)
+# │ │ │ ┌───────────── month (1-12)
+# │ │ │ │ ┌───────────── day of week (0-7, 0 and 7 = Sunday)
+# │ │ │ │ │
+# │ │ │ │ │
+# * */6 * * * /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1

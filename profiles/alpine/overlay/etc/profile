@@ -1,0 +1,52 @@
+#!/bin/sh
+# =============================================================================
+# CodexOS Lite — System-wide /etc/profile
+# =============================================================================
+
+# ── PATH ─────────────────────────────────────────────────────────────────────
+# Ensure /usr/local/bin is early in PATH for Codex CLI and wrapper scripts.
+if [ "$(echo ":$PATH:" | grep -q ':/usr/local/bin:' && echo yes || echo no)" = "no" ]; then
+    export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+fi
+
+# ── Codex aliases ────────────────────────────────────────────────────────────
+alias ci='codex-disk-inventory'       # Quick disk inventory
+alias cm='codex-mount-ro'            # Mount read-only
+alias cmw='codex-mount-rw'           # Mount read-write
+alias cn='codex-network'             # Network manager
+alias cu='codex-update'              # Update Codex CLI
+alias cb='codex-backup'              # Backup workspace
+alias cl='codex-logs'                # View logs
+alias ct='codexctl'                  # CodexOS control
+
+# ── Shell helpers ─────────────────────────────────────────────────────────────
+# Colored prompt (respects TERM capabilities)
+if [ "$(tput colors 2>/dev/null)" -ge 8 ] 2>/dev/null; then
+    _codex_reset='\033[0m'
+    _codex_cyan='\033[36m'
+    _codex_green='\033[32m'
+    _codex_yellow='\033[33m'
+    PS1="${_codex_cyan}codex${_codex_reset}:${_codex_green}\w${_codex_reset}\$ "
+else
+    PS1='codex:\w\$ '
+fi
+export PS1
+
+# ── Pager preference ──────────────────────────────────────────────────────────
+export PAGER="${PAGER:-less}"
+export LESS="${LESS:-FRSX}"
+
+# ── Editor fallback ──────────────────────────────────────────────────────────
+export EDITOR="${EDITOR:-nano}"
+
+# ── History ───────────────────────────────────────────────────────────────────
+export HISTSIZE=5000
+export HISTFILE="${HOME:-/root}/.codex_history"
+export HISTCONTROL="ignoredups:ignorespace"
+
+# ── CodexOS environment ──────────────────────────────────────────────────────
+export CODEX_HOME="/home/codex"
+export CODEX_WORKSPACE="/workspace"
+export CODEX_PERSIST="/persist"
+export CODEX_CONFIG="$CODEX_PERSIST/config"
+export CODEX_LOGS="$CODEX_PERSIST/logs"

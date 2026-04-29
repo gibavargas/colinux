@@ -1,0 +1,103 @@
+#!/sbin/openrc-run
+# /etc/init.d/codex-auto-update
+# CodexOS Lite — Codex CLI auto-update service
+#
+# Sets up a cron job that periodically checks for Codex CLI updates.
+# The cron schedule and behavior are controlled by /etc/config/auto-update.conf.
+# This service does NOT perform updates itself — it only installs the cron job.
+
+name="codex-auto-update"
+description="CodexOS Lite Codex CLI auto-update cron setup"
+
+depend() {
+    need localmount
+    after codex-firstboot
+    after net
+    use logger
+}
+
+CRON_TAB="/etc/codex-update-crontab"
+CRON_DIR="/etc/cron.d"
+CRON_LINK="${CRON_DIR}/codex-auto-update"
+CONFIG_FILE="/etc/config/auto-update.conf"
+UPDATE_SCRIPT="/usr/local/bin/cron-codex-update"
+LOG_DIR="/persist/logs"
+
+# Default configuration values (overridden by config file if present)
+ENABLED="true"
+INTERVAL="6"
+
+config_load() {
+    if [ -f "${CONFIG_FILE}" ]; then
+        . "${CONFIG_FILE}"
+    fi
+}
+
+start() {
+    config_load
+
+    if [ "${ENABLED}" != "true" ]; then
+        einfo "Codex auto-update is disabled in ${CONFIG_FILE}"
+        return 0
+    fi
+
+    ebegin "Setting up Codex auto-update cron job"
+
+    # Ensure cron directory and log directory exist
+    mkdir -p "${CRON_DIR}" 2>/dev/null
+    mkdir -p "${LOG_DIR}" 2>/dev/null
+
+    # Check that the update script exists
+    if [ ! -x "${UPDATE_SCRIPT}" ]; then
+        eend 1 "Update script not found: ${UPDATE_SCRIPT}"
+        return 1
+    fi
+
+    # Install the crontab
+    if [ -f "${CRON_TAB}" ]; then
+        cp "${CRON_TAB}" "${CRON_LINK}"
+        chmod 0644 "${CRON_LINK}"
+
+        # Validate interval
+        case "${INTERVAL}" in
+            1|2|3|4|6|8|12|24)
+                # Valid interval — update the crontab
+                sed -i "s|^\* /\* \* \* \*|* /${INTERVAL} * * *|" "${CRON_LINK}"
+                ;;
+            *)
+                ewarn "Invalid INTERVAL=${INTERVAL} in ${CONFIG_FILE}, using default (6)"
+                ;;
+        esac
+
+        eend 0 "Auto-update cron installed (every ${INTERVAL}h)"
+    else
+        eend 1 "Crontab file not found: ${CRON_TAB}"
+    fi
+}
+
+stop() {
+    ebegin "Removing Codex auto-update cron job"
+
+    if [ -f "${CRON_LINK}" ]; then
+        rm -f "${CRON_LINK}"
+        eend 0 "Auto-update cron removed"
+    else
+        eend 0 "No auto-update cron to remove"
+    fi
+}
+
+status() {
+    config_load
+
+    if [ "${ENABLED}" != "true" ]; then
+        einfo "Codex auto-update: disabled"
+        return 0
+    fi
+
+    if [ -f "${CRON_LINK}" ]; then
+        einfo "Codex auto-update: active (every ${INTERVAL}h)"
+        einfo "Crontab: ${CRON_LINK}"
+    else
+        einfo "Codex auto-update: enabled but cron job not installed"
+    fi
+}

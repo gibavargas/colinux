@@ -1,0 +1,205 @@
+#!/bin/bash
+# codex-mount-rw — Mount a block device read-write with serial confirmation
+# Part of CodexOS Lite
+#
+# Usage: codex-mount-rw --confirm SERIAL /dev/sdX1
+#
+# Safety: The --confirm flag with the correct disk serial number is REQUIRED.
+# This prevents accidental write-mount of the wrong disk.
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+MOUNT_BASE="/mnt/disks"
+
+mkdir -p "$LOG_DIR" "$MOUNT_BASE/by-device" "$MOUNT_BASE/by-label" "$MOUNT_BASE/by-uuid"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] mount-rw: $*" >> "$LOGFILE"
+}
+
+usage() {
+    echo "Usage: codex-mount-rw --confirm SERIAL <device>"
+    echo ""
+    echo "Mount a block device read-write at ${MOUNT_BASE}/by-device/<name>"
+    echo ""
+    echo "WARNING: Read-write mount. You MUST confirm with the disk serial number."
+    echo ""
+    echo "Options:"
+    echo "  --confirm SERIAL  Required. The serial number of the target disk."
+    echo "  --noexec          Add noexec flag (default: not set for rw mounts)"
+    echo ""
+    echo "Examples:"
+    echo "  codex-mount-rw --confirm WXYZ12345 /dev/sdb1"
+    echo "  codex-mount-rw --confirm WXYZ12345 --noexec /dev/nvme0n1p3"
+    exit 1
+}
+
+# ── Parse arguments ───────────────────────────────────────────────────────
+CONFIRM_SERIAL=""
+DEVICE=""
+EXTRA_OPTS=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --confirm)
+            if [[ -z "${2:-}" ]]; then
+                echo "ERROR: --confirm requires a serial number argument." >&2
+                exit 1
+            fi
+            CONFIRM_SERIAL="$2"
+            shift 2
+            ;;
+        --noexec)
+            EXTRA_OPTS+=",noexec"
+            shift
+            ;;
+        --help|-h)
+            usage
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            if [[ -n "$DEVICE" ]]; then
+                echo "ERROR: Multiple devices specified." >&2
+                exit 1
+            fi
+            DEVICE="$1"
+            shift
+            ;;
+    esac
+done
+
+# ── Validate arguments ────────────────────────────────────────────────────
+if [[ -z "$DEVICE" ]]; then
+    usage
+fi
+
+if [[ -z "$CONFIRM_SERIAL" ]]; then
+    echo "ERROR: --confirm SERIAL is required for read-write mounts." >&2
+    echo "" >&2
+    echo "This safety check prevents accidental write-mount of the wrong disk." >&2
+    echo "Get the serial with: lsblk -d -o NAME,SERIAL /dev/sdX" >&2
+    echo "or: codex-disk-inventory" >&2
+    log_action "FAILED missing_serial device=$DEVICE"
+    exit 1
+fi
+
+if [[ ! -b "$DEVICE" ]]; then
+    echo "ERROR: $DEVICE is not a valid block device." >&2
+    log_action "FAILED device_not_block device=$DEVICE"
+    exit 1
+fi
+
+# ── Retrieve actual disk serial ───────────────────────────────────────────
+# Resolve partition to parent disk for serial check
+PARENT_DEV="$DEVICE"
+if [[ "$DEVICE" =~ ^/dev/(nvme[0-9]+n[0-9]+)p[0-9]+$ ]]; then
+    PARENT_DEV="/dev/${BASH_REMATCH[1]}"
+elif [[ "$DEVICE" =~ ^/dev/([a-z]+)[0-9]+$ ]]; then
+    PARENT_DEV="/dev/${BASH_REMATCH[1]}"
+elif [[ "$DEVICE" =~ ^/dev/(mmcblk[0-9]+)p[0-9]+$ ]]; then
+    PARENT_DEV="/dev/${BASH_REMATCH[1]}"
+fi
+
+ACTUAL_SERIAL=""
+# Try lsblk first
+ACTUAL_SERIAL="$(lsblk -d -n -o SERIAL "$PARENT_DEV" 2>/dev/null | tr -d ' ' || true)"
+# Fallback to hdparm
+if [[ -z "$ACTUAL_SERIAL" ]] && command -v hdparm &>/dev/null; then
+    ACTUAL_SERIAL="$(hdparm -I "$PARENT_DEV" 2>/dev/null | grep -i 'Serial Number' | awk -F: '{print $2}' | tr -d ' ' || true)"
+fi
+# Fallback to udev
+if [[ -z "$ACTUAL_SERIAL" ]] && [[ -d "/sys/block/${PARENT_DEV##*/}" ]]; then
+    ACTUAL_SERIAL="$(cat "/sys/block/${PARENT_DEV##*/}/device/serial" 2>/dev/null | tr -d ' ' || true)"
+fi
+
+# Normalize both serials for comparison (trim whitespace, uppercase)
+CONFIRM_NORMALIZED="$(echo "$CONFIRM_SERIAL" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+ACTUAL_NORMALIZED="$(echo "$ACTUAL_SERIAL" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+
+if [[ -z "$ACTUAL_NORMALIZED" ]]; then
+    echo "WARNING: Could not read serial number from $PARENT_DEV." >&2
+    echo "The device may not report a serial number." >&2
+    echo "Proceeding with caution..." >&2
+    log_action "WARNING no_serial device=$DEVICE parent=$PARENT_DEV confirm=$CONFIRM_SERIAL"
+else
+    if [[ "$CONFIRM_NORMALIZED" != "$ACTUAL_NORMALIZED" ]]; then
+        echo "ERROR: Serial number mismatch!" >&2
+        echo "  Expected: ${CONFIRM_SERIAL}" >&2
+        echo "  Actual:   ${ACTUAL_SERIAL}" >&2
+        echo "" >&2
+        echo "Refusing to mount. Verify the device and try again." >&2
+        log_action "FAILED serial_mismatch device=$DEVICE expected=$CONFIRM_SERIAL actual=$ACTUAL_SERIAL"
+        exit 1
+    fi
+    echo "Serial confirmed: ${ACTUAL_SERIAL}"
+fi
+
+DEVNAME="${DEVICE##*/}"
+MOUNT_POINT="${MOUNT_BASE}/by-device/${DEVNAME}"
+
+# Check if already mounted
+if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+    echo "Device $DEVICE is already mounted at $MOUNT_POINT" >&2
+    log_action "ALREADY_MOUNTED device=$DEVICE mountpoint=$MOUNT_POINT"
+    exit 0
+fi
+
+# ── Get filesystem info ───────────────────────────────────────────────────
+FS_TYPE=""
+LABEL=""
+UUID=""
+
+eval "$(blkid -o export "$DEVICE" 2>/dev/null || true)"
+
+if [[ -z "$FS_TYPE" ]]; then
+    FS_TYPE="$(blkid -s TYPE -o value "$DEVICE" 2>/dev/null || echo "")"
+fi
+if [[ -z "$LABEL" ]]; then
+    LABEL="$(blkid -s LABEL -o value "$DEVICE" 2>/dev/null || echo "")"
+fi
+if [[ -z "$UUID" ]]; then
+    UUID="$(blkid -s UUID -o value "$DEVICE" 2>/dev/null || echo "")"
+fi
+
+if [[ -z "$FS_TYPE" ]]; then
+    echo "WARNING: Could not detect filesystem type. Attempting auto..." >&2
+    FS_TYPE="auto"
+fi
+
+# ── Perform mount ─────────────────────────────────────────────────────────
+mkdir -p "$MOUNT_POINT"
+
+MOUNT_OPTS="rw,nosuid,nodev${EXTRA_OPTS}"
+
+if mount -o "$MOUNT_OPTS" "$DEVICE" "$MOUNT_POINT"; then
+    echo "Mounted $DEVICE (rw) at $MOUNT_POINT"
+    log_action "OK device=$DEVICE fs=$FS_TYPE mountpoint=$MOUNT_POINT serial=$ACTUAL_SERIAL"
+else
+    echo "ERROR: Failed to mount $DEVICE read-write." >&2
+    log_action "FAILED mount_error device=$DEVICE fs=$FS_TYPE"
+    exit 1
+fi
+
+# ── Create by-label symlink ───────────────────────────────────────────────
+if [[ -n "$LABEL" ]]; then
+    local_symlink_path="${MOUNT_BASE}/by-label/${LABEL}"
+    [[ -L "$local_symlink_path" ]] && rm -f "$local_symlink_path"
+    ln -s "$MOUNT_POINT" "$local_symlink_path"
+    echo "  → symlink: by-label/${LABEL}"
+fi
+
+# ── Create by-uuid symlink ────────────────────────────────────────────────
+if [[ -n "$UUID" ]]; then
+    local_symlink_path="${MOUNT_BASE}/by-uuid/${UUID}"
+    [[ -L "$local_symlink_path" ]] && rm -f "$local_symlink_path"
+    ln -s "$MOUNT_POINT" "$local_symlink_path"
+    echo "  → symlink: by-uuid/${UUID}"
+fi
+
+echo "Done."

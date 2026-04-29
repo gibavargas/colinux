@@ -1,0 +1,274 @@
+#!/bin/bash
+# codex-update — Update CodexOS system and Codex CLI binary
+# Part of CodexOS Lite
+#
+# Updates:
+#   1. Codex CLI binary (downloads latest musl binary from GitHub releases)
+#   2. Alpine Linux packages (apk upgrade)
+#
+# Usage: codex-update [OPTIONS]
+#   --codex-only    Only update Codex CLI
+#   --system-only   Only update Alpine packages
+#   --check         Check for updates without applying
+#   --force         Force update even if already latest
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+LOG_DIR="${PERSIST_DIR}/logs"
+STATE_DIR="${PERSIST_DIR}/state"
+LOGFILE="${LOG_DIR}/update.log"
+STATE_FILE="${STATE_DIR}/update-state.json"
+CODEX_BIN="/usr/local/bin/codex"
+CODEX_REPO="openai/codex"
+CODEX_VERSION_FILE="${STATE_DIR}/codex-version"
+
+mkdir -p "$LOG_DIR" "$STATE_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] update: $*" >> "$LOGFILE"
+    echo "[$ts] update: $*"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────
+CODEX_ONLY=false
+SYSTEM_ONLY=false
+CHECK_ONLY=false
+FORCE=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --codex-only) CODEX_ONLY=true; shift ;;
+        --system-only) SYSTEM_ONLY=true; shift ;;
+        --check) CHECK_ONLY=true; shift ;;
+        --force) FORCE=true; shift ;;
+        --help|-h)
+            echo "Usage: codex-update [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --codex-only    Only update Codex CLI binary"
+            echo "  --system-only   Only update Alpine packages"
+            echo "  --check         Check for updates without applying"
+            echo "  --force         Force update even if already latest"
+            exit 0
+            ;;
+        *)
+            die "Unknown option: $1"
+            ;;
+    esac
+done
+
+# ── Get latest version from GitHub ────────────────────────────────────────
+get_latest_codex_version() {
+    local version
+    if command -v curl &>/dev/null; then
+        version="$(curl -sfL "https://api.github.com/repos/${CODEX_REPO}/releases/latest" \
+            | jq -r '.tag_name // .name' 2>/dev/null || true)"
+    elif command -v wget &>/dev/null; then
+        version="$(wget -qO- "https://api.github.com/repos/${CODEX_REPO}/releases/latest" \
+            | jq -r '.tag_name // .name' 2>/dev/null || true)"
+    fi
+
+    # Strip leading 'v' if present
+    version="${version#v}"
+    echo "$version"
+}
+
+get_current_codex_version() {
+    if [[ -x "$CODEX_BIN" ]]; then
+        "$CODEX_BIN" --version 2>/dev/null | head -1 | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown"
+    else
+        echo "not-installed"
+    fi
+}
+
+# ── Update Codex CLI ──────────────────────────────────────────────────────
+update_codex() {
+    log_action "codex_update_start"
+
+    local latest_version current_version
+    latest_version="$(get_latest_codex_version)"
+    current_version="$(get_current_codex_version)"
+
+    if [[ -z "$latest_version" ]]; then
+        echo "Could not determine latest Codex version. Check network connectivity."
+        log_action "codex_update_fail version_check_failed"
+        return 1
+    fi
+
+    echo "Codex CLI:"
+    echo "  Current: $current_version"
+    echo "  Latest:  $latest_version"
+
+    if [[ "$current_version" == "$latest_version" ]] && [[ "$FORCE" != true ]]; then
+        echo "  → Already up to date."
+        log_action "codex_update_skip already_current=$current_version"
+        return 0
+    fi
+
+    if [[ "$CHECK_ONLY" == true ]]; then
+        echo "  → Update available!"
+        return 0
+    fi
+
+    echo "  → Downloading Codex CLI v${latest_version}..."
+
+    # Detect architecture
+    local arch
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64)  arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        armv7l)  arch="armv7" ;;
+        *)
+            echo "WARNING: Unsupported architecture $arch. Attempting x86_64 binary."
+            arch="x86_64"
+            ;;
+    esac
+
+    # Try to download musl static binary
+    local download_url="https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}-musl.tar.gz"
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+
+    # Try direct binary URL patterns
+    local downloaded=false
+    for url_pattern in \
+        "https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}-musl" \
+        "https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}" \
+        "https://github.com/${CODEX_REPO}/releases/latest/download/codex-linux-${arch}"; do
+
+        echo "  Trying: $url_pattern"
+        if curl -sfL -o "${tmp_dir}/codex" "${url_pattern}" 2>/dev/null; then
+            # Check if it's a valid binary
+            if file "${tmp_dir}/codex" 2>/dev/null | grep -qi 'ELF\|executable'; then
+                downloaded=true
+                break
+            fi
+        fi
+        rm -f "${tmp_dir}/codex"
+    done
+
+    # Try tarball
+    if [[ "$downloaded" != true ]]; then
+        for url_pattern in \
+            "https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}-musl.tar.gz" \
+            "https://github.com/${CODEX_REPO}/releases/download/v${latest_version}/codex-linux-${arch}.tar.gz"; do
+
+            echo "  Trying: $url_pattern"
+            if curl -sfL -o "${tmp_dir}/codex.tar.gz" "${url_pattern}" 2>/dev/null; then
+                if tar xzf "${tmp_dir}/codex.tar.gz" -C "${tmp_dir}" 2>/dev/null; then
+                    # Find the binary inside extracted files
+                    local extracted_bin
+                    extracted_bin="$(find "${tmp_dir}" -name 'codex' -type f -executable 2>/dev/null | head -1 || true)"
+                    if [[ -n "$extracted_bin" ]]; then
+                        mv "$extracted_bin" "${tmp_dir}/codex"
+                        downloaded=true
+                        break
+                    fi
+                fi
+            fi
+            rm -f "${tmp_dir}/codex.tar.gz"
+        done
+    fi
+
+    if [[ "$downloaded" != true ]]; then
+        echo "  ✗ Failed to download Codex binary."
+        echo "  Manual install: Visit https://github.com/${CODEX_REPO}/releases"
+        log_action "codex_update_fail download_failed version=$latest_version"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Install
+    chmod +x "${tmp_dir}/codex"
+
+    if ! "${tmp_dir}/codex" --version &>/dev/null; then
+        echo "  ✗ Downloaded binary does not work."
+        log_action "codex_update_fail binary_invalid version=$latest_version"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Backup old binary
+    if [[ -x "$CODEX_BIN" ]]; then
+        cp "$CODEX_BIN" "${CODEX_BIN}.bak.${current_version}"
+    fi
+
+    mv "${tmp_dir}/codex" "$CODEX_BIN"
+    rm -rf "$tmp_dir"
+
+    # Record version
+    echo "$latest_version" > "$CODEX_VERSION_FILE"
+
+    echo "  ✓ Codex CLI updated to v${latest_version}"
+    log_action "codex_update_ok version=$latest_version"
+}
+
+# ── Update Alpine packages ────────────────────────────────────────────────
+update_system() {
+    log_action "system_update_start"
+
+    echo "Alpine Linux packages:"
+
+    if [[ "$CHECK_ONLY" == true ]]; then
+        echo "  Checking for updates..."
+        apk version -v -s '<' 2>/dev/null || echo "  (unknown)"
+        return 0
+    fi
+
+    # Update repository index
+    echo "  Updating repository index..."
+    if ! apk update 2>/dev/null; then
+        echo "  ✗ Failed to update package index. Check network."
+        log_action "system_update_fail apk_update_failed"
+        return 1
+    fi
+
+    # Upgrade packages
+    echo "  Upgrading packages..."
+    local upgradable
+    upgradable="$(apk version -s '<' 2>/dev/null | wc -l || echo 0)"
+    upgradable="$(echo "$upgradable" | tr -d ' ')"
+
+    if [[ "$upgradable" == "0" ]] && [[ "$FORCE" != true ]]; then
+        echo "  → All packages up to date."
+        log_action "system_update_skip all_current"
+        return 0
+    fi
+
+    echo "  → $upgradable package(s) to upgrade."
+
+    if apk upgrade --verbose 2>&1; then
+        echo "  ✓ System packages updated."
+        log_action "system_update_ok packages=$upgradable"
+    else
+        echo "  ⚠ Some packages failed to update."
+        log_action "system_update_partial packages=$upgradable"
+    fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────
+echo "CodexOS Update"
+echo "=============="
+echo ""
+
+if [[ "$CODEX_ONLY" != true ]]; then
+    update_system
+    echo ""
+fi
+
+if [[ "$SYSTEM_ONLY" != true ]]; then
+    update_codex
+fi
+
+echo ""
+echo "Update complete."
+log_action "update_session_complete"

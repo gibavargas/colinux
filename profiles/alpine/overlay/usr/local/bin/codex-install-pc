@@ -1,0 +1,445 @@
+#!/bin/bash
+# codex-install-pc — Install CodexOS to an internal disk (NVMe or SATA)
+# Part of CodexOS Lite
+#
+# Usage: codex-install-pc [OPTIONS] /dev/nvmeXnX | /dev/sdX
+#
+# Options:
+#   --replace     Wipe entire disk and install (default for non-external)
+#   --external    Install to external SSD (sets removable flag in config)
+#   --dual-boot   Preserve existing EFI partition for dual-boot
+#
+# Partition layout:
+#   1: EFI System Partition (FAT32, 512MB)
+#   2: System (ext4, 4GB)
+#   3: LUKS Persistence (remaining space)
+#
+# Safety: Requires explicit confirmation with serial number.
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+CODEXOS_IMAGE_DIR="${CODEXOS_IMAGE_DIR:-/opt/codexos}"
+
+mkdir -p "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] install-pc: $*" >> "$LOGFILE"
+    echo "[$ts] install-pc: $*"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+usage() {
+    cat <<EOF
+Usage: codex-install-pc [OPTIONS] /dev/nvmeXnX | /dev/sdX
+
+Install CodexOS to an internal disk (NVMe or SATA SSD/HDD).
+
+Options:
+  --replace         Wipe entire disk and install CodexOS (default)
+  --external        Install to an external SSD via USB adapter
+  --dual-boot       Preserve existing OS — only add CodexOS partitions
+  --efi-size N      Size in MB for EFI partition (default: 512)
+  --system-size N   Size in MB for system partition (default: 4096)
+  --no-confirm      Skip interactive confirmation (DANGEROUS)
+  --help            Show this help
+
+Examples:
+  codex-install-pc /dev/nvme0n1
+  codex-install-pc --replace /dev/sda
+  codex-install-pc --external /dev/sdb
+  codex-install-pc --dual-boot --efi-size 256 /dev/nvme0n1
+
+WARNING: This will DESTROY all data on the target disk (unless --dual-boot).
+EOF
+    exit 0
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────
+MODE="replace"
+DEVICE=""
+EFI_SIZE=512
+SYSTEM_SIZE=4096
+VOLUME_LABEL="CODEXOS"
+DUAL_BOOT=false
+EXTERNAL=false
+NO_CONFIRM=false
+
+# ── Parse arguments ───────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --replace)
+            MODE="replace"
+            shift
+            ;;
+        --external)
+            EXTERNAL=true
+            MODE="replace"
+            shift
+            ;;
+        --dual-boot)
+            DUAL_BOOT=true
+            MODE="dual-boot"
+            shift
+            ;;
+        --efi-size)
+            EFI_SIZE="${2:?--efi-size requires a number}"
+            shift 2
+            ;;
+        --system-size)
+            SYSTEM_SIZE="${2:?--system-size requires a number}"
+            shift 2
+            ;;
+        --label)
+            VOLUME_LABEL="${2:?--label requires an argument}"
+            shift 2
+            ;;
+        --no-confirm)
+            NO_CONFIRM=true
+            shift
+            ;;
+        --help|-h)
+            usage
+            ;;
+        -*)
+            die "Unknown option: $1"
+            ;;
+        *)
+            if [[ -n "$DEVICE" ]]; then
+                die "Multiple devices specified. Use only one."
+            fi
+            DEVICE="$1"
+            shift
+            ;;
+    esac
+done
+
+# ── Validate device ───────────────────────────────────────────────────────
+if [[ -z "$DEVICE" ]]; then
+    die "No device specified. Usage: codex-install-pc /dev/nvmeXnX"
+fi
+
+if [[ ! -b "$DEVICE" ]]; then
+    die "$DEVICE is not a valid block device."
+fi
+
+DEVNAME="${DEVICE##*/}"
+
+# Determine partition suffix
+if [[ "$DEVICE" == /dev/nvme* ]]; then
+    PART_SUFFIX="p"
+elif [[ "$DEVICE" == /dev/mmcblk* ]]; then
+    PART_SUFFIX="p"
+else
+    PART_SUFFIX=""
+fi
+
+# ── Check if currently booted from this device ────────────────────────────
+BOOT_DEV=""
+if [[ -f /proc/cmdline ]]; then
+    cmdline_root="$(grep -oP 'root=\K[^\s]+' /proc/cmdline 2>/dev/null || true)"
+    if [[ "$cmdline_root" == /dev/* ]]; then
+        BOOT_DEV="${cmdline_root%%[0-9]*}"
+        BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
+    fi
+fi
+if [[ -z "$BOOT_DEV" ]]; then
+    BOOT_DEV="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
+    BOOT_DEV="${BOOT_DEV%%[0-9]*}"
+    BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
+fi
+
+if [[ "$DEVICE" == "$BOOT_DEV" ]]; then
+    die "Cannot install to the currently booted device ($DEVICE). Boot from USB first."
+fi
+
+# ── Check mounted partitions ──────────────────────────────────────────────
+if lsblk -n -o MOUNTPOINT "$DEVICE" 2>/dev/null | grep -q .; then
+    die "Device $DEVICE has mounted partitions. Unmount all partitions first."
+fi
+
+# ── Gather device info ────────────────────────────────────────────────────
+SIZE_BYTES="$(lsblk -d -b -n -o SIZE "$DEVICE" 2>/dev/null || echo 0)"
+SIZE_GB="$(echo "$SIZE_BYTES" | awk '{printf "%.1f", $1/1024/1024/1024}')"
+MODEL="$(lsblk -d -n -o MODEL "$DEVICE" 2>/dev/null | xargs || echo "Unknown")"
+SERIAL="$(lsblk -d -n -o SERIAL "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
+TRANSPORT="$(lsblk -d -n -o TRAN "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
+ROTATIONAL="$(lsblk -d -n -o ROTA "$DEVICE" 2>/dev/null | xargs || echo "1")"
+
+# Minimum size: 16GB for PC install
+MIN_SIZE=$((16 * 1024 * 1024 * 1024))
+if [[ "$SIZE_BYTES" -lt "$MIN_SIZE" ]]; then
+    die "Device too small (${SIZE_GB}GB). Minimum 16GB required for PC installation."
+fi
+
+# ── Display device info and confirm ──────────────────────────────────────
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║          CODEXOS PC INSTALLER                        ║"
+echo "╠══════════════════════════════════════════════════════╣"
+echo "║  Device:    $DEVICE"
+echo "║  Model:     $MODEL"
+echo "║  Serial:    $SERIAL"
+echo "║  Transport: $TRANSPORT"
+echo "║  Media:     $(if [[ "$ROTATIONAL" == "0" ]]; then echo "SSD"; else echo "HDD"; fi)"
+echo "║  Size:      ${SIZE_GB}GB"
+echo "║  Mode:      $MODE"
+if [[ "$EXTERNAL" == true ]]; then
+echo "║  Target:    External SSD"
+fi
+echo "║  EFI:       ${EFI_SIZE}MB"
+echo "║  System:    ${SYSTEM_SIZE}MB"
+echo "║  Persist:   remaining space"
+echo "╠══════════════════════════════════════════════════════╣"
+if [[ "$DUAL_BOOT" != true ]]; then
+echo "║  ⚠  ALL DATA ON THIS DEVICE WILL BE DESTROYED        ║"
+fi
+echo "╚══════════════════════════════════════════════════════╝"
+echo ""
+
+if [[ "$NO_CONFIRM" != true ]]; then
+    echo -n "Type the serial number to confirm [${SERIAL}]: "
+    read -r CONFIRM_INPUT
+    if [[ "$CONFIRM_INPUT" != "$SERIAL" ]]; then
+        die "Serial confirmation failed. Aborting."
+    fi
+
+    if [[ "$DUAL_BOOT" != true ]]; then
+        echo -n "Type YES to destroy all data on $DEVICE: "
+        read -r WIPE_CONFIRM
+        if [[ "$WIPE_CONFIRM" != "YES" ]]; then
+            echo "Aborted."
+            exit 0
+        fi
+    else
+        echo -n "Confirm installation alongside existing OS [yes]: "
+        read -r CONFIRM_DUAL
+        if [[ "$CONFIRM_DUAL" != "yes" ]]; then
+            echo "Aborted."
+            exit 0
+        fi
+    fi
+fi
+
+log_action "START mode=$MODE device=$DEVICE serial=$SERIAL size=${SIZE_GB}GB external=$EXTERNAL"
+
+# ── Check dependencies ────────────────────────────────────────────────────
+for cmd in sgdisk mkfs.vfat mkfs.ext4; do
+    if ! command -v "$cmd" &>/dev/null; then
+        die "Required command not found: $cmd. Install with: apk add sgdisk dosfstools e2fsprogs"
+    fi
+done
+
+if ! command -v cryptsetup &>/dev/null; then
+    die "Required command not found: cryptsetup. Install with: apk add cryptsetup"
+fi
+
+# ── Dual-boot: find the first partition number we can use ─────────────────
+FIRST_PART=1
+if [[ "$DUAL_BOOT" == true ]]; then
+    # Find highest partition number
+    LAST_PART="$(sgdisk -p "$DEVICE" 2>/dev/null | tail -1 | awk '{print $1}' | tr -d '.')"
+    if [[ -n "$LAST_PART" ]] && [[ "$LAST_PART" =~ ^[0-9]+$ ]]; then
+        FIRST_PART=$((LAST_PART + 1))
+    fi
+    echo "Dual-boot: adding partitions starting at ${FIRST_PART}"
+fi
+
+# ── Wipe/create partition table (replace mode) ───────────────────────────
+if [[ "$DUAL_BOOT" != true ]]; then
+    echo "[1/7] Wiping partition table..."
+    sgdisk --zap-all "$DEVICE" 2>/dev/null || true
+    dd if=/dev/zero of="$DEVICE" bs=1M count=1 conv=fsync 2>/dev/null || true
+
+    echo "[2/7] Creating GPT partition table..."
+    sgdisk --clear --mbrtogpt "$DEVICE" >/dev/null 2>&1 || sgdisk --clear "$DEVICE" >/dev/null 2>&1
+else
+    echo "[1/7] Preserving existing partition table (dual-boot)..."
+fi
+
+# ── Create partitions ─────────────────────────────────────────────────────
+echo "[3/7] Creating partitions..."
+
+P1_NUM=$FIRST_PART
+P2_NUM=$((FIRST_PART + 1))
+P3_NUM=$((FIRST_PART + 2))
+
+# EFI partition
+if [[ "$DUAL_BOOT" != true ]]; then
+    sgdisk -n ${P1_NUM}:0:+"${EFI_SIZE}M" -t ${P1_NUM}:EF00 -c ${P1_NUM}:"EFI System" "$DEVICE" >/dev/null 2>&1
+    sgdisk -A ${P1_NUM}:set:2 "$DEVICE" >/dev/null 2>&1
+fi
+
+# System partition
+sfdisk_part_end="+${SYSTEM_SIZE}M"
+sgdisk -n ${P2_NUM}:0:+"${SYSTEM_SIZE}M" -t ${P2_NUM}:8300 -c ${P2_NUM}:"CodexOS System" "$DEVICE" >/dev/null 2>&1
+
+# Persistence partition (LUKS)
+sgdisk -n ${P3_NUM}:0:0 -t ${P3_NUM}:8300 -c ${P3_NUM}:"CodexOS Persistence" "$DEVICE" >/dev/null 2>&1
+
+# Wait for kernel to re-read partition table
+sleep 2
+partprobe "$DEVICE" 2>/dev/null || true
+sleep 1
+
+PART1="${DEVICE}${PART_SUFFIX}${P1_NUM}"
+PART2="${DEVICE}${PART_SUFFIX}${P2_NUM}"
+PART3="${DEVICE}${PART_SUFFIX}${P3_NUM}"
+
+# Verify partitions exist
+for p in "$PART1" "$PART2" "$PART3"; do
+    if [[ ! -b "$p" ]]; then
+        die "Partition $p was not created. Check disk state with lsblk."
+    fi
+done
+
+# ── Format partitions ─────────────────────────────────────────────────────
+echo "[4/7] Formatting partitions..."
+
+# EFI partition (skip if dual-boot — reuse existing)
+if [[ "$DUAL_BOOT" != true ]]; then
+    mkfs.vfat -F 32 -n "$VOLUME_LABEL" "$PART1" >/dev/null 2>&1
+    echo "  → $PART1 formatted as FAT32 (EFI)"
+else
+    echo "  → Reusing existing EFI partition ($PART1)"
+fi
+
+# System partition
+mkfs.ext4 -F -L "codex-system" "$PART2" >/dev/null 2>&1
+echo "  → $PART2 formatted as ext4 (system)"
+
+# ── LUKS persistence ──────────────────────────────────────────────────────
+echo "[5/7] Setting up LUKS persistence partition..."
+echo -n "Enter LUKS passphrase for persistence: "
+read -rs LUKS_PASSPHRASE
+echo ""
+if [[ -z "$LUKS_PASSPHRASE" ]]; then
+    die "Passphrase cannot be empty."
+fi
+echo -n "Confirm passphrase: "
+read -rs LUKS_CONFIRM
+echo ""
+if [[ "$LUKS_PASSPHRASE" != "$LUKS_CONFIRM" ]]; then
+    die "Passphrases do not match."
+fi
+
+echo -n "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 \
+    --pbkdf argon2id --pbkdf-force-iterations 5 \
+    "$PART3" -q -
+echo -n "$LUKS_PASSPHRASE" | cryptsetup open "$PART3" codex-persist-install -
+
+mkfs.ext4 -F -L "codex-persist" /dev/mapper/codex-persist-install >/dev/null 2>&1
+cryptsetup close codex-persist-install
+echo "  → $PART3 LUKS-encrypted ext4 (persistence)"
+unset LUKS_PASSPHRASE LUKS_CONFIRM
+
+# ── Copy system files ─────────────────────────────────────────────────────
+echo "[6/7] Copying system files..."
+
+TEMP_MOUNT="$(mktemp -d)"
+
+# Copy system image
+mount "$PART2" "$TEMP_MOUNT"
+if [[ -f "${CODEXOS_IMAGE_DIR}/system.squashfs" ]]; then
+    cp "${CODEXOS_IMAGE_DIR}/system.squashfs" "$TEMP_MOUNT/"
+    echo "  → Copied system.squashfs"
+elif [[ -d "${CODEXOS_IMAGE_DIR}/rootfs" ]]; then
+    cp -a "${CODEXOS_IMAGE_DIR}/rootfs/"* "$TEMP_MOUNT/"
+    echo "  → Copied root filesystem"
+else
+    echo "  WARNING: No system image found at ${CODEXOS_IMAGE_DIR}/"
+    echo "  System partition is prepared but empty."
+fi
+umount "$TEMP_MOUNT"
+
+# ── Install bootloader ────────────────────────────────────────────────────
+echo "[7/7] Installing bootloader..."
+
+mount "$PART1" "$TEMP_MOUNT"
+
+# Create EFI directory structure
+mkdir -p "$TEMP_MOUNT/EFI/BOOT"
+mkdir -p "$TEMP_MOUNT/EFI/codexos"
+
+# Copy kernel and initramfs
+if [[ -f "${CODEXOS_IMAGE_DIR}/boot/vmlinuz-lts" ]]; then
+    cp "${CODEXOS_IMAGE_DIR}/boot/vmlinuz-lts" "$TEMP_MOUNT/"
+    echo "  → Copied kernel"
+fi
+if [[ -f "${CODEXOS_IMAGE_DIR}/boot/initramfs-lts" ]]; then
+    cp "${CODEXOS_IMAGE_DIR}/boot/initramfs-lts" "$TEMP_MOUNT/"
+    echo "  → Copied initramfs"
+fi
+
+# Copy EFI bootloader
+if [[ -f "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
+    cp -a "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/BOOT/"
+elif command -v grub-install &>/dev/null; then
+    grub-install --target=x86_64-efi --efi-directory="$TEMP_MOUNT" \
+                 --boot-directory="$TEMP_MOUNT" \
+                 --bootloader-id="CodexOS" \
+                 --recheck "$DEVICE" >/dev/null 2>&1 || {
+        echo "  WARNING: grub-install failed, trying --removable fallback..."
+        grub-install --target=x86_64-efi --efi-directory="$TEMP_MOUNT" \
+                     --boot-directory="$TEMP_MOUNT" --removable \
+                     --recheck "$DEVICE" >/dev/null 2>&1 || true
+    }
+fi
+
+# Generate boot configuration
+PARTUUID_SYSTEM="$(blkid -s PARTUUID -o value "$PART2" 2>/dev/null || echo "unknown")"
+PARTUUID_PERSIST="$(blkid -s PARTUUID -o value "$PART3" 2>/dev/null || echo "unknown")"
+
+cat > "$TEMP_MOUNT/EFI/codexos/codexos.conf" <<BOOTCFG
+title CodexOS Lite
+linux /vmlinuz-lts
+initrd /initramfs-lts
+options quiet splash root=PARTUUID=${PARTUUID_SYSTEM} ro cryptroot=PARTUUID=${PARTUUID_PERSIST}
+BOOTCFG
+
+echo "  → Created boot configuration"
+umount "$TEMP_MOUNT"
+rmdir "$TEMP_MOUNT"
+
+# ── Install EFI boot entry (NVRAM) ────────────────────────────────────────
+if command -v efibootmgr &>/dev/null && [[ "$DUAL_BOOT" != true ]]; then
+    efibootmgr --create --disk "$DEVICE" --part ${P1_NUM} \
+               --loader "/EFI/codexos/BOOTX64.EFI" \
+               --label "CodexOS" \
+               --unicode 2>/dev/null || true
+    echo "  → Added EFI boot entry"
+fi
+
+# ── Finalize ──────────────────────────────────────────────────────────────
+sync
+
+# Write install metadata
+mkdir -p "/persist"
+cat > "/persist/install-info" <<META
+codex_install_device=$DEVICE
+codex_install_serial=$SERIAL
+codex_install_mode=$MODE
+codex_install_date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+codex_install_external=$EXTERNAL
+META
+
+echo ""
+echo "✓ CodexOS PC installation complete!"
+echo "  Device:  $DEVICE ($MODEL, $SERIAL)"
+echo "  Mode:    $MODE"
+if [[ "$EXTERNAL" == true ]]; then
+    echo "  Target:  External SSD"
+fi
+echo ""
+echo "  Partitions:"
+sgdisk -p "$DEVICE" 2>/dev/null || lsblk "$DEVICE"
+echo ""
+echo "Reboot to start CodexOS from this disk."
+
+log_action "COMPLETE mode=$MODE device=$DEVICE serial=$SERIAL external=$EXTERNAL"

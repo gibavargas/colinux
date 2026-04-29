@@ -1,0 +1,57 @@
+#!/sbin/openrc-run
+# /etc/init.d/codex-disk-inventory
+# CodexOS Lite — Disk inventory service
+#
+# Scans all attached block devices at boot and writes a manifest to
+# /run/codexos/disk-inventory.json. This manifest is used by disk
+# safety wrappers to identify devices and enforce the boot device
+# protection policy.
+
+name="codex-disk-inventory"
+description="CodexOS Lite disk inventory scanner"
+
+depend() {
+    need localmount
+    after codex-firstboot
+    before net
+}
+
+INVENTORY_BIN="/usr/local/bin/disk-inventory"
+INVENTORY_DIR="/run/codexos"
+INVENTORY_FILE="${INVENTORY_DIR}/disk-inventory.json"
+INVENTORY_LOG="/persist/logs/disk-inventory.log"
+
+start() {
+    ebegin "Scanning disk inventory"
+
+    # Ensure output directory exists
+    mkdir -p "${INVENTORY_DIR}" 2>/dev/null
+
+    # Ensure log directory exists (may not be available on first boot before persistence)
+    mkdir -p /persist/logs 2>/dev/null
+
+    # Run the inventory scanner
+    if [ -x "${INVENTORY_BIN}" ]; then
+        "${INVENTORY_BIN}" --output "${INVENTORY_FILE}" >> "${INVENTORY_LOG}" 2>&1
+        local rc=$?
+
+        if [ $rc -eq 0 ]; then
+            # Set restrictive permissions on inventory file
+            chmod 0640 "${INVENTORY_FILE}" 2>/dev/null
+
+            # Count devices
+            local dev_count
+            dev_count=$(grep -c '"device"' "${INVENTORY_FILE}" 2>/dev/null || echo 0)
+            eend 0 "Disk inventory complete — ${dev_count} device(s) found"
+        else
+            eend $rc "Disk inventory failed (see ${INVENTORY_LOG})"
+        fi
+    else
+        eend 1 "Disk inventory script not found: ${INVENTORY_BIN}"
+    fi
+}
+
+stop() {
+    # Nothing to stop — inventory is a one-shot operation
+    return 0
+}

@@ -1,0 +1,72 @@
+# =============================================================================
+# CodexOS Lite — aarch64 (ARM64) Package List
+# =============================================================================
+# Core system
+alpine-base
+linux-lts
+linux-firmware
+eudev
+
+# Security & privilege escalation
+doas
+sudo
+
+# Terminal & productivity
+tmux
+git
+
+# Networking
+openssh-client
+curl
+wget
+ca-certificates
+
+# CLI utilities
+jq
+yq
+ripgrep
+fd
+fzf
+nano
+python3
+
+# Disk & filesystem tools
+util-linux
+parted
+gptfdisk
+e2fsprogs
+dosfstools
+exfatprogs
+ntfs-3g
+btrfs-progs
+xfsprogs
+cryptsetup
+lvm2
+mdadm
+
+# Storage & hardware utilities
+rsync
+smartmontools
+nvme-cli
+hdparm
+pciutils
+usbutils
+
+# Boot & image tools
+xorriso
+grub
+grub-arm64-efi
+efibootmgr
+mtools
+squashfs-tools
+
+# Network management
+iwd
+wpa_supplicant
+dhcpcd
+
+# Compression & crypto
+openssl
+tar
+gzip
+xz
