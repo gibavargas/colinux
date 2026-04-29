@@ -1,0 +1,461 @@
+#!/bin/bash
+# codex-usb-persist — Manage USB persistence (LUS) partition
+# Part of CodexOS Lite
+#
+# Manages the LUKS-encrypted persistence partition on a CodexOS USB drive.
+#
+# Usage: codex-usb-persist <COMMAND> [OPTIONS]
+#   status                  Show persistence partition status
+#   open [DEVICE]           Open/unlock LUKS persistence
+#   close                   Close/lock LUKS persistence
+#   mount [DEVICE]          Open and mount persistence at /persist
+#   unmount                 Unmount and close persistence
+#   resize [DEVICE] SIZE    Resize persistence filesystem
+#   passphrase [DEVICE]     Change LUKS passphrase
+#   info [DEVICE]           Detailed info about persistence partition
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+MOUNT_POINT="/persist"
+LUKS_MAPPER="codex-persist"
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+
+mkdir -p "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] usb-persist: $*" >> "$LOGFILE" 2>/dev/null || true
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL usb-persist: $*"
+    exit 1
+}
+
+# ── Find the persistence partition ────────────────────────────────────────
+find_persist_part() {
+    local specified="${1:-}"
+
+    if [[ -n "$specified" ]]; then
+        if [[ ! -b "$specified" ]]; then
+            die "Not a block device: $specified"
+        fi
+        echo "$specified"
+        return
+    fi
+
+    # Try by label
+    local by_label
+    by_label="$(blkid -t LABEL=codex-persist -o device 2>/dev/null | head -1 || true)"
+    if [[ -n "$by_label" ]]; then
+        echo "$by_label"
+        return
+    fi
+
+    # Try by UUID from stored state
+    if [[ -f "${PERSIST_DIR}/install-info" ]]; then
+        local stored_uuid
+        stored_uuid="$(grep persist_uuid "${PERSIST_DIR}/install-info" 2>/dev/null | cut -d= -f2 || true)"
+        if [[ -n "$stored_uuid" ]]; then
+            local by_uuid
+            by_uuid="$(blkid -t UUID="$stored_uuid" -o device 2>/dev/null | head -1 || true)"
+            if [[ -n "$by_uuid" ]]; then
+                echo "$by_uuid"
+                return
+            fi
+        fi
+    fi
+
+    # Try to find a LUKS partition with 'codex' in its label
+    local luks_parts
+    luks_parts="$(blkid -t TYPE=crypto_LUKS -o device 2>/dev/null || true)"
+    for part in $luks_parts; do
+        local label
+        label="$(blkid -s LABEL -o value "$part" 2>/dev/null || true)"
+        if [[ "$label" == *"persist"* ]] || [[ "$label" == *"codex"* ]]; then
+            echo "$part"
+            return
+        fi
+    done
+
+    echo ""
+}
+
+# ── Check if LUKS is open ─────────────────────────────────────────────────
+is_luks_open() {
+    [[ -e "/dev/mapper/${LUKS_MAPPER}" ]]
+}
+
+# ── Check if mounted ──────────────────────────────────────────────────────
+is_mounted() {
+    mountpoint -q "$MOUNT_POINT" 2>/dev/null
+}
+
+# ── Command: status ───────────────────────────────────────────────────────
+cmd_status() {
+    local device
+    device="$(find_persist_part "${1:-}")"
+
+    echo "=== USB Persistence Status ==="
+    echo ""
+
+    if is_mounted; then
+        echo "State:      MOUNTED"
+        local mount_info
+        mount_info="$(findmnt -n -o SOURCE,TARGET,FSTYPE,OPTIONS "$MOUNT_POINT" 2>/dev/null || true)"
+        echo "Details:    $mount_info"
+        local usage
+        usage="$(df -h "$MOUNT_POINT" 2>/dev/null | tail -1 || echo 'unknown')"
+        echo "Usage:      $usage"
+    elif is_luks_open; then
+        echo "State:      UNLOCKED (not mounted)"
+        echo "Mapper:     /dev/mapper/${LUKS_MAPPER}"
+        local mapper_size
+        mapper_size="$(lsblk -d -n -o SIZE "/dev/mapper/${LUKS_MAPPER}" 2>/dev/null || echo 'unknown')"
+        echo "Size:       $mapper_size"
+    else
+        echo "State:      LOCKED"
+    fi
+
+    echo ""
+
+    if [[ -n "$device" ]]; then
+        echo "Partition:  $device"
+        local part_size
+        part_size="$(lsblk -d -n -o SIZE "$device" 2>/dev/null || echo 'unknown')"
+        local part_uuid
+        part_uuid="$(blkid -s UUID -o value "$device" 2>/dev/null || echo 'N/A')"
+        local part_label
+        part_label="$(blkid -s LABEL -o value "$device" 2>/dev/null || echo 'N/A')"
+        echo "Size:       $part_size"
+        echo "UUID:       $part_uuid"
+        echo "Label:      $part_label"
+        echo "Type:       $(blkid -s TYPE -o value "$device" 2>/dev/null || echo 'N/A')"
+    else
+        echo "Partition:  (not found)"
+        echo "  Search by LABEL=codex-persist or specify device manually."
+    fi
+
+    # Show persistence directory contents
+    if is_mounted; then
+        echo ""
+        echo "=== /persist contents ==="
+        echo "  backups/:  $(du -sh "${PERSIST_DIR}/backups" 2>/dev/null | awk '{print $1}' || echo 'N/A')"
+        echo "  logs/:     $(du -sh "${PERSIST_DIR}/logs" 2>/dev/null | awk '{print $1}' || echo 'N/A')"
+        echo "  state/:    $(du -sh "${PERSIST_DIR}/state" 2>/dev/null | awk '{print $1}' || echo 'N/A')"
+    fi
+}
+
+# ── Command: open ─────────────────────────────────────────────────────────
+cmd_open() {
+    local device
+    device="$(find_persist_part "${1:-}")"
+
+    if [[ -z "$device" ]]; then
+        die "Persistence partition not found. Specify device: codex-usb-persist open /dev/sdX3"
+    fi
+
+    if is_luks_open; then
+        echo "LUKS persistence already unlocked (/dev/mapper/${LUKS_MAPPER})."
+        return 0
+    fi
+
+    echo "Opening LUKS persistence: $device"
+    echo -n "Passphrase: "
+    read -rs PASSPHRASE
+    echo ""
+
+    if [[ -z "$PASSPHRASE" ]]; then
+        die "Passphrase required."
+    fi
+
+    if echo -n "$PASSPHRASE" | cryptsetup open "$device" "$LUKS_MAPPER" -; then
+        echo "✓ Persistence unlocked."
+        log_action "open_ok device=$device"
+    else
+        die "Failed to unlock. Wrong passphrase or device error."
+    fi
+    unset PASSPHRASE
+}
+
+# ── Command: close ────────────────────────────────────────────────────────
+cmd_close() {
+    if is_mounted; then
+        echo "Unmounting persistence..."
+        umount "$MOUNT_POINT" || die "Failed to unmount $MOUNT_POINT"
+    fi
+
+    if is_luks_open; then
+        echo "Closing LUKS persistence..."
+        cryptsetup close "$LUKS_MAPPER" || die "Failed to close LUKS mapper"
+        echo "✓ Persistence closed."
+        log_action "close_ok"
+    else
+        echo "Persistence is already closed."
+    fi
+}
+
+# ── Command: mount ────────────────────────────────────────────────────────
+cmd_mount() {
+    if is_mounted; then
+        echo "Persistence already mounted at $MOUNT_POINT"
+        return 0
+    fi
+
+    if ! is_luks_open; then
+        cmd_open "${1:-}"
+    fi
+
+    mkdir -p "$MOUNT_POINT"
+
+    if mount "/dev/mapper/${LUKS_MAPPER}" "$MOUNT_POINT"; then
+        echo "✓ Persistence mounted at $MOUNT_POINT"
+        log_action "mount_ok mountpoint=$MOUNT_POINT"
+
+        # Ensure subdirectories exist
+        mkdir -p "${PERSIST_DIR}/"{logs,backups,state,workspace}
+    else
+        die "Failed to mount persistence."
+    fi
+}
+
+# ── Command: unmount ──────────────────────────────────────────────────────
+cmd_unmount() {
+    if ! is_mounted; then
+        echo "Persistence is not mounted."
+        return 0
+    fi
+
+    echo "Unmounting persistence..."
+    if umount "$MOUNT_POINT"; then
+        echo "✓ Persistence unmounted."
+        log_action "unmount_ok"
+    else
+        die "Failed to unmount. Check for open files: lsof $MOUNT_POINT"
+    fi
+
+    # Optionally close LUKS
+    if is_luks_open; then
+        echo "Closing LUKS mapper..."
+        cryptsetup close "$LUKS_MAPPER" 2>/dev/null || true
+        log_action "close_ok"
+    fi
+}
+
+# ── Command: resize ───────────────────────────────────────────────────────
+cmd_resize() {
+    local device="$1"
+    local new_size="$2"
+
+    if [[ -z "$device" ]] || [[ -z "$new_size" ]]; then
+        echo "Usage: codex-usb-persist resize /dev/sdX3 SIZE"
+        echo "  SIZE can be: +500M, -1G, 8G, max"
+        die "Device and size required."
+    fi
+
+    if [[ ! -b "$device" ]]; then
+        die "Not a block device: $device"
+    fi
+
+    # We cannot resize a partition if LUKS is open and mounted
+    if is_mounted; then
+        die "Unmount persistence first: codex-usb-persist unmount"
+    fi
+    if is_luks_open; then
+        die "Close LUKS first: codex-usb-persist close"
+    fi
+
+    echo "⚠ WARNING: Resizing partitions is potentially destructive."
+    echo "  Device: $device"
+    echo "  New size: $new_size"
+    echo ""
+    echo -n "Type RESIZE to confirm: "
+    read -r confirm
+    if [[ "$confirm" != "RESIZE" ]]; then
+        echo "Aborted."
+        return 0
+    fi
+
+    log_action "resize_start device=$device size=$new_size"
+
+    # Resize partition using sgdisk
+    if command -v sgdisk &>/dev/null; then
+        local part_num
+        # Extract partition number from device
+        if [[ "$device" =~ ^/dev/(nvme[0-9]+n[0-9]+)p([0-9]+)$ ]]; then
+            part_num="${BASH_REMATCH[2]}"
+            local disk="/dev/${BASH_REMATCH[1]}"
+        elif [[ "$device" =~ ^/dev/([a-z]+)([0-9]+)$ ]]; then
+            part_num="${BASH_REMATCH[2]}"
+            local disk="/dev/${BASH_REMATCH[1]}"
+        else
+            die "Cannot parse partition number from $device"
+        fi
+
+        if [[ "$new_size" == "max" ]]; then
+            # Delete and recreate partition to fill remaining space
+            echo "Resizing to maximum..."
+            sgdisk -d "$part_num" "$disk" 2>/dev/null
+            sgdisk -N "$part_num" "$disk" 2>/dev/null
+            sgdisk -t "$part_num":8300 "$disk" 2>/dev/null
+            sgdisk -c "$part_num":"CodexOS Persistence" "$disk" 2>/dev/null
+        else
+            echo "Note: Precise partition resizing with sgdisk requires careful calculation."
+            echo "Consider using 'max' for automatic resize, or use a partitioning tool."
+        fi
+
+        partprobe "$device" 2>/dev/null || true
+        sleep 2
+
+        # Resize LUKS if the partition contains LUKS
+        if blkid -s TYPE -o value "$device" 2>/dev/null | grep -qi luks; then
+            echo "Opening LUKS to resize..."
+            echo -n "Passphrase: "
+            read -rs PASSPHRASE
+            echo ""
+            echo -n "$PASSPHRASE" | cryptsetup open "$device" "$LUKS_MAPPER" -
+            cryptsetup resize "$LUKS_MAPPER" 2>/dev/null
+            e2fsck -f -y "/dev/mapper/${LUKS_MAPPER}" 2>/dev/null
+            resize2fs "/dev/mapper/${LUKS_MAPPER}" 2>/dev/null
+            cryptsetup close "$LUKS_MAPPER"
+            unset PASSPHRASE
+            echo "✓ LUKS container and filesystem resized."
+        fi
+
+        log_action "resize_ok device=$device size=$new_size"
+        echo "✓ Partition resized. Verify with: codex-usb-persist status $device"
+    else
+        die "sgdisk required for partition resize. Install: apk add gptfdisk"
+    fi
+}
+
+# ── Command: passphrase ───────────────────────────────────────────────────
+cmd_passphrase() {
+    local device
+    device="$(find_persist_part "${1:-}")"
+
+    if [[ -z "$device" ]]; then
+        die "Persistence partition not found."
+    fi
+
+    echo "Changing LUKS passphrase for: $device"
+    echo ""
+    echo -n "Current passphrase: "
+    read -rs OLD_PASS
+    echo ""
+    echo -n "New passphrase: "
+    read -rs NEW_PASS
+    echo ""
+    echo -n "Confirm new passphrase: "
+    read -rs NEW_PASS_CONFIRM
+    echo ""
+
+    if [[ "$NEW_PASS" != "$NEW_PASS_CONFIRM" ]]; then
+        die "New passphrases do not match."
+    fi
+
+    if echo -n "$OLD_PASS" | cryptsetup luksChangeKey "$device" -; then
+        echo "✓ Passphrase changed."
+        log_action "passphrase_changed device=$device"
+    else
+        die "Failed to change passphrase. Wrong current passphrase?"
+    fi
+
+    unset OLD_PASS NEW_PASS NEW_PASS_CONFIRM
+}
+
+# ── Command: info ─────────────────────────────────────────────────────────
+cmd_info() {
+    local device
+    device="$(find_persist_part "${1:-}")"
+
+    if [[ -z "$device" ]]; then
+        echo "Persistence partition not found."
+        return 1
+    fi
+
+    echo "=== Persistence Partition Info ==="
+    echo "Device: $device"
+    echo ""
+
+    # blkid details
+    echo "blkid:"
+    blkid "$device" 2>/dev/null || true
+    echo ""
+
+    # lsblk tree
+    echo "lsblk:"
+    lsblk -o NAME,SIZE,FSTYPE,UUID,LABEL,MOUNTPOINT "$device" 2>/dev/null || true
+    echo ""
+
+    # LUKS info
+    if blkid -s TYPE -o value "$device" 2>/dev/null | grep -qi luks; then
+        echo "LUKS Info:"
+        cryptsetup luksDump "$device" 2>/dev/null | head -20 || true
+        echo ""
+    fi
+
+    # Filesystem info (if open)
+    if [[ -e "/dev/mapper/${LUKS_MAPPER}" ]]; then
+        echo "Filesystem Info:"
+        tune2fs -l "/dev/mapper/${LUKS_MAPPER}" 2>/dev/null | grep -E 'Block count|Block size|Free blocks|Inode count' || true
+        echo ""
+        echo "Usage:"
+        df -h "/dev/mapper/${LUKS_MAPPER}" 2>/dev/null || true
+    fi
+}
+
+# ── Main dispatch ─────────────────────────────────────────────────────────
+COMMAND="${1:-}"
+
+case "${COMMAND:-}" in
+    status|st|"")
+        cmd_status "${2:-}"
+        ;;
+    open|unlock)
+        cmd_open "${2:-}"
+        ;;
+    close|lock)
+        cmd_close
+        ;;
+    mount)
+        cmd_mount "${2:-}"
+        ;;
+    unmount|umount)
+        cmd_unmount
+        ;;
+    resize)
+        cmd_resize "${2:-}" "${3:-}"
+        ;;
+    passphrase|pass|chpass)
+        cmd_passphrase "${2:-}"
+        ;;
+    info|details)
+        cmd_info "${2:-}"
+        ;;
+    help|--help|-h)
+        cat <<EOF
+Usage: codex-usb-persist <COMMAND> [OPTIONS]
+
+Commands:
+  status [DEVICE]     Show persistence status
+  open [DEVICE]       Unlock LUKS persistence
+  close               Lock LUKS persistence
+  mount [DEVICE]      Open + mount at /persist
+  unmount             Unmount + close persistence
+  resize DEVICE SIZE  Resize persistence partition
+  passphrase [DEVICE] Change LUKS passphrase
+  info [DEVICE]       Detailed partition info
+
+If DEVICE is not specified, auto-detection is attempted.
+EOF
+        ;;
+    *)
+        echo "Unknown command: $COMMAND"
+        echo "Run 'codex-usb-persist help' for usage."
+        exit 1
+        ;;
+esac

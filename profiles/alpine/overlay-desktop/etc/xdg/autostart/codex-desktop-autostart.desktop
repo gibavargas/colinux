@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Codex Desktop
+Comment=OpenAI Codex Desktop App
+Exec=/opt/codex-desktop/codex-desktop %U
+Icon=codex-desktop
+Terminal=false
+Categories=Development;IDE;
+StartupNotify=true
+X-GNOME-Autostart-enabled=true

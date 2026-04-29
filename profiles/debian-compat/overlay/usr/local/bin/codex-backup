@@ -1,0 +1,173 @@
+#!/bin/bash
+# codex-backup — Create tar snapshots of /persist and /workspace
+# Part of CodexOS Lite
+#
+# Usage: codex-backup [OPTIONS]
+#   (no args)    — Create a timestamped backup of both /persist and /workspace
+#   --persist    — Only backup /persist
+#   --workspace  — Only backup /workspace
+#   --list       — List existing backups
+#   --prune N    — Keep only the last N backups, delete older ones
+#   --dest DIR   — Backup destination (default: /persist/backups)
+#
+# NOTE: To restore a backup, use codex-restore (separate command with
+# path validation). Restore functionality was removed from this script
+# for security reasons.
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+WORKSPACE_DIR="/workspace"
+BACKUP_DIR="${PERSIST_DIR}/backups"
+LOG_DIR="${PERSIST_DIR}/logs"
+LOGFILE="${LOG_DIR}/backup.log"
+
+mkdir -p "$BACKUP_DIR" "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] backup: $*" >> "$LOGFILE"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────
+BACKUP_PERSIST=true
+BACKUP_WORKSPACE=true
+LIST_ONLY=false
+PRUNE_COUNT=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --persist)
+            BACKUP_PERSIST=true
+            BACKUP_WORKSPACE=false
+            shift
+            ;;
+        --workspace)
+            BACKUP_PERSIST=false
+            BACKUP_WORKSPACE=true
+            shift
+            ;;
+        --list|list)
+            LIST_ONLY=true
+            shift
+            ;;
+        --prune)
+            PRUNE_COUNT="${2:?--prune requires a number}"
+            shift 2
+            ;;
+        --dest)
+            BACKUP_DIR="${2:?--dest requires a directory}"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: codex-backup [OPTIONS]"
+            echo ""
+            echo "Create snapshots of /persist and /workspace."
+            echo ""
+            echo "Options:"
+            echo "  --persist       Only backup /persist"
+            echo "  --workspace     Only backup /workspace"
+            echo "  --list          List existing backups"
+            echo "  --prune N       Keep only last N backups"
+            echo "  --dest DIR      Backup destination (default: /persist/backups)"
+            echo ""
+            echo "To restore: use codex-restore (separate command)"
+            exit 0
+            ;;
+        *)
+            die "Unknown option: $1"
+            ;;
+    esac
+done
+
+mkdir -p "$BACKUP_DIR"
+
+# ── List backups ──────────────────────────────────────────────────────────
+if [[ "$LIST_ONLY" == true ]]; then
+    echo "=== CodexOS Backups ==="
+    echo "Location: $BACKUP_DIR"
+    echo ""
+
+    if ! ls -1t "$BACKUP_DIR"/*.tar.gz 2>/dev/null | head -1 | read -r; then
+        echo "(no backups found)"
+        exit 0
+    fi
+
+    for f in "$BACKUP_DIR"/*.tar.gz; do
+        [[ -f "$f" ]] || continue
+        local_f="${f##*/}"
+        local_size="$(du -sh "$f" 2>/dev/null | awk '{print $1}')"
+        local_date="$(stat -c '%y' "$f" 2>/dev/null | cut -d. -f1)"
+        echo "  $local_f  ($local_size)  $local_date"
+    done | sort -r
+
+    echo ""
+    echo "Total: $(ls -1 "$BACKUP_DIR"/*.tar.gz 2>/dev/null | wc -l) backup(s)"
+    echo "Size:  $(du -sh "$BACKUP_DIR" 2>/dev/null | awk '{print $1}')"
+    exit 0
+fi
+
+# ── Prune old backups ─────────────────────────────────────────────────────
+if [[ "$PRUNE_COUNT" -gt 0 ]]; then
+    total="$(ls -1t "$BACKUP_DIR"/*.tar.gz 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$total" -gt "$PRUNE_COUNT" ]]; then
+        delete_count=$((total - PRUNE_COUNT))
+        echo "Pruning: keeping last $PRUNE_COUNT backups, deleting $delete_count old backup(s)..."
+        ls -1t "$BACKUP_DIR"/*.tar.gz | tail -n "$delete_count" | while read -r old_backup; do
+            echo "  Deleting: ${old_backup##*/}"
+            rm -f "$old_backup"
+        done
+        log_action "prune kept=$PRUNE_COUNT deleted=$delete_count"
+    else
+        echo "Nothing to prune (only $total backup(s) exist)."
+    fi
+fi
+
+# ── Create backup ─────────────────────────────────────────────────────────
+TIMESTAMP="$(date -u '+%Y%m%d-%H%M%S')"
+HOSTNAME="$(hostname -s 2>/dev/null || echo 'codex')"
+BACKUP_FILE="${BACKUP_DIR}/codexos-${HOSTNAME}-${TIMESTAMP}.tar.gz"
+
+# Build list of paths to backup
+PATHS=()
+
+if [[ "$BACKUP_PERSIST" == true ]] && [[ -d "$PERSIST_DIR" ]]; then
+    PATHS+=("$PERSIST_DIR")
+fi
+
+if [[ "$BACKUP_WORKSPACE" == true ]] && [[ -d "$WORKSPACE_DIR" ]]; then
+    PATHS+=("$WORKSPACE_DIR")
+fi
+
+if [[ ${#PATHS[@]} -eq 0 ]]; then
+    echo "Nothing to backup (no /persist or /workspace found)."
+    exit 0
+fi
+
+echo "Creating backup..."
+echo "  Paths: ${PATHS[*]}"
+echo "  File:  $BACKUP_FILE"
+log_action "backup_start paths=${PATHS[*]} file=${BACKUP_FILE##*/}"
+
+# Create compressed tar archive
+# Exclude certain directories to save space
+EXCLUDES=(
+    --exclude='*.sock'
+    --exclude='*.pid'
+    --exclude='__pycache__'
+    --exclude='.cache'
+    --exclude='node_modules/.cache'
+    --exclude='/persist/backups/*.tar.gz'
+)
+
+tar czf "$BACKUP_FILE" "${EXCLUDES[@]}" "${PATHS[@]}" 2>&1
+
+BACKUP_SIZE="$(du -sh "$BACKUP_FILE" | awk '{print $1}')"
+echo "✓ Backup complete: ${BACKUP_FILE##*/} ($BACKUP_SIZE)"
+log_action "backup_ok file=${BACKUP_FILE##*/} size=$BACKUP_SIZE"

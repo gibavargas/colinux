@@ -1,0 +1,63 @@
+# dconf database — CodexOS Desktop defaults
+# Dark theme, no animations, Codex-focused GNOME settings
+
+[org/gnome/desktop/interface]
+gtk-theme='Adwaita-dark'
+color-scheme='prefer-dark'
+clock-show-weekday=true
+enable-hot-corners=false
+font-name='DejaVu Sans 11'
+document-font-name='DejaVu Sans 11'
+monospace-font-name='DejaVu Sans Mono 11'
+
+[org/gnome/desktop/wm/preferences]
+button-layout='appmenu:minimize,maximize,close'
+num-workspaces=2
+
+[org/gnome/desktop/peripherals/touchpad]
+tap-to-click=true
+natural-scroll=false
+click-method='areas'
+
+[org/gnome/mutter]
+center-new-windows=true
+dynamic-workspaces=false
+workspaces-only-on-primary=true
+
+[org/gnome/desktop/session]
+idle-delay=0
+
+[org/gnome/desktop/screensaver]
+lock-enabled=false
+lock-delay=0
+
+[org/gnome/desktop/background]
+picture-uri='none'
+picture-uri-dark='none'
+primary-color='#2e3436'
+secondary-color='#1a1a1a'
+
+[org/gnome/desktop/notifications]
+show-banners=true
+
+[org/gnome/settings-daemon/plugins/color]
+night-light-enabled=false
+
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-ac-type='nothing'
+sleep-inactive-battery-type='nothing'
+power-button-action='nothing'
+lid-close-action='nothing'
+
+[org/gnome/shell]
+favorite-apps=['org.gnome.Terminal.desktop', 'org.gnome.Nautilus.desktop', 'codex-desktop.desktop', 'firefox.desktop']
+disable-user-extensions=true
+enabled-extensions=['']
+
+[org/gnome/terminal/legacy/profiles:/:b1dcc9dd-5262-4d8d-a863-c897e6d67902']
+background-color='rgba(0,0,0,0.9)'
+foreground-color='rgb(200,200,200)'
+use-theme-colors=false
+font='DejaVu Sans Mono 12'
+cursor-shape='block'
+scrollback-unlimited=true

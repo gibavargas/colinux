@@ -1,0 +1,13 @@
+# CodexOS Shared Packages — Debian Network/WiFi
+# Used by all editions for network connectivity and WiFi support
+
+iwd
+wpasupplicant
+dhcpcd5
+wireless-tools
+iw
+crda
+dialog
+rfkill
+ethtool
+network-manager

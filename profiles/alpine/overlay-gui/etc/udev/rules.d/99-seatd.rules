@@ -1,0 +1,20 @@
+# CodexOS — seatd udev rules
+# Allows non-root users in the 'seatd' group to access GPU, input, and DRM devices.
+# Required for cage/sway to work without root privileges.
+
+# DRM (Direct Rendering Manager) — GPU access
+SUBSYSTEM=="drm", GROUP="video", MODE="0660"
+
+# Input devices — keyboard, mouse, touchpad
+KERNEL=="event*", SUBSYSTEM=="input", GROUP="input", MODE="0660"
+KERNEL=="mouse*", SUBSYSTEM=="input", GROUP="input", MODE="0660"
+KERNEL=="ts*", SUBSYSTEM="input", GROUP="input", MODE="0660"
+
+# DRI (Direct Rendering Infrastructure) — 3D acceleration
+SUBSYSTEM=="dri", GROUP="video", MODE="0666"
+
+# Render nodes
+SUBSYSTEM=="render", GROUP="video", MODE="0666"
+
+# Seat device for seatd
+KERNEL=="seat0", TAG+="systemd", MODE="0660"

@@ -1,0 +1,6 @@
+[Desktop Actions codex-desktop]
+Identity=unix-user:codex
+Action=org.freedesktop.udisks2.filesystem-mount;org.freedesktop.udisks2.filesystem-mount-system;org.freedesktop.udisks2.loop-modify;org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes

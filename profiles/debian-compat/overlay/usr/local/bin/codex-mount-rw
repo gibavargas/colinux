@@ -1,0 +1,263 @@
+#!/bin/bash
+# codex-mount-rw — Mount a block device read-write with serial confirmation
+# Part of CodexOS Lite
+#
+# Usage: codex-mount-rw --confirm SERIAL /dev/sdX1 [--timeout MINUTES]
+#
+# Safety: The --confirm flag with the correct disk serial number is REQUIRED.
+# Additional safety: boot device check, forensic mode check, TTY requirement,
+# serial readability check, and auto-remount-ro timeout.
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+MOUNT_BASE="/mnt/disks"
+
+mkdir -p "$LOG_DIR" "$MOUNT_BASE/by-device" "$MOUNT_BASE/by-label" "$MOUNT_BASE/by-uuid"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] mount-rw: $*" >> "$LOGFILE"
+}
+
+usage() {
+    echo "Usage: codex-mount-rw --confirm SERIAL <device> [--timeout MINUTES]"
+    echo ""
+    echo "Mount a block device read-write at ${MOUNT_BASE}/by-device/<name>"
+    echo ""
+    echo "WARNING: Read-write mount. You MUST confirm with the disk serial number."
+    echo ""
+    echo "Options:"
+    echo "  --confirm SERIAL  Required. The serial number of the target disk."
+    echo "  --noexec          Add noexec flag (default: not set for rw mounts)"
+    echo "  --timeout MINUTES Auto-remount read-only after N minutes (default: 15)"
+    echo ""
+    echo "Examples:"
+    echo "  codex-mount-rw --confirm WXYZ12345 /dev/sdb1"
+    echo "  codex-mount-rw --confirm WXYZ12345 --noexec /dev/nvme0n1p3"
+    echo "  codex-mount-rw --confirm WXYZ12345 --timeout 30 /dev/sdb1"
+    exit 1
+}
+
+# ── Parse arguments ───────────────────────────────────────────────────────
+CONFIRM_SERIAL=""
+DEVICE=""
+EXTRA_OPTS=""
+TIMEOUT_MINUTES="${CODEX_RW_TIMEOUT:-15}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --confirm)
+            if [[ -z "${2:-}" ]]; then
+                echo "ERROR: --confirm requires a serial number argument." >&2
+                exit 1
+            fi
+            CONFIRM_SERIAL="$2"
+            shift 2
+            ;;
+        --noexec)
+            EXTRA_OPTS+=",noexec"
+            shift
+            ;;
+        --timeout)
+            TIMEOUT_MINUTES="${2:?--timeout requires a number}"
+            shift 2
+            ;;
+        --help|-h)
+            usage
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            if [[ -n "$DEVICE" ]]; then
+                echo "ERROR: Multiple devices specified." >&2
+                exit 1
+            fi
+            DEVICE="$1"
+            shift
+            ;;
+    esac
+done
+
+# ── Validate arguments ────────────────────────────────────────────────────
+if [[ -z "$DEVICE" ]]; then
+    usage
+fi
+
+if [[ -z "$CONFIRM_SERIAL" ]]; then
+    echo "ERROR: --confirm SERIAL is required for read-write mounts." >&2
+    echo "" >&2
+    echo "This safety check prevents accidental write-mount of the wrong disk." >&2
+    echo "Get the serial with: lsblk -d -o NAME,SERIAL /dev/sdX" >&2
+    echo "or: codex-disk-inventory" >&2
+    log_action "FAILED missing_serial device=$DEVICE"
+    exit 1
+fi
+
+# ── Require interactive terminal ──────────────────────────────────────────
+if [[ ! -t 0 ]]; then
+    echo "ERROR: Read-write mounts require an interactive terminal." >&2
+    echo "This is a safety measure to prevent automated write operations." >&2
+    log_action "FAILED no_tty device=$DEVICE"
+    exit 1
+fi
+
+if [[ ! -b "$DEVICE" ]]; then
+    echo "ERROR: $DEVICE is not a valid block device." >&2
+    log_action "FAILED device_not_block device=$DEVICE"
+    exit 1
+fi
+
+# ── Check if device is the boot device ────────────────────────────────────
+BOOT_DEV=""
+if [[ -f /proc/cmdline ]]; then
+    cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
+    if [[ -n "$cmdline_root" ]]; then
+        if [[ "$cmdline_root" == /dev/* ]]; then
+            BOOT_DEV="${cmdline_root%%[0-9]*}"
+            BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
+        elif [[ "$cmdline_root" == PARTUUID=* ]]; then
+            puuid="${cmdline_root#PARTUUID=}"
+            BOOT_DEV="$(blkid -t "PARTUUID=${puuid}" -o device 2>/dev/null | head -1 || true)"
+            BOOT_DEV="${BOOT_DEV%%[0-9]*}"
+            BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
+        fi
+    fi
+fi
+if [[ -z "$BOOT_DEV" ]]; then
+    BOOT_DEV="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
+    BOOT_DEV="${BOOT_DEV%%[0-9]*}"
+    BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
+fi
+
+# Resolve target device to parent for comparison
+PARENT_DEV="$DEVICE"
+if [[ "$DEVICE" =~ ^/dev/(nvme[0-9]+n[0-9]+)p[0-9]+$ ]]; then
+    PARENT_DEV="/dev/${BASH_REMATCH[1]}"
+elif [[ "$DEVICE" =~ ^/dev/([a-z]+)[0-9]+$ ]]; then
+    PARENT_DEV="/dev/${BASH_REMATCH[1]}"
+elif [[ "$DEVICE" =~ ^/dev/(mmcblk[0-9]+)p[0-9]+$ ]]; then
+    PARENT_DEV="/dev/${BASH_REMATCH[1]}"
+fi
+
+if [[ -n "$BOOT_DEV" && "$PARENT_DEV" == "$BOOT_DEV" ]]; then
+    echo "ERROR: REFUSING to write-mount the boot device." >&2
+    echo "  Device: $DEVICE (parent: $PARENT_DEV)" >&2
+    echo "  Boot device: $BOOT_DEV" >&2
+    echo "  Writing to the boot device can destroy the running system." >&2
+    log_action "FAILED boot_device device=$DEVICE parent=$PARENT_DEV boot=$BOOT_DEV"
+    exit 1
+fi
+
+# ── Check forensic mode ───────────────────────────────────────────────────
+if [[ -f /persist/config/forensic-mode ]]; then
+    echo "ERROR: REFUSING write-mount — system is in FORENSIC MODE." >&2
+    echo "Forensic mode prevents all write operations to external devices." >&2
+    echo "Disable forensic mode to allow write mounts." >&2
+    log_action "FAILED forensic_mode device=$DEVICE"
+    exit 1
+fi
+
+# ── Retrieve actual disk serial ───────────────────────────────────────────
+ACTUAL_SERIAL=""
+ACTUAL_SERIAL="$(lsblk -d -n -o SERIAL "$PARENT_DEV" 2>/dev/null | tr -d ' ' || true)"
+if [[ -z "$ACTUAL_SERIAL" ]] && command -v hdparm &>/dev/null; then
+    ACTUAL_SERIAL="$(hdparm -I "$PARENT_DEV" 2>/dev/null | grep -i 'Serial Number' | awk -F: '{print $2}' | tr -d ' ' || true)"
+fi
+if [[ -z "$ACTUAL_SERIAL" ]] && [[ -d "/sys/block/${PARENT_DEV##*/}" ]]; then
+    ACTUAL_SERIAL="$(cat "/sys/block/${PARENT_DEV##*/}/device/serial" 2>/dev/null | tr -d ' ' || true)"
+fi
+
+# Normalize both serials for comparison (trim whitespace, uppercase)
+CONFIRM_NORMALIZED="$(echo "$CONFIRM_SERIAL" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+ACTUAL_NORMALIZED="$(echo "$ACTUAL_SERIAL" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+
+if [[ -z "$ACTUAL_NORMALIZED" ]]; then
+    echo "ERROR: Could not read serial number from $PARENT_DEV." >&2
+    echo "This device does not report a serial number." >&2
+    echo "Write-mount is REFUSED when serial cannot be verified." >&2
+    log_action "FAILED no_serial device=$DEVICE parent=$PARENT_DEV confirm=$CONFIRM_SERIAL"
+    exit 1
+fi
+
+if [[ "$CONFIRM_NORMALIZED" != "$ACTUAL_NORMALIZED" ]]; then
+    echo "ERROR: Serial number mismatch!" >&2
+    echo "  Expected: ${CONFIRM_SERIAL}" >&2
+    echo "  Actual:   ${ACTUAL_SERIAL}" >&2
+    echo "" >&2
+    echo "Refusing to mount. Verify the device and try again." >&2
+    log_action "FAILED serial_mismatch device=$DEVICE expected=$CONFIRM_SERIAL actual=$ACTUAL_SERIAL"
+    exit 1
+fi
+echo "Serial confirmed: ${ACTUAL_SERIAL}"
+
+DEVNAME="${DEVICE##*/}"
+MOUNT_POINT="${MOUNT_BASE}/by-device/${DEVNAME}"
+
+# Check if already mounted
+if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+    echo "Device $DEVICE is already mounted at $MOUNT_POINT" >&2
+    log_action "ALREADY_MOUNTED device=$DEVICE mountpoint=$MOUNT_POINT"
+    exit 0
+fi
+
+# ── Get filesystem info (safe, no eval) ───────────────────────────────────
+FS_TYPE="$(blkid -s TYPE -o value "$DEVICE" 2>/dev/null || echo "")"
+LABEL="$(blkid -s LABEL -o value "$DEVICE" 2>/dev/null || echo "")"
+UUID="$(blkid -s UUID -o value "$DEVICE" 2>/dev/null || echo "")"
+
+if [[ -z "$FS_TYPE" ]]; then
+    echo "WARNING: Could not detect filesystem type. Attempting auto..." >&2
+    FS_TYPE="auto"
+fi
+
+# ── Perform mount ─────────────────────────────────────────────────────────
+mkdir -p "$MOUNT_POINT"
+
+MOUNT_OPTS="rw,nosuid,nodev${EXTRA_OPTS}"
+
+if mount -o "$MOUNT_OPTS" "$DEVICE" "$MOUNT_POINT"; then
+    CALLER="$(whoami 2>/dev/null || echo 'unknown')"
+    echo "Mounted $DEVICE (rw) at $MOUNT_POINT"
+    echo "Auto-remount-ro in ${TIMEOUT_MINUTES} minutes. Use 'mount -o remount,ro $MOUNT_POINT' to remount early."
+    log_action "OK device=$DEVICE fs=$FS_TYPE mountpoint=$MOUNT_POINT serial=$ACTUAL_SERIAL caller=$CALLER timeout=${TIMEOUT_MINUTES}m"
+else
+    echo "ERROR: Failed to mount $DEVICE read-write." >&2
+    log_action "FAILED mount_error device=$DEVICE fs=$FS_TYPE"
+    exit 1
+fi
+
+# ── Create by-label symlink ───────────────────────────────────────────────
+if [[ -n "$LABEL" ]]; then
+    local_symlink_path="${MOUNT_BASE}/by-label/${LABEL}"
+    [[ -L "$local_symlink_path" ]] && rm -f "$local_symlink_path"
+    ln -s "$MOUNT_POINT" "$local_symlink_path"
+    echo "  → symlink: by-label/${LABEL}"
+fi
+
+# ── Create by-uuid symlink ────────────────────────────────────────────────
+if [[ -n "$UUID" ]]; then
+    local_symlink_path="${MOUNT_BASE}/by-uuid/${UUID}"
+    [[ -L "$local_symlink_path" ]] && rm -f "$local_symlink_path"
+    ln -s "$MOUNT_POINT" "$local_symlink_path"
+    echo "  → symlink: by-uuid/${UUID}"
+fi
+
+# ── Schedule auto-remount-ro ──────────────────────────────────────────────
+if [[ "$TIMEOUT_MINUTES" -gt 0 ]]; then
+    (
+        sleep "$((TIMEOUT_MINUTES * 60))"
+        if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+            mount -o remount,ro "$MOUNT_POINT" 2>/dev/null && {
+                log_action "AUTO_REMOUNT_RO device=$DEVICE mountpoint=$MOUNT_POINT timeout=${TIMEOUT_MINUTES}m"
+                echo "Auto-remounted $DEVICE read-only (timeout: ${TIMEOUT_MINUTES}m)" >> "$LOGFILE"
+            } || true
+        fi
+    ) &
+    echo "  → Auto-remount-ro scheduled: ${TIMEOUT_MINUTES} minutes"
+fi
+
+echo "Done."

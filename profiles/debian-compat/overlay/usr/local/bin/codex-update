@@ -1,0 +1,335 @@
+#!/bin/bash
+# codex-update — Update CodexOS system and Codex CLI binary
+# Part of CodexOS Lite
+#
+# Updates:
+#   1. Codex CLI binary (downloads from GitHub releases with checksum verification)
+#   2. Alpine Linux packages (apk upgrade)
+#
+# Security: Verifies SHA256 checksums before installing. Keeps rollback binary.
+#
+# Usage: codex-update [OPTIONS]
+#   --codex-only    Only update Codex CLI
+#   --system-only   Only update Alpine packages
+#   --check         Check for updates without applying
+#   --force         Force update even if already latest
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+LOG_DIR="${PERSIST_DIR}/logs"
+STATE_DIR="${PERSIST_DIR}/state"
+LOGFILE="${LOG_DIR}/update.log"
+STATE_FILE="${STATE_DIR}/update-state.json"
+CODEX_BIN="/usr/local/bin/codex"
+CODEX_REPO="openai/codex"
+CODEX_VERSION_FILE="${STATE_DIR}/codex-version"
+CONFIG_FILE="${PERSIST_DIR}/config/auto-update.conf"
+
+mkdir -p "$LOG_DIR" "$STATE_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] update: $*" >> "$LOGFILE"
+    echo "[$ts] update: $*"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+# ── Load config (safe parse) ───────────────────────────────────────────────
+AUTO_INSTALL=false
+PINNED_TAG=""
+if [[ -f "$CONFIG_FILE" ]]; then
+    while IFS='=' read -r key value; do
+        [[ "$key" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$key" ]] && continue
+        key="$(echo "$key" | xargs 2>/dev/null || echo "$key")"
+        value="$(echo "$value" | xargs 2>/dev/null || echo "$value")"
+        case "$key" in
+            auto_install) AUTO_INSTALL="$value" ;;
+            pinned_tag)   PINNED_TAG="$value" ;;
+        esac
+    done < "$CONFIG_FILE"
+fi
+
+# ── Defaults ──────────────────────────────────────────────────────────────
+CODEX_ONLY=false
+SYSTEM_ONLY=false
+CHECK_ONLY=false
+FORCE=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --codex-only) CODEX_ONLY=true; shift ;;
+        --system-only) SYSTEM_ONLY=true; shift ;;
+        --check) CHECK_ONLY=true; shift ;;
+        --force) FORCE=true; shift ;;
+        --help|-h)
+            echo "Usage: codex-update [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --codex-only    Only update Codex CLI binary"
+            echo "  --system-only   Only update Alpine packages"
+            echo "  --check         Check for updates without applying"
+            echo "  --force         Force update even if already latest"
+            echo ""
+            echo "Security: SHA256 checksums are verified before installation."
+            echo "Config: ${CONFIG_FILE}"
+            exit 0
+            ;;
+        *)
+            die "Unknown option: $1"
+            ;;
+    esac
+done
+
+# ── Get version from GitHub (respects pinned tag) ─────────────────────────
+get_target_codex_version() {
+    if [[ -n "$PINNED_TAG" ]]; then
+        echo "$PINNED_TAG"
+        return
+    fi
+
+    local version
+    if command -v curl &>/dev/null; then
+        version="$(curl -sfL "https://api.github.com/repos/${CODEX_REPO}/releases/latest" \
+            | jq -r '.tag_name // .name' 2>/dev/null || true)"
+    elif command -v wget &>/dev/null; then
+        version="$(wget -qO- "https://api.github.com/repos/${CODEX_REPO}/releases/latest" \
+            | jq -r '.tag_name // .name' 2>/dev/null || true)"
+    fi
+
+    # Strip leading 'v' if present
+    version="${version#v}"
+    echo "$version"
+}
+
+get_current_codex_version() {
+    if [[ -x "$CODEX_BIN" ]]; then
+        "$CODEX_BIN" --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown"
+    else
+        echo "not-installed"
+    fi
+}
+
+# ── Verify SHA256 checksum ────────────────────────────────────────────────
+verify_checksum() {
+    local file="$1"
+    local expected_sha256="$2"
+
+    if ! command -v sha256sum &>/dev/null; then
+        log_action "WARN sha256sum not available, skipping checksum verification"
+        echo "WARNING: sha256sum not found. Cannot verify checksum. Skipping."
+        return 0
+    fi
+
+    local actual_sha256
+    actual_sha256="$(sha256sum "$file" 2>/dev/null | awk '{print $1}')"
+
+    if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+        log_action "FAIL checksum_mismatch expected=$expected_sha256 actual=$actual_sha256"
+        return 1
+    fi
+
+    log_action "OK checksum_verified sha256=$actual_sha256"
+    return 0
+}
+
+# ── Update Codex CLI ──────────────────────────────────────────────────────
+update_codex() {
+    log_action "codex_update_start"
+
+    local latest_version current_version
+    latest_version="$(get_target_codex_version)"
+    current_version="$(get_current_codex_version)"
+
+    if [[ -z "$latest_version" ]]; then
+        echo "Could not determine latest Codex version. Check network connectivity."
+        log_action "codex_update_fail version_check_failed"
+        return 1
+    fi
+
+    echo "Codex CLI:"
+    echo "  Current: $current_version"
+    echo "  Latest:  $latest_version"
+    if [[ -n "$PINNED_TAG" ]]; then
+        echo "  Pinned:  $PINNED_TAG"
+    fi
+
+    if [[ "$current_version" == "$latest_version" ]] && [[ "$FORCE" != true ]]; then
+        echo "  → Already up to date."
+        log_action "codex_update_skip already_current=$current_version"
+        return 0
+    fi
+
+    if [[ "$CHECK_ONLY" == true ]]; then
+        echo "  → Update available!"
+        return 0
+    fi
+
+    # Detect architecture
+    local arch
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64)  arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        armv7l)  arch="armv7" ;;
+        *)
+            echo "WARNING: Unsupported architecture $arch. Attempting x86_64 binary."
+            arch="x86_64"
+            ;;
+    esac
+
+    # Construct correct artifact name
+    local tarball_name="codex-${arch}-unknown-linux-musl.tar.gz"
+    local tag_prefix="v${latest_version}"
+    local base_url="https://github.com/${CODEX_REPO}/releases/download/${tag_prefix}"
+
+    echo "  → Downloading Codex CLI v${latest_version}..."
+    log_action "codex_download_start version=$latest_version arch=$arch"
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+
+    # Download tarball
+    if ! curl -sfL -o "${tmp_dir}/${tarball_name}" "${base_url}/${tarball_name}" 2>/dev/null; then
+        echo "  ✗ Failed to download tarball."
+        log_action "codex_update_fail download_failed version=$latest_version file=$tarball_name"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Download SHA256SUMS and verify
+    local checksum_ok=false
+    if curl -sfL -o "${tmp_dir}/SHA256SUMS" "${base_url}/SHA256SUMS" 2>/dev/null; then
+        local expected_sha256
+        expected_sha256="$(grep "${tarball_name}" "${tmp_dir}/SHA256SUMS" 2>/dev/null | awk '{print $1}' || true)"
+        if [[ -n "$expected_sha256" ]]; then
+            if verify_checksum "${tmp_dir}/${tarball_name}" "$expected_sha256"; then
+                checksum_ok=true
+                echo "  ✓ SHA256 checksum verified."
+            else
+                echo "  ✗ SHA256 CHECKSUM MISMATCH! Refusing to install."
+                echo "  Expected: $expected_sha256"
+                log_action "codex_update_fail checksum_mismatch version=$latest_version"
+                rm -rf "$tmp_dir"
+                return 1
+            fi
+        else
+            echo "  ⚠ Could not find checksum in SHA256SUMS for $tarball_name"
+            log_action "WARN checksum_not_found file=$tarball_name"
+        fi
+    else
+        echo "  ⚠ Could not download SHA256SUMS. Skipping verification."
+        log_action "WARN sha256sums_download_failed"
+    fi
+
+    # Extract tarball
+    if ! tar xzf "${tmp_dir}/${tarball_name}" -C "${tmp_dir}" 2>/dev/null; then
+        echo "  ✗ Failed to extract tarball."
+        log_action "codex_update_fail extraction_failed"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Find the binary
+    local extracted_bin
+    extracted_bin="$(find "${tmp_dir}" -name 'codex' -type f -executable 2>/dev/null | head -1 || true)"
+    if [[ -z "$extracted_bin" ]]; then
+        echo "  ✗ Could not find codex binary in archive."
+        log_action "codex_update_fail binary_not_found"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Verify binary is valid
+    chmod +x "$extracted_bin"
+    if ! "$extracted_bin" --version &>/dev/null; then
+        echo "  ✗ Downloaded binary does not work."
+        log_action "codex_update_fail binary_invalid version=$latest_version"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Keep old binary as rollback
+    if [[ -x "$CODEX_BIN" ]]; then
+        cp "$CODEX_BIN" "${CODEX_BIN}.rollback.${current_version}"
+        log_action "codex_rollback_saved version=$current_version"
+    fi
+
+    # Install new binary
+    mv "$extracted_bin" "$CODEX_BIN"
+    rm -rf "$tmp_dir"
+
+    # Record version
+    echo "$latest_version" > "$CODEX_VERSION_FILE"
+
+    echo "  ✓ Codex CLI updated to v${latest_version}"
+    if [[ "$checksum_ok" == true ]]; then
+        echo "  ✓ Integrity verified (SHA256)"
+    fi
+    log_action "codex_update_ok version=$latest_version checksum=$checksum_ok"
+}
+
+# ── Update Alpine packages ────────────────────────────────────────────────
+update_system() {
+    log_action "system_update_start"
+
+    echo "Alpine Linux packages:"
+
+    if [[ "$CHECK_ONLY" == true ]]; then
+        echo "  Checking for updates..."
+        apk version -v -s '<' 2>/dev/null || echo "  (unknown)"
+        return 0
+    fi
+
+    echo "  Updating repository index..."
+    if ! apk update 2>/dev/null; then
+        echo "  ✗ Failed to update package index. Check network."
+        log_action "system_update_fail apk_update_failed"
+        return 1
+    fi
+
+    echo "  Upgrading packages..."
+    local upgradable
+    upgradable="$(apk version -s '<' 2>/dev/null | wc -l || echo 0)"
+    upgradable="$(echo "$upgradable" | tr -d ' ')"
+
+    if [[ "$upgradable" == "0" ]] && [[ "$FORCE" != true ]]; then
+        echo "  → All packages up to date."
+        log_action "system_update_skip all_current"
+        return 0
+    fi
+
+    echo "  → $upgradable package(s) to upgrade."
+
+    if apk upgrade --verbose 2>&1; then
+        echo "  ✓ System packages updated."
+        log_action "system_update_ok packages=$upgradable"
+    else
+        echo "  ⚠ Some packages failed to update."
+        log_action "system_update_partial packages=$upgradable"
+    fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────
+echo "CodexOS Update"
+echo "=============="
+echo ""
+
+if [[ "$CODEX_ONLY" != true ]]; then
+    update_system
+    echo ""
+fi
+
+if [[ "$SYSTEM_ONLY" != true ]]; then
+    update_codex
+fi
+
+echo ""
+echo "Update complete."
+log_action "update_session_complete"

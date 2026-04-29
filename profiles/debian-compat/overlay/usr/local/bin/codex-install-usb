@@ -1,0 +1,410 @@
+#!/bin/bash
+# codex-install-usb — Install CodexOS to a USB drive
+# Part of CodexOS Lite
+#
+# Usage: codex-install-usb [OPTIONS] /dev/sdX
+#
+# Modes:
+#   portable-safe    — SquashFS read-only system + LUKS-encrypted persistence (default)
+#   portable-admin   — Ext4 writable system + LUKS persistence (for development)
+#   forensic         — Read-only system, no persistence, chain-verification on boot
+#
+# Partition layout:
+#   1: EFI System Partition (FAT32, 512MB, boot flag)
+#   2: System (squashfs image or ext4, ~2GB)
+#   3: Persistence (LUKS-encrypted ext4, rest of disk)
+#
+# Safety: Requires explicit device confirmation and serial verification.
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+CODEXOS_IMAGE_DIR="${CODEXOS_IMAGE_DIR:-/opt/codexos}"
+
+mkdir -p "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] install-usb: $*" >> "$LOGFILE"
+    echo "[$ts] install-usb: $*"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+usage() {
+    cat <<EOF
+Usage: codex-install-usb [OPTIONS] /dev/sdX
+
+Install CodexOS to a USB drive.
+
+Options:
+  --mode MODE       Installation mode (default: portable-safe)
+                      portable-safe   — Read-only squashfs + LUKS persistence
+                      portable-admin  — Writable ext4 + LUKS persistence
+                      forensic        — Read-only, no persistence
+  --label LABEL     Volume label for EFI partition (default: CODEXOS)
+  --persist-size N  Size in MB for persistence partition (default: remaining)
+  --system-size N   Size in MB for system partition (default: 2048)
+  --efi-size N      Size in MB for EFI partition (default: 512)
+  --no-confirm      Skip interactive confirmation (DANGEROUS)
+  --help            Show this help
+
+Examples:
+  codex-install-usb /dev/sdb
+  codex-install-usb --mode forensic /dev/sdc
+  codex-install-usb --mode portable-admin --persist-size 4096 /dev/sdb
+EOF
+    exit 0
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────
+MODE="portable-safe"
+DEVICE=""
+EFI_SIZE=512
+SYSTEM_SIZE=2048
+PERSIST_SIZE=0  # 0 = use remaining space
+VOLUME_LABEL="CODEXOS"
+NO_CONFIRM=false
+
+# ── Parse arguments ───────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --mode)
+            MODE="${2:?--mode requires an argument}"
+            shift 2
+            ;;
+        --label)
+            VOLUME_LABEL="${2:?--label requires an argument}"
+            shift 2
+            ;;
+        --persist-size)
+            PERSIST_SIZE="${2:?--persist-size requires a number}"
+            shift 2
+            ;;
+        --system-size)
+            SYSTEM_SIZE="${2:?--system-size requires a number}"
+            shift 2
+            ;;
+        --efi-size)
+            EFI_SIZE="${2:?--efi-size requires a number}"
+            shift 2
+            ;;
+        --no-confirm)
+            NO_CONFIRM=true
+            shift
+            ;;
+        --help|-h)
+            usage
+            ;;
+        -*)
+            die "Unknown option: $1"
+            ;;
+        *)
+            if [[ -n "$DEVICE" ]]; then
+                die "Multiple devices specified. Use only one."
+            fi
+            DEVICE="$1"
+            shift
+            ;;
+    esac
+done
+
+# ── Validate mode ─────────────────────────────────────────────────────────
+case "$MODE" in
+    portable-safe|portable-admin|forensic) ;;
+    *) die "Invalid mode: $MODE. Use portable-safe, portable-admin, or forensic." ;;
+esac
+
+# ── Validate device ───────────────────────────────────────────────────────
+if [[ -z "$DEVICE" ]]; then
+    die "No device specified. Usage: codex-install-usb /dev/sdX"
+fi
+
+if [[ ! -b "$DEVICE" ]]; then
+    die "$DEVICE is not a valid block device."
+fi
+
+# Refuse NVMe devices (use codex-install-pc instead)
+if [[ "$DEVICE" == /dev/nvme* ]]; then
+    die "$DEVICE appears to be an NVMe device. Use codex-install-pc for internal drives."
+fi
+
+# ── Gather device info ────────────────────────────────────────────────────
+DEVNAME="${DEVICE##*/}"
+
+# Check if it's mounted
+if lsblk -n -o MOUNTPOINT "$DEVICE" 2>/dev/null | grep -q .; then
+    die "Device $DEVICE has mounted partitions. Unmount all partitions first."
+fi
+
+# Check if any partitions are busy
+for p in "${DEVICE}"*; do
+    if [[ -b "$p" ]] && mountpoint -q "$p" 2>/dev/null; then
+        die "Partition $p is mounted. Unmount before proceeding."
+    fi
+done
+
+# Get device info
+SIZE_BYTES="$(lsblk -d -b -n -o SIZE "$DEVICE" 2>/dev/null || echo 0)"
+SIZE_GB="$(echo "$SIZE_BYTES" | awk '{printf "%.1f", $1/1024/1024/1024}')"
+MODEL="$(lsblk -d -n -o MODEL "$DEVICE" 2>/dev/null | xargs || echo "Unknown")"
+SERIAL="$(lsblk -d -n -o SERIAL "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
+TRANSPORT="$(lsblk -d -n -o TRAN "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
+
+# Minimum size check: 4GB
+MIN_SIZE=$((4 * 1024 * 1024 * 1024))
+if [[ "$SIZE_BYTES" -lt "$MIN_SIZE" ]]; then
+    die "Device too small (${SIZE_GB}GB). Minimum 4GB required."
+fi
+
+# ── Display device info and confirm ──────────────────────────────────────
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║          CODEXOS USB INSTALLER                       ║"
+echo "╠══════════════════════════════════════════════════════╣"
+echo "║  Device:    $DEVICE"
+echo "║  Model:     $MODEL"
+echo "║  Serial:    $SERIAL"
+echo "║  Transport: $TRANSPORT"
+echo "║  Size:      ${SIZE_GB}GB"
+echo "║  Mode:      $MODE"
+echo "║  EFI:       ${EFI_SIZE}MB"
+echo "║  System:    ${SYSTEM_SIZE}MB"
+if [[ "$MODE" != "forensic" ]]; then
+    echo "║  Persist:   ${PERSIST_SIZE}MB (0=remaining)"
+fi
+echo "╠══════════════════════════════════════════════════════╣"
+echo "║  ⚠  ALL DATA ON THIS DEVICE WILL BE DESTROYED        ║"
+echo "╚══════════════════════════════════════════════════════╝"
+echo ""
+
+if [[ "$NO_CONFIRM" == true ]]; then
+    echo "WARNING: --no-confirm bypassed safety checks."
+else
+    echo -n "Type the serial number to confirm [${SERIAL}]: "
+    read -r CONFIRM_INPUT
+    if [[ "$CONFIRM_INPUT" != "$SERIAL" ]]; then
+        die "Serial confirmation failed. Aborting."
+    fi
+
+    echo -n "Type YES to destroy all data on $DEVICE: "
+    read -r WIPE_CONFIRM
+    if [[ "$WIPE_CONFIRM" != "YES" ]]; then
+        echo "Aborted."
+        exit 0
+    fi
+fi
+
+log_action "START mode=$MODE device=$DEVICE serial=$SERIAL size=${SIZE_GB}GB"
+
+# ── Check dependencies ────────────────────────────────────────────────────
+for cmd in sgdisk mkfs.vfat mkfs.ext4; do
+    if ! command -v "$cmd" &>/dev/null; then
+        die "Required command not found: $cmd. Install with: apk add gptfdisk dosfstools e2fsprogs"
+    fi
+done
+
+# ── Zap existing partition table ──────────────────────────────────────────
+echo "[1/7] Wiping partition table..."
+sgdisk --zap-all "$DEVICE" 2>/dev/null || true
+# Also wipe first 1MB and last 1MB to clear remnants
+dd if=/dev/zero of="$DEVICE" bs=1M count=1 conv=fsync 2>/dev/null || true
+dd if=/dev/zero of="$DEVICE" bs=512 seek=$(($(lsblk -d -b -n -o SIZE "$DEVICE" 2>/dev/null)/512 - 2048)) count=2048 conv=fsync 2>/dev/null || true
+
+# ── Create new GPT partition table ────────────────────────────────────────
+echo "[2/7] Creating GPT partition table..."
+sgdisk --clear --mbrtogpt "$DEVICE" >/dev/null 2>&1 || sgdisk --clear "$DEVICE" >/dev/null 2>&1
+
+# ── Create partitions ─────────────────────────────────────────────────────
+echo "[3/7] Creating partitions..."
+
+# Partition 1: EFI (FAT32)
+if [[ "$EFI_SIZE" -gt 0 ]]; then
+    sgdisk -n 1:0:+"${EFI_SIZE}M" -t 1:EF00 -c 1:"EFI System" "$DEVICE" >/dev/null 2>&1
+    sgdisk -A 1:set:2 "$DEVICE" >/dev/null 2>&1  # Set boot flag
+fi
+
+# Partition 2: System
+if [[ "$MODE" == "portable-safe" || "$MODE" == "forensic" ]]; then
+    # Use remaining - persist for system, or just system_size
+    sgdisk -n 2:0:+"${SYSTEM_SIZE}M" -t 2:8300 -c 2:"CodexOS System" "$DEVICE" >/dev/null 2>&1
+else
+    # portable-admin: ext4 writable system
+    sgdisk -n 2:0:+"${SYSTEM_SIZE}M" -t 2:8300 -c 2:"CodexOS System" "$DEVICE" >/dev/null 2>&1
+fi
+
+# Partition 3: Persistence (LUKS)
+if [[ "$MODE" != "forensic" ]]; then
+    if [[ "$PERSIST_SIZE" -gt 0 ]]; then
+        sgdisk -n 3:0:+"${PERSIST_SIZE}M" -t 3:8300 -c 3:"CodexOS Persistence" "$DEVICE" >/dev/null 2>&1
+    else
+        # Use all remaining space
+        sgdisk -n 3:0:0 -t 3:8300 -c 3:"CodexOS Persistence" "$DEVICE" >/dev/null 2>&1
+    fi
+fi
+
+# Wait for partition table to settle
+sleep 2
+partprobe "$DEVICE" 2>/dev/null || true
+sleep 1
+
+# ── Format partitions ─────────────────────────────────────────────────────
+echo "[4/7] Formatting partitions..."
+
+PART1="${DEVICE}1"
+PART2="${DEVICE}2"
+PART3="${DEVICE}3"
+
+# For devices like /dev/mmcblk0, partitions are p1, p2, p3
+if [[ "$DEVICE" == /dev/mmcblk* ]]; then
+    PART1="${DEVICE}p1"
+    PART2="${DEVICE}p2"
+    PART3="${DEVICE}p3"
+fi
+
+# EFI partition
+if [[ -b "$PART1" ]]; then
+    mkfs.vfat -F 32 -n "$VOLUME_LABEL" "$PART1" >/dev/null 2>&1
+    echo "  → $PART1 formatted as FAT32 (EFI)"
+fi
+
+# System partition
+if [[ -b "$PART2" ]]; then
+    if [[ "$MODE" == "portable-safe" || "$MODE" == "forensic" ]]; then
+        # For squashfs, we just need a partition — we'll write the image directly
+        mkfs.ext4 -F -L "codex-system" "$PART2" >/dev/null 2>&1
+        echo "  → $PART2 formatted as ext4 (system)"
+    else
+        mkfs.ext4 -F -L "codex-system" "$PART2" >/dev/null 2>&1
+        echo "  → $PART2 formatted as ext4 (writable system)"
+    fi
+fi
+
+# Persistence partition
+if [[ "$MODE" != "forensic" ]] && [[ -b "$PART3" ]]; then
+    echo "[5/7] Setting up LUKS persistence partition..."
+    echo -n "Enter LUKS passphrase for persistence: "
+    read -rs LUKS_PASSPHRASE
+    echo ""
+    if [[ -z "$LUKS_PASSPHRASE" ]]; then
+        die "Passphrase cannot be empty."
+    fi
+    echo -n "Confirm passphrase: "
+    read -rs LUKS_CONFIRM
+    echo ""
+    if [[ "$LUKS_PASSPHRASE" != "$LUKS_CONFIRM" ]]; then
+        die "Passphrases do not match."
+    fi
+
+    # Create LUKS container
+    echo -n "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 "$PART3" -q -
+    echo -n "$LUKS_PASSPHRASE" | cryptsetup open "$PART3" codex-persist -
+    mkfs.ext4 -F -L "codex-persist" /dev/mapper/codex-persist >/dev/null 2>&1
+    cryptsetup close codex-persist
+    echo "  → $PART3 LUKS-encrypted ext4 (persistence)"
+    # Clear passphrase from memory
+    unset LUKS_PASSPHRASE LUKS_CONFIRM
+else
+    echo "[5/7] Skipping persistence (forensic mode)..."
+fi
+
+# ── Copy system files ─────────────────────────────────────────────────────
+echo "[6/7] Copying system files..."
+
+if [[ -b "$PART2" ]]; then
+    TEMP_MOUNT="$(mktemp -d)"
+
+    if [[ "$MODE" == "portable-safe" || "$MODE" == "forensic" ]]; then
+        # Mount and copy squashfs image
+        mount "$PART2" "$TEMP_MOUNT"
+        if [[ -f "${CODEXOS_IMAGE_DIR}/system.squashfs" ]]; then
+            cp "${CODEXOS_IMAGE_DIR}/system.squashfs" "$TEMP_MOUNT/"
+            echo "  → Copied system.squashfs"
+        else
+            echo "  WARNING: system.squashfs not found at ${CODEXOS_IMAGE_DIR}/"
+            echo "  The system partition is prepared but empty. Copy the image manually."
+        fi
+        umount "$TEMP_MOUNT"
+    else
+        # portable-admin: mount and copy full root filesystem
+        mount "$PART2" "$TEMP_MOUNT"
+        if [[ -d "${CODEXOS_IMAGE_DIR}/rootfs" ]]; then
+            cp -a "${CODEXOS_IMAGE_DIR}/rootfs/"* "$TEMP_MOUNT/"
+            echo "  → Copied root filesystem"
+        else
+            echo "  WARNING: rootfs not found at ${CODEXOS_IMAGE_DIR}/rootfs/"
+            echo "  The system partition is prepared but empty."
+        fi
+        umount "$TEMP_MOUNT"
+    fi
+
+    rmdir "$TEMP_MOUNT"
+fi
+
+# ── Install bootloader ────────────────────────────────────────────────────
+echo "[7/7] Installing bootloader..."
+
+if [[ -b "$PART1" ]]; then
+    TEMP_EFI="$(mktemp -d)"
+    mount "$PART1" "$TEMP_EFI"
+
+    # Copy EFI boot files
+    mkdir -p "$TEMP_EFI/EFI/BOOT"
+    mkdir -p "$TEMP_EFI/EFI/codexos"
+
+    if [[ -f "${CODEXOS_IMAGE_DIR}/boot/vmlinuz-lts" ]]; then
+        cp "${CODEXOS_IMAGE_DIR}/boot/vmlinuz-lts" "$TEMP_EFI/"
+        echo "  → Copied kernel"
+    fi
+
+    if [[ -f "${CODEXOS_IMAGE_DIR}/boot/initramfs-lts" ]]; then
+        cp "${CODEXOS_IMAGE_DIR}/boot/initramfs-lts" "$TEMP_EFI/"
+        echo "  → Copied initramfs"
+    fi
+
+    # Copy EFI stub or systemd-boot / GRUB
+    if [[ -f "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
+        cp -a "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_EFI/EFI/BOOT/"
+    elif command -v grub-install &>/dev/null; then
+        grub-install --target=x86_64-efi --efi-directory="$TEMP_EFI" \
+                     --boot-directory="$TEMP_EFI" --removable \
+                     --recheck "$DEVICE" >/dev/null 2>&1 || true
+    fi
+
+    # Generate boot config based on mode
+    cat > "$TEMP_EFI/EFI/codexos/codexos.conf" <<BOOTCFG
+title CodexOS Lite ($MODE)
+linux /vmlinuz-lts
+initrd /initramfs-lts
+options quiet splash
+BOOTCFG
+
+    if [[ "$MODE" == "portable-safe" ]]; then
+        echo "options quiet splash root=PARTUUID=$(blkid -s PARTUUID -o value "$PART2" 2>/dev/null) ro" \
+            >> "$TEMP_EFI/EFI/codexos/codexos.conf"
+    elif [[ "$MODE" == "portable-admin" ]]; then
+        echo "options quiet splash root=PARTUUID=$(blkid -s PARTUUID -o value "$PART2" 2>/dev/null) rw" \
+            >> "$TEMP_EFI/EFI/codexos/codexos.conf"
+    fi
+
+    umount "$TEMP_EFI"
+    rmdir "$TEMP_EFI"
+fi
+
+# ── Sync and finalize ────────────────────────────────────────────────────
+sync
+echo ""
+echo "✓ CodexOS USB installation complete!"
+echo "  Device:  $DEVICE ($MODEL, $SERIAL)"
+echo "  Mode:    $MODE"
+echo ""
+echo "  Partitions:"
+sgdisk -p "$DEVICE" 2>/dev/null || lsblk "$DEVICE"
+echo ""
+echo "Safely remove and boot from this USB drive."
+
+log_action "COMPLETE mode=$MODE device=$DEVICE serial=$SERIAL"

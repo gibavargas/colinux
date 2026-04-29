@@ -1,0 +1,451 @@
+#!/bin/bash
+# codex-network — Network setup tool for CodexOS Lite
+# Part of CodexOS Lite
+#
+# Detects available interfaces, configures Ethernet (DHCP),
+# and offers Wi-Fi setup via wpa_supplicant or iwd.
+#
+# Usage: codex-network [COMMAND]
+#   (no args)    — Interactive setup wizard
+#   status       — Show current network status
+#   ethernet     — Configure Ethernet via DHCP
+#   wifi-scan    — Scan for Wi-Fi networks
+#   wifi-connect — Connect to a Wi-Fi network
+#   wifi-list    — List saved Wi-Fi networks
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+STATE_DIR="${PERSIST_DIR}/state"
+WPA_CONF="${STATE_DIR}/wpa_supplicant.conf"
+IWD_CONF_DIR="${STATE_DIR}/iwd"
+LOG_DIR="${PERSIST_DIR}/logs"
+LOGFILE="${LOG_DIR}/network.log"
+
+mkdir -p "$STATE_DIR" "$IWD_CONF_DIR" "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] network: $*" >> "$LOGFILE"
+}
+
+# ── Helper: find network interfaces ───────────────────────────────────────
+find_ethernet() {
+    # Find Ethernet interfaces (skip lo, wlan, wwan)
+    for iface in /sys/class/net/*; do
+        name="${iface##*/}"
+        [[ "$name" == "lo" ]] && continue
+        [[ "$name" == "wlan"* ]] && continue
+        [[ "$name" == "wlp"* ]] && continue
+        [[ "$name" == "wwan"* ]] && continue
+        # Check if it's an Ethernet device by checking operstate or driver
+        if [[ -f "${iface}/operstate" ]]; then
+            driver="$(readlink "${iface}/device/driver" 2>/dev/null | xargs basename 2>/dev/null || true)"
+            if ethtool "$name" 2>/dev/null | grep -qi 'ethernet\|link detected'; then
+                echo "$name"
+            elif [[ -d "${iface}/wireless" ]]; then
+                continue  # Skip wireless
+            else
+                echo "$name"
+            fi
+        fi
+    done
+}
+
+find_wifi() {
+    for iface in /sys/class/net/*; do
+        name="${iface##*/}"
+        if [[ -d "${iface}/wireless" ]]; then
+            echo "$name"
+        fi
+    done
+}
+
+iface_is_up() {
+    local iface="$1"
+    ip link show "$iface" 2>/dev/null | grep -q "state UP"
+}
+
+iface_has_ip() {
+    local iface="$1"
+    ip -4 addr show "$iface" 2>/dev/null | grep -q 'inet '
+}
+
+# ── Command: status ───────────────────────────────────────────────────────
+cmd_status() {
+    echo "=== Network Status ==="
+    echo ""
+
+    for iface in /sys/class/net/*; do
+        name="${iface##*/}"
+        [[ "$name" == "lo" ]] && continue
+
+        echo "[$name]"
+        if iface_is_up "$name"; then
+            echo "  Status: UP"
+        else
+            echo "  Status: DOWN"
+        fi
+
+        local ip_addr
+        ip_addr="$(ip -4 addr show "$name" 2>/dev/null | grep -oE 'inet [0-9./]+' | sed 's/^inet //' | head -1 || true)"
+        if [[ -n "$ip_addr" ]]; then
+            echo "  IPv4:   $ip_addr"
+        else
+            echo "  IPv4:   (none)"
+        fi
+
+        local ip6_addr
+        ip6_addr="$(ip -6 addr show "$name" 2>/dev/null | grep -oE 'inet6 [0-9a-f:/]+' | sed 's/^inet6 //' | head -1 || true)"
+        if [[ -n "$ip6_addr" ]]; then
+            echo "  IPv6:   $ip6_addr"
+        fi
+
+        if [[ -d "${iface}/wireless" ]]; then
+            local ssid
+            ssid="$(iwconfig "$name" 2>/dev/null | grep -oE 'ESSID:"[^"]+"' | sed 's/^ESSID:"//;s/"$//' || true)"
+            if [[ -n "$ssid" ]]; then
+                echo "  WiFi:   $ssid"
+            fi
+        fi
+
+        # DNS
+        echo "  DNS:    $(grep nameserver /etc/resolv.conf 2>/dev/null | head -3 | awk '{print $2}' | tr '\n' ' ')"
+        echo ""
+    done
+
+    # Gateway
+    local gw
+    gw="$(ip route show default 2>/dev/null | awk '{print $3}' | head -1 || true)"
+    echo "Gateway: ${gw:-none}"
+    echo ""
+
+    # Connectivity test
+    echo "Connectivity test:"
+    if ping -c 1 -W 2 1.1.1.1 &>/dev/null; then
+        echo "  → Internet: OK (1.1.1.1 reachable)"
+    else
+        echo "  → Internet: NO (1.1.1.1 unreachable)"
+    fi
+    if ping -c 1 -W 2 dns.google &>/dev/null; then
+        echo "  → DNS:      OK (dns.google reachable)"
+    else
+        echo "  → DNS:      FAIL"
+    fi
+}
+
+# ── Command: ethernet ─────────────────────────────────────────────────────
+cmd_ethernet() {
+    local iface="${1:-}"
+
+    if [[ -z "$iface" ]]; then
+        iface="$(find_ethernet | head -1 || true)"
+    fi
+
+    if [[ -z "$iface" ]]; then
+        echo "No Ethernet interface found."
+        log_action "ERROR no_ethernet_found"
+        return 1
+    fi
+
+    echo "Configuring Ethernet: $iface"
+
+    # Bring interface up
+    ip link set "$iface" up
+    sleep 1
+
+    # Request DHCP
+    if command -v dhcpcd &>/dev/null; then
+        dhcpcd -w -t 10 "$iface"
+    elif command -v udhcpc &>/dev/null; then
+        udhcpc -i "$iface" -n -q -t 10
+    elif command -v dhclient &>/dev/null; then
+        dhclient -v "$iface"
+    else
+        echo "No DHCP client found. Install one of: dhcpcd, udhcpc, dhclient"
+        return 1
+    fi
+
+    # Verify
+    if iface_has_ip "$iface"; then
+        local ip_addr
+        ip_addr="$(ip -4 addr show "$iface" 2>/dev/null | grep -oE 'inet [0-9./]+' | sed 's/^inet //' | head -1)"
+        echo "✓ Connected: $iface — $ip_addr"
+        log_action "OK ethernet iface=$iface ip=$ip_addr"
+    else
+        echo "✗ No IP address obtained on $iface"
+        log_action "FAIL ethernet iface=$iface no_ip"
+        return 1
+    fi
+}
+
+# ── Command: wifi-scan ────────────────────────────────────────────────────
+cmd_wifi_scan() {
+    local iface="${1:-}"
+
+    if [[ -z "$iface" ]]; then
+        iface="$(find_wifi | head -1 || true)"
+    fi
+
+    if [[ -z "$iface" ]]; then
+        echo "No Wi-Fi interface found."
+        log_action "ERROR no_wifi_found"
+        return 1
+    fi
+
+    echo "Scanning Wi-Fi networks on $iface..."
+    echo ""
+
+    if ! iface_is_up "$iface"; then
+        ip link set "$iface" up
+        sleep 2
+    fi
+
+    # Use iwlist if available, else iw
+    if command -v iwlist &>/dev/null; then
+        iwlist "$iface" scan 2>/dev/null | grep -E 'ESSID|Quality|Channel|Encryption' | \
+            awk '
+                /ESSID/ { printf "%-30s", $0 }
+                /Quality/ { printf "  %s", $0 }
+                /Channel/ { printf "  %s", $0 }
+                /Encryption/ { printf "  %s\n", $0 }
+            '
+    elif command -v iw &>/dev/null; then
+        iw dev "$iface" scan 2>/dev/null | awk '
+            /BSS/ { if (NR>1) print ""; printf "BSSID: " $2 }
+            /SSID:/ { printf "  SSID: " ; for(i=2;i<=NF;i++) printf "%s ", $i; print "" }
+            /signal:/ { printf "  %s", $0 }
+            /freq:/ { printf "  %s", $0 }
+            /RSN:/ || /WPA:/ { printf "  encrypted" }
+        '
+    else
+        echo "Neither iwlist nor iw found. Install: apk add wireless-tools iw"
+        return 1
+    fi
+
+    log_action "wifi-scan iface=$iface"
+}
+
+# ── Command: wifi-connect ─────────────────────────────────────────────────
+cmd_wifi_connect() {
+    local iface="${1:-}"
+    local ssid="$2"
+
+    if [[ -z "$iface" ]]; then
+        iface="$(find_wifi | head -1 || true)"
+    fi
+    if [[ -z "$iface" ]]; then
+        echo "No Wi-Fi interface found."
+        return 1
+    fi
+    if [[ -z "${ssid:-}" ]]; then
+        echo "Usage: codex-network wifi-connect [IFACE] SSID"
+        return 1
+    fi
+
+    echo -n "Enter passphrase for '$ssid': "
+    read -rs PASSPHRASE
+    echo ""
+
+    if [[ -z "$PASSPHRASE" ]]; then
+        echo "Passphrase cannot be empty."
+        return 1
+    fi
+
+    # Prefer wpa_supplicant over iwd
+    if command -v wpa_supplicant &>/dev/null; then
+        _connect_wpa "$iface" "$ssid" "$PASSPHRASE"
+    elif command -v iwd &>/dev/null; then
+        _connect_iwd "$iface" "$ssid" "$PASSPHRASE"
+    else
+        echo "No Wi-Fi supplicant found. Install: apk add wpa_supplicant or iwd"
+        return 1
+    fi
+
+    unset PASSPHRASE
+}
+
+_connect_wpa() {
+    local iface="$1" ssid="$2" passphrase="$3"
+
+    echo "Connecting via wpa_supplicant..."
+
+    # Generate config
+    wpa_passphrase "$ssid" "$passphrase" > "$WPA_CONF" 2>/dev/null
+    chmod 600 "$WPA_CONF"
+
+    # Kill existing wpa_supplicant for this interface
+    pkill -f "wpa_supplicant.*$iface" 2>/dev/null || true
+    sleep 1
+
+    # Start wpa_supplicant (background)
+    wpa_supplicant -B -i "$iface" -c "$WPA_CONF" -D nl80211,wext 2>/dev/null
+    sleep 3
+
+    # Request DHCP
+    if command -v dhcpcd &>/dev/null; then
+        dhcpcd -w -t 10 "$iface"
+    elif command -v udhcpc &>/dev/null; then
+        udhcpc -i "$iface" -n -q -t 10
+    elif command -v dhclient &>/dev/null; then
+        dhclient "$iface"
+    fi
+
+    if iface_has_ip "$iface"; then
+        echo "✓ Connected to $ssid"
+        log_action "OK wifi iface=$iface ssid=$ssid"
+    else
+        echo "✗ Failed to obtain IP for $ssid"
+        log_action "FAIL wifi iface=$iface ssid=$ssid no_ip"
+        return 1
+    fi
+}
+
+_connect_iwd() {
+    local iface="$1" ssid="$2" passphrase="$3"
+
+    echo "Connecting via iwd..."
+
+    # Create IWD config
+    cat > "${IWD_CONF_DIR}/${ssid}.psk" <<EOF
+[Security]
+Passphrase=${passphrase}
+
+[Settings]
+AutoConnect=true
+EOF
+    chmod 600 "${IWD_CONF_DIR}/${ssid}.psk"
+
+    # Start iwd if not running
+    if ! pgrep -x iwd &>/dev/null; then
+        iwd -d &
+        sleep 2
+    fi
+
+    # Connect via iwctl
+    iwctl station "$iface" connect "$ssid" 2>/dev/null
+    sleep 3
+
+    # DHCP
+    if command -v dhcpcd &>/dev/null; then
+        dhcpcd -w -t 10 "$iface"
+    elif command -v udhcpc &>/dev/null; then
+        udhcpc -i "$iface" -n -q -t 10
+    fi
+
+    if iface_has_ip "$iface"; then
+        echo "✓ Connected to $ssid"
+        log_action "OK wifi iface=$iface ssid=$ssid backend=iwd"
+    else
+        echo "✗ Failed to obtain IP for $ssid"
+        log_action "FAIL wifi iface=$iface ssid=$ssid no_ip backend=iwd"
+        return 1
+    fi
+}
+
+# ── Command: wifi-list ────────────────────────────────────────────────────
+cmd_wifi_list() {
+    echo "Saved Wi-Fi networks:"
+    echo ""
+
+    if [[ -f "$WPA_CONF" ]]; then
+        echo "wpa_supplicant networks:"
+        grep 'ssid=' "$WPA_CONF" 2>/dev/null | sed 's/ssid=//;s/"//g' | while read -r s; do
+            echo "  - $s"
+        done
+    fi
+
+    if [[ -d "$IWD_CONF_DIR" ]] && ls "$IWD_CONF_DIR"/*.psk &>/dev/null; then
+        echo "iwd networks:"
+        for f in "$IWD_CONF_DIR"/*.psk; do
+            echo "  - ${f##*/}"
+        done
+    fi
+}
+
+# ── Interactive wizard ────────────────────────────────────────────────────
+wizard() {
+    echo "╔══════════════════════════════╗"
+    echo "║    CODEXOS NETWORK SETUP    ║"
+    echo "╚══════════════════════════════╝"
+    echo ""
+
+    cmd_status
+    echo ""
+
+    local eth_ifaces wifi_ifaces
+    eth_ifaces="$(find_ethernet)"
+    wifi_ifaces="$(find_wifi)"
+
+    if [[ -n "$eth_ifaces" ]]; then
+        echo "Detected Ethernet: $eth_ifaces"
+        echo -n "Configure Ethernet via DHCP? [Y/n] "
+        read -r resp
+        if [[ "${resp:-Y}" =~ ^[Yy] ]]; then
+            cmd_ethernet
+        fi
+    fi
+
+    if [[ -n "$wifi_ifaces" ]]; then
+        echo ""
+        echo "Detected Wi-Fi: $wifi_ifaces"
+        echo -n "Scan for Wi-Fi networks? [y/N] "
+        read -r resp
+        if [[ "${resp:-N}" =~ ^[Yy] ]]; then
+            cmd_wifi_scan
+            echo ""
+            echo -n "Enter SSID to connect (or press Enter to skip): "
+            read -r ssid
+            if [[ -n "$ssid" ]]; then
+                cmd_wifi_connect "$wifi_ifaces" "$ssid"
+            fi
+        fi
+    fi
+
+    if [[ -z "$eth_ifaces" ]] && [[ -z "$wifi_ifaces" ]]; then
+        echo "No network interfaces found."
+        echo "Check that your network adapter is connected."
+    fi
+}
+
+# ── Main dispatch ─────────────────────────────────────────────────────────
+case "${1:-}" in
+    status)
+        cmd_status
+        ;;
+    ethernet)
+        cmd_ethernet "${2:-}"
+        ;;
+    wifi-scan|scan)
+        cmd_wifi_scan "${2:-}"
+        ;;
+    wifi-connect|wifi)
+        cmd_wifi_connect "${2:-}" "${3:-}"
+        ;;
+    wifi-list)
+        cmd_wifi_list
+        ;;
+    --help|-h|help|"")
+        if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "help" ]]; then
+            cat <<EOF
+Usage: codex-network [COMMAND]
+
+Commands:
+  status         Show current network status
+  ethernet       Configure Ethernet via DHCP
+  wifi-scan      Scan for Wi-Fi networks
+  wifi-connect   Connect to a Wi-Fi network (SSID)
+  wifi-list      List saved Wi-Fi networks
+
+(No arguments: interactive wizard)
+EOF
+            exit 0
+        fi
+        wizard
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Run 'codex-network --help' for usage."
+        exit 1
+        ;;
+esac

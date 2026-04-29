@@ -1,0 +1,4 @@
+# dconf profile for user session
+user-db:user
+system-db:local-defaults
+system-db:default

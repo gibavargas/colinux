@@ -1,0 +1,409 @@
+#!/bin/bash
+# codexctl — CodexOS control surface / dispatcher
+# Part of CodexOS Lite
+#
+# Central command that dispatches to all CodexOS tools.
+#
+# Usage: codexctl <COMMAND> [OPTIONS]
+#
+# Commands:
+#   status          Show system overview (uptime, memory, disk, network)
+#   disks           Run disk inventory and show summary
+#   disks --json    Run disk inventory and output raw JSON
+#   mount-ro DEV    Mount device read-only
+#   mount-rw DEV    Mount device read-write (requires --confirm SERIAL)
+#   persist         Show persistence partition status
+#   update          Update Codex CLI and Alpine packages
+#   update --check  Check for updates only
+#   install-usb     Install CodexOS to USB drive
+#   install-pc      Install CodexOS to internal disk
+#   network         Network setup / status
+#   logs            View system logs
+#   logs --follow   Follow log output
+#   backup          Create a backup snapshot
+#   backup --list   List existing backups
+#   restore FILE    Safely restore a backup
+#   version         Show CodexOS and Codex CLI versions
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+LOG_DIR="${PERSIST_DIR}/logs"
+STATE_DIR="${PERSIST_DIR}/state"
+LOGFILE="${LOG_DIR}/codexctl.log"
+CODEX_BIN="/usr/local/bin/codex"
+CODEXOS_VERSION="${CODEXOS_VERSION:-0.1.0}"
+
+mkdir -p "$LOG_DIR" "$STATE_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] codexctl: $*" >> "$LOGFILE"
+}
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+cmd_exists() {
+    command -v "$1" &>/dev/null
+}
+
+try_root() {
+    # Check if running as root; if not, try with sudo/doas
+    if [[ "$(id -u)" -ne 0 ]]; then
+        if command -v doas &>/dev/null; then
+            doas "$@"
+        elif command -v sudo &>/dev/null; then
+            sudo "$@"
+        else
+            echo "ERROR: This command requires root privileges." >&2
+            echo "Install sudo or doas, or run as root." >&2
+            return 1
+        fi
+    else
+        "$@"
+    fi
+}
+
+# ── Command: version ──────────────────────────────────────────────────────
+cmd_version() {
+    echo "codexctl ${CODEXOS_VERSION}"
+    echo "CodexOS Lite — Alpine Linux + Codex CLI appliance"
+    echo ""
+
+    if cmd_exists codex; then
+        echo "Codex CLI:  $($CODEX_BIN --version 2>/dev/null | head -1 || echo 'not found')"
+    else
+        echo "Codex CLI:  not installed"
+    fi
+
+    echo "Kernel:     $(uname -r)"
+    echo "Arch:       $(uname -m)"
+    echo "Uptime:     $(uptime -p 2>/dev/null || uptime)"
+    echo "Hostname:   $(hostname -s 2>/dev/null || echo 'unknown')"
+}
+
+# ── Command: status ───────────────────────────────────────────────────────
+cmd_status() {
+    local json_output=false
+    [[ "${1:-}" == "--json" ]] && json_output=true
+
+    if [[ "$json_output" == true ]]; then
+        # JSON status output
+        local codex_ver="null"
+        if cmd_exists codex; then
+            codex_ver="\"$($CODEX_BIN --version 2>/dev/null | head -1 || echo 'unknown')\""
+        fi
+
+        jq -n \
+            --arg codexos_ver "$CODEXOS_VERSION" \
+            --arg codex_ver "$codex_ver" \
+            --arg kernel "$(uname -r)" \
+            --arg arch "$(uname -m)" \
+            --arg hostname "$(hostname -s 2>/dev/null || echo 'unknown')" \
+            --arg uptime "$(uptime -p 2>/dev/null || uptime)" \
+            --arg date "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            '{
+                codexos_version: $codexos_ver,
+                codex_cli: $codex_ver,
+                kernel: $kernel,
+                arch: $arch,
+                hostname: $hostname,
+                uptime: $uptime,
+                timestamp: $date
+            }'
+        return
+    fi
+
+    echo "╔══════════════════════════════════════════╗"
+    echo "║         CODEXOS STATUS                   ║"
+    echo "╠══════════════════════════════════════════╣"
+    echo "║  CodexOS:  v${CODEXOS_VERSION}"
+
+    if cmd_exists codex; then
+        echo "║  Codex:    $($CODEX_BIN --version 2>/dev/null | head -1 | cut -c1-30 || echo 'unknown')"
+    else
+        echo "║  Codex:    not installed"
+    fi
+
+    echo "║  Kernel:   $(uname -r)"
+    echo "║  Arch:     $(uname -m)"
+    echo "╚══════════════════════════════════════════╝"
+    echo ""
+
+    # Uptime
+    echo "Uptime: $(uptime -p 2>/dev/null || uptime)"
+    echo ""
+
+    # Memory
+    echo "=== Memory ==="
+    free -h 2>/dev/null || echo "(free not available)"
+    echo ""
+
+    # Disk usage
+    echo "=== Disk Usage ==="
+    df -h / /persist 2>/dev/null || df -h /
+    echo ""
+
+    # Network
+    echo "=== Network ==="
+    ip -4 addr show scope global 2>/dev/null | grep inet | awk '{print "  " $2 " (" $NF ")"}' || \
+        ifconfig 2>/dev/null | grep 'inet addr' | awk '{print "  " $2}' || \
+        echo "  (no network info)"
+    echo ""
+
+    # Running services
+    echo "=== Services ==="
+    for svc in codex sshd wpa_supplicant iwd; do
+        if pgrep -x "$svc" &>/dev/null; then
+            echo "  ✓ $svc"
+        fi
+    done
+    echo ""
+
+    # Persistence status
+    if [[ -d "$PERSIST_DIR" ]]; then
+        local persist_size
+        persist_size="$(du -sh "$PERSIST_DIR" 2>/dev/null | awk '{print $1}' || echo 'unknown')"
+        echo "Persistence: ${persist_size} used"
+    fi
+}
+
+# ── Command: disks ────────────────────────────────────────────────────────
+cmd_disks() {
+    local json_output=false
+    [[ "${1:-}" == "--json" ]] && json_output=true
+
+    if cmd_exists codex-disk-inventory; then
+        if [[ "$json_output" == true ]]; then
+            try_root codex-disk-inventory >/dev/null 2>&1
+            if [[ -f /run/codex/disks.json ]]; then
+                cat /run/codex/disks.json
+            else
+                echo '{"error": "disk inventory failed"}' >&2
+                exit 1
+            fi
+        else
+            try_root codex-disk-inventory
+            echo ""
+            if [[ -f /run/codex/disks.md ]]; then
+                cat /run/codex/disks.md
+            fi
+        fi
+    else
+        echo "ERROR: codex-disk-inventory not found." >&2
+        exit 1
+    fi
+    log_action "disks json=$json_output"
+}
+
+# ── Command: mount-ro ─────────────────────────────────────────────────────
+cmd_mount_ro() {
+    local device="${1:-}"
+    if [[ -z "$device" ]]; then
+        echo "Usage: codexctl mount-ro /dev/sdX1"
+        exit 1
+    fi
+    try_root codex-mount-ro "$device"
+}
+
+# ── Command: mount-rw ─────────────────────────────────────────────────────
+cmd_mount_rw() {
+    shift  # remove 'mount-rw' from args
+    try_root codex-mount-rw "$@"
+}
+
+# ── Command: persist ──────────────────────────────────────────────────────
+cmd_persist() {
+    echo "=== Persistence Status ==="
+    echo ""
+
+    # Check LUKS persistence
+    if [[ -e /dev/mapper/codex-persist ]]; then
+        echo "LUKS Persistence: UNLOCKED"
+        local persist_dev="/dev/mapper/codex-persist"
+        local persist_size
+        persist_size="$(lsblk -d -n -o SIZE "$persist_dev" 2>/dev/null || echo 'unknown')"
+        local persist_used
+        persist_used="$(df -h /persist 2>/dev/null | tail -1 | awk '{print $3"/"$2 " ("$5")"}' || echo 'not mounted')"
+        echo "  Device: $persist_dev"
+        echo "  Size:   $persist_size"
+        echo "  Used:   $persist_used"
+    else
+        echo "LUKS Persistence: LOCKED or not configured"
+        # Try to find a codex persistence partition
+        if cmd_exists blkid; then
+            local luks_part
+            luks_part="$(blkid -t LABEL=codex-persist -o device 2>/dev/null | head -1 || true)"
+            if [[ -n "$luks_part" ]]; then
+                echo "  Found LUKS partition: $luks_part"
+                echo "  Open with: codexctl persist open"
+            fi
+        fi
+    fi
+
+    echo ""
+
+    # Show persist directory contents
+    if [[ -d "$PERSIST_DIR" ]]; then
+        echo "=== /persist contents ==="
+        du -sh "${PERSIST_DIR}"/* 2>/dev/null | sort -rh | head -10 || echo "  (empty)"
+        echo ""
+        echo "Total: $(du -sh "$PERSIST_DIR" 2>/dev/null | awk '{print $1}')"
+    fi
+
+    # Handle sub-commands
+    if [[ "${1:-}" == "open" ]]; then
+        echo ""
+        local luks_part="${2:-}"
+        if [[ -z "$luks_part" ]]; then
+            luks_part="$(blkid -t LABEL=codex-persist -o device 2>/dev/null | head -1 || true)"
+        fi
+        if [[ -z "$luks_part" ]]; then
+            echo "Usage: codexctl persist open /dev/sdX3"
+            echo "       codexctl persist open  (auto-detect)"
+            exit 1
+        fi
+        echo "Opening LUKS persistence: $luks_part"
+        try_root cryptsetup open "$luks_part" codex-persist
+        echo "✓ Persistence unlocked at /dev/mapper/codex-persist"
+        echo "  Mount with: mount /dev/mapper/codex-persist /persist"
+    elif [[ "${1:-}" == "close" ]]; then
+        echo ""
+        if mountpoint -q /persist 2>/dev/null; then
+            try_root umount /persist
+        fi
+        try_root cryptsetup close codex-persist
+        echo "✓ Persistence closed."
+    fi
+}
+
+# ── Command: update ───────────────────────────────────────────────────────
+cmd_update() {
+    shift  # remove 'update'
+    try_root codex-update "$@"
+}
+
+# ── Command: install-usb ──────────────────────────────────────────────────
+cmd_install_usb() {
+    shift  # remove 'install-usb'
+    try_root codex-install-usb "$@"
+}
+
+# ── Command: install-pc ───────────────────────────────────────────────────
+cmd_install_pc() {
+    shift  # remove 'install-pc'
+    try_root codex-install-pc "$@"
+}
+
+# ── Command: network ──────────────────────────────────────────────────────
+cmd_network() {
+    shift  # remove 'network'
+    try_root codex-network "$@"
+}
+
+# ── Command: logs ─────────────────────────────────────────────────────────
+cmd_logs() {
+    shift  # remove 'logs'
+    codex-logs "$@"
+}
+
+# ── Command: backup ───────────────────────────────────────────────────────
+cmd_backup() {
+    shift  # remove 'backup'
+    codex-backup "$@"
+}
+
+# ── Command: restore ──────────────────────────────────────────────────────
+cmd_restore() {
+    shift  # remove 'restore'
+    try_root codex-restore "$@"
+}
+
+# ── Command: usb-persist ──────────────────────────────────────────────────
+cmd_usb_persist() {
+    shift  # remove 'usb-persist'
+    try_root codex-usb-persist "$@"
+}
+
+# ── Main dispatch ─────────────────────────────────────────────────────────
+COMMAND="${1:-}"
+
+case "$COMMAND" in
+    version|-v|--version)
+        cmd_version
+        ;;
+    status|"")
+        cmd_status "${2:-}"
+        ;;
+    disks)
+        cmd_disks "${2:-}"
+        ;;
+    mount-ro)
+        cmd_mount_ro "${2:-}"
+        ;;
+    mount-rw)
+        cmd_mount_rw "$@"
+        ;;
+    persist)
+        cmd_persist "${2:-}" "${3:-}" "${4:-}"
+        ;;
+    update)
+        cmd_update "$@"
+        ;;
+    install-usb)
+        cmd_install_usb "$@"
+        ;;
+    install-pc)
+        cmd_install_pc "$@"
+        ;;
+    network|net)
+        cmd_network "$@"
+        ;;
+    logs|log)
+        cmd_logs "$@"
+        ;;
+    backup)
+        cmd_backup "$@"
+        ;;
+    restore)
+        cmd_restore "$@"
+        ;;
+    usb-persist)
+        cmd_usb_persist "$@"
+        ;;
+    --json)
+        # Bare --json: output status as JSON
+        cmd_status --json
+        ;;
+    help|--help|-h)
+        cat <<EOF
+CodexOS Control (codexctl) v${CODEXOS_VERSION}
+
+Usage: codexctl <COMMAND> [OPTIONS]
+
+Commands:
+  status              System overview
+  disks [--json]      Disk inventory
+  mount-ro DEV        Mount device read-only
+  mount-rw --confirm SERIAL DEV
+                      Mount device read-write
+  persist [open|close]
+                      Persistence partition management
+  update [--check]    Update Codex CLI and Alpine
+  install-usb         Install to USB drive
+  install-pc          Install to internal disk
+  network             Network setup and status
+  logs [source]       View system logs
+  backup [--list]     Create/list backups
+  restore FILE        Safely restore a backup
+  usb-persist         USB persistence management
+  version             Show version info
+
+Most commands require root. codexctl will use sudo/doas automatically.
+EOF
+        ;;
+    *)
+        echo "Unknown command: $COMMAND"
+        echo "Run 'codexctl help' for usage."
+        exit 1
+        ;;
+esac

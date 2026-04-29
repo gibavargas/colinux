@@ -1,0 +1,256 @@
+# =============================================================================
+# CodexOS Desktop — Alpine x86_64 Package List
+# =============================================================================
+# Full GNOME desktop experience with Electron Codex Desktop app.
+# Based on Alpine Linux. Includes ALL packages from packages.x86_64.gui
+# plus GNOME desktop environment and Electron dependencies.
+# =============================================================================
+
+# --- Core system (from lite) ---
+alpine-base
+linux-lts
+linux-firmware
+eudev
+bash
+coreutils
+file
+iw
+
+# Security & privilege escalation
+doas
+sudo
+polkit
+
+# Terminal & productivity
+tmux
+git
+
+# Networking
+openssh-client
+curl
+wget
+ca-certificates
+
+# CLI utilities
+jq
+yq
+ripgrep
+fd
+fzf
+nano
+python3
+
+# Disk & filesystem tools
+util-linux
+parted
+gptfdisk
+e2fsprogs
+dosfstools
+exfatprogs
+ntfs-3g
+btrfs-progs
+xfsprogs
+cryptsetup
+lvm2
+mdadm
+
+# Storage & hardware utilities
+rsync
+smartmontools
+nvme-cli
+hdparm
+pciutils
+usbutils
+
+# Boot & image tools
+xorriso
+grub
+grub-efi
+efibootmgr
+syslinux
+mtools
+squashfs-tools
+
+# Network management
+iwd
+wpa_supplicant
+dhcpcd
+
+# Compression & crypto
+openssl
+tar
+gzip
+xz
+
+# =============================================================================
+# GUI / Wayland Stack (from lite-gui)
+# =============================================================================
+
+# Wayland compositor (GNOME uses mutter, but sway as fallback)
+sway
+
+# Wayland-native terminal emulator
+foot
+
+# Seat management
+seatd
+
+# GPU drivers
+mesa-dri-gallium
+mesa-vulkan-intel
+mesa-vulkan-radeon
+
+# Fonts
+font-dejavu
+
+# Wayland utilities
+wlr-randr
+
+# Keyboard layout support
+xkb-utils
+
+# Input drivers
+libinput-libs
+libinput-tools
+eudev-rule-generator
+
+# DBus
+dbus
+
+# DRI utilities
+mesa-gl
+
+# =============================================================================
+# GNOME Desktop Environment
+# =============================================================================
+
+# GNOME core meta-package
+gnome-desktop
+
+# Display manager (GDM)
+gdm
+
+# GNOME shell & components
+gnome-shell
+gnome-terminal
+nautilus
+gnome-control-center
+gnome-settings-daemon
+gnome-shell-extensions
+gjs
+
+# GNOME compositor
+mutter
+
+# GNOME keyring (credential storage for Electron)
+gnome-keyring
+
+# Chrome/Firefox integration
+chrome-gnome-shell
+
+# Fallback web browser
+firefox
+
+# GNOME utilities
+evince
+eog
+gnome-tweaks
+gnome-calculator
+gnome-font-viewer
+
+# App center
+gnome-software
+
+# XDG portals
+xdg-desktop-portal-gnome
+xdg-desktop-portal
+
+# =============================================================================
+# Electron Dependencies
+# =============================================================================
+
+# NSS (Network Security Services — required by Electron)
+nss
+
+# Accessibility (AT-SPI — required by Electron)
+at-spi2-core
+at-spi2-atk
+
+# Notifications
+libnotify
+
+# Desktop integration
+xdg-utils
+
+# Theme compilation (for GNOME themes)
+sassc
+
+# =============================================================================
+# Audio, Bluetooth, Printing
+# =============================================================================
+
+# Audio (PipeWire)
+pipewire
+pipewire-pulse
+pipewire-spa-tools
+pulseaudio-utils
+
+# Bluetooth
+bluez
+bluez-openrc
+
+# Printing
+cups
+
+# =============================================================================
+# Flatpak Support (for future apps)
+# =============================================================================
+
+flatpak
+
+# =============================================================================
+# Network Manager (full GUI integration)
+# =============================================================================
+
+NetworkManager
+networkmanager-cli
+networkmanager-wifi
+networkmanager-openrc
+networkmanager-tui
+mobile-broadband-provider-info
+
+# =============================================================================
+# Additional Desktop Packages
+# =============================================================================
+
+# Theming
+adwaita-icon-theme
+gnome-themes-extra
+
+# File management (additional)
+gvfs
+gvfs-smb
+
+# Screenshot tool
+grim
+slurp
+
+# System monitor
+gnome-system-monitor
+
+# Disk utility
+gnome-disk-utility
+
+# Archive manager
+file-roller
+
+# Text editor (fallback)
+mousepad
+
+# Image viewer (eog from GNOME, but ensure it's there)
+eog
+
+# Document viewer (evince already listed above)
+
+# Dialog utility (for WiFi wizard in TTY fallback)
+dialog

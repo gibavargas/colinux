@@ -1,0 +1,109 @@
+#!/bin/bash
+# codex-shell-compat — Default login shell for the codex user on Debian compat
+# Part of CodexOS Compat
+#
+# Sets up the tmux workspace with:
+#   Pane 0: Codex CLI session
+#   Pane 1: System monitor / log tailer
+#   Pane 2: Standard shell
+#
+# Uses apt instead of apk for system packages. Otherwise identical to
+# the Alpine codex-shell for consistency.
+set -euo pipefail
+
+# ── Configuration ─────────────────────────────────────────────────────────
+PERSIST_DIR="/persist"
+WORKSPACE_DIR="/workspace"
+LOG_DIR="${PERSIST_DIR}/logs"
+CODEX_LOG="${LOG_DIR}/codex.log"
+CONTEXT_FILE="${WORKSPACE_DIR}/AGENTS.md"
+SESSION_NAME="codex"
+
+# ── Ensure directories exist ──────────────────────────────────────────────
+mkdir -p "$LOG_DIR" "$PERSIST_DIR/backups" "$PERSIST_DIR/state" /mnt/disks/by-device /mnt/disks/by-label /mnt/disks/by-uuid
+
+# ── Log shell start ───────────────────────────────────────────────────────
+{
+    echo "=== codex-shell-compat started at $(date -u '+%Y-%m-%dT%H:%M:%SZ') ==="
+    echo "  user=$(whoami) uid=$(id -u) tty=$(tty 2>/dev/null || echo 'none')"
+    echo "  edition=compat distro=debian"
+} >> "$CODEX_LOG" 2>/dev/null || true
+
+# ── Run disk inventory on start ───────────────────────────────────────────
+if command -v codex-disk-inventory &>/dev/null; then
+    echo "Scanning disks..."
+    if codex-disk-inventory 2>/dev/null; then
+        echo "Disk inventory complete."
+    else
+        echo "Note: Disk inventory had issues (may need root for some features)."
+    fi
+fi
+
+# ── Source workspace context ──────────────────────────────────────────────
+if [[ -f "$CONTEXT_FILE" ]]; then
+    export CODEX_AGENTS_CONTEXT="$CONTEXT_FILE"
+fi
+
+# ── Set up environment ────────────────────────────────────────────────────
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export EDITOR="${EDITOR:-nano}"
+export VISUAL="${VISUAL:-nano}"
+export TERM="${TERM:-xterm-256color}"
+export CODEX_EDITION="compat"
+
+if [[ -d "${WORKSPACE_DIR}/bin" ]]; then
+    export PATH="${WORKSPACE_DIR}/bin:${PATH}"
+fi
+
+# ── Source user profile if exists ─────────────────────────────────────────
+if [[ -f "${PERSIST_DIR}/profile" ]]; then
+    source "${PERSIST_DIR}/profile"
+fi
+
+# ── Check if we're already in a tmux session ──────────────────────────────
+if [[ -n "${TMUX:-}" ]]; then
+    exec /bin/bash --rcfile <(cat ~/.bashrc 2>/dev/null; echo 'export PS1="\\[\\e[1;33m\\]codex-compat\\[\\e[0m\\]:\\w\\$ "')
+fi
+
+# ── Start tmux session ────────────────────────────────────────────────────
+if ! command -v tmux &>/dev/null; then
+    echo "WARNING: tmux not installed. Starting plain shell."
+    echo "Install with: sudo apt install tmux"
+    exec /bin/bash
+fi
+
+# Kill stale session if it exists
+tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
+
+# Create new session
+tmux new-session -d -s "$SESSION_NAME" -x "$(tput cols 2>/dev/null || echo 80)" -y "$(tput lines 2>/dev/null || echo 24)"
+
+# ── Pane 0: Codex CLI ─────────────────────────────────────────────────────
+tmux send-keys -t "$SESSION_NAME:0" 'echo "Welcome to CodexOS Compat (Debian)"; echo ""; if command -v codex &>/dev/null; then codex; else echo "Codex CLI not found. Run: codex-update"; fi' C-m
+tmux rename-window -t "$SESSION_NAME:0" "codex"
+
+# ── Pane 1: System monitor / logs ─────────────────────────────────────────
+tmux split-window -h -t "$SESSION_NAME:0"
+tmux send-keys -t "$SESSION_NAME:0.1" 'echo "=== System Monitor ==="; echo ""; while true; do clear; echo "--- $(date) ---"; echo ""; echo "=== Memory ==="; free -h 2>/dev/null || echo "N/A"; echo ""; echo "=== Disk ==="; df -h / /persist 2>/dev/null || df -h /; echo ""; echo "=== Top Processes ==="; ps aux --sort=-%mem 2>/dev/null | head -8 || ps aux | head -8; echo ""; echo "=== Recent Logs ==="; tail -5 /persist/logs/disk-actions.log 2>/dev/null; echo "---"; sleep 5; done' C-m
+
+# ── Pane 2: Standard shell ────────────────────────────────────────────────
+tmux split-window -v -t "$SESSION_NAME:0.0"
+tmux send-keys -t "$SESSION_NAME:0.2" 'export PS1="\[\e[1;34m\]shell\[\e[0m\]:\w\$ "; echo "Codex compat shell ready. Type codexctl for system commands."' C-m
+
+# Focus on the Codex pane
+tmux select-pane -t "$SESSION_NAME:0.0"
+
+# ── Attach ────────────────────────────────────────────────────────────────
+echo "Starting CodexOS Compat environment..."
+echo ""
+echo "  Edition: CodexOS Compat (Debian GNU/Linux)"
+echo "  Pane layout:"
+echo "    [codex]      — Codex CLI interface"
+echo "    [monitor]    — System monitor (auto-refreshing)"
+echo "    [shell]      — Standard bash shell"
+echo ""
+echo "  Ctrl+B then arrow keys to switch panes"
+echo "  Type 'codexctl' in any pane for system commands"
+echo ""
+
+exec tmux attach-session -t "$SESSION_NAME"

@@ -1,0 +1,11 @@
+[Unit]
+Description=CodexOS Compat Auto-Update Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cron-codex-update
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal

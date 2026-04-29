@@ -1,0 +1,60 @@
+#!/bin/bash
+# codex-shell-desktop — Desktop shell for CodexOS Desktop edition
+# Part of CodexOS Desktop (Alpine + GNOME)
+#
+# On first login, sets up the GNOME desktop environment and launches
+# the Electron Codex Desktop app. Falls back to a terminal if needed.
+set -euo pipefail
+
+# ── Configuration ─────────────────────────────────────────────────────────
+PERSIST_DIR="/persist"
+WORKSPACE_DIR="/workspace"
+LOG_DIR="${PERSIST_DIR}/logs"
+CODEX_LOG="${LOG_DIR}/codex.log"
+CONTEXT_FILE="${WORKSPACE_DIR}/AGENTS.md"
+SESSION_NAME="codex-desktop"
+CODEX_ELECTRON="/opt/codex-desktop/codex-desktop"
+
+# ── Ensure directories exist ──────────────────────────────────────────────
+mkdir -p "$LOG_DIR" "$PERSIST_DIR/backups" "$PERSIST_DIR/state" \
+    /mnt/disks/by-device /mnt/disks/by-label /mnt/disks/by-uuid
+
+# ── Log shell start ───────────────────────────────────────────────────────
+{
+    echo "=== codex-shell-desktop started at $(date -u '+%Y-%m-%dT%H:%M:%SZ') ==="
+    echo "  user=$(whoami) uid=$(id -u) display=${DISPLAY:-wayland}"
+    echo "  edition=desktop distro=alpine"
+} >> "$CODEX_LOG" 2>/dev/null || true
+
+# ── Set up environment ────────────────────────────────────────────────────
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export EDITOR="${EDITOR:-nano}"
+export VISUAL="${VISUAL:-nano}"
+export TERM="${TERM:-xterm-256color}"
+export CODEX_EDITION="desktop"
+export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+
+if [[ -d "${WORKSPACE_DIR}/bin" ]]; then
+    export PATH="${WORKSPACE_DIR}/bin:${PATH}"
+fi
+
+# ── Source workspace context ──────────────────────────────────────────────
+if [[ -f "$CONTEXT_FILE" ]]; then
+    export CODEX_AGENTS_CONTEXT="$CONTEXT_FILE"
+fi
+
+# ── Source user profile if exists ─────────────────────────────────────────
+if [[ -f "${PERSIST_DIR}/profile" ]]; then
+    source "${PERSIST_DIR}/profile"
+fi
+
+# ── Launch Electron Codex Desktop if available ────────────────────────────
+if [[ -x "$CODEX_ELECTRON" ]]; then
+    echo "Starting Codex Desktop..."
+    exec "$CODEX_ELECTRON" "$@"
+else
+    echo "Codex Desktop not found at $CODEX_ELECTRON"
+    echo "To install: sudo setup-electron-codex.sh"
+    echo "Starting GNOME Terminal with Codex CLI..."
+    exec gnome-terminal -- bash -c "codex 2>/dev/null || bash"
+fi

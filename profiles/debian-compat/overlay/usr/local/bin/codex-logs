@@ -1,0 +1,236 @@
+#!/bin/bash
+# codex-logs — View/tail system logs, disk action logs, and Codex logs
+# Part of CodexOS Lite
+#
+# Usage: codex-logs [SOURCE] [OPTIONS]
+#   codex-logs              — Show last 30 lines of all logs
+#   codex-logs system       — Show system logs (dmesg, syslog)
+#   codex-logs disk         — Show disk action logs
+#   codex-logs codex        — Show Codex CLI logs
+#   codex-logs update       — Show update logs
+#   codex-logs network      — Show network logs
+#   codex-logs backup       — Show backup logs
+#   codex-logs all          — Show all logs in sequence
+#
+# Options (use before source):
+#   -f, --follow            Tail / follow logs (default: show last 30 lines)
+#   -n NUM                  Show last NUM lines (default: 30)
+#   -s, --since TIME        Show logs since time (e.g., "1 hour ago")
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+LOG_DIR="${PERSIST_DIR}/logs"
+
+# ── Defaults ──────────────────────────────────────────────────────────────
+FOLLOW=false
+LINES=30
+SINCE=""
+SOURCE="${1:-}"
+
+# ── Parse options ─────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -f|--follow)
+            FOLLOW=true
+            shift
+            ;;
+        -n)
+            LINES="${2:?-n requires a number}"
+            shift 2
+            ;;
+        -s|--since)
+            SINCE="$2"
+            shift 2
+            ;;
+        system|disk|codex|update|network|backup|all|help|--help|-h)
+            SOURCE="$1"
+            shift
+            ;;
+        *)
+            # Might be a positional source argument
+            if [[ -z "$SOURCE" ]] || [[ "$SOURCE" == -* ]]; then
+                SOURCE="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+# ── Help ──────────────────────────────────────────────────────────────────
+if [[ "$SOURCE" == "help" ]] || [[ "$SOURCE" == "--help" ]] || [[ "$SOURCE" == "-h" ]]; then
+    cat <<EOF
+Usage: codex-logs [SOURCE] [OPTIONS]
+
+Sources:
+  system     System logs (dmesg, syslog)
+  disk       Disk action logs
+  codex      Codex CLI logs
+  update     Update logs
+  network    Network logs
+  backup     Backup logs
+  all        All logs in sequence
+  (default)  Summary of recent log activity
+
+Options:
+  -f, --follow    Tail / follow logs
+  -n NUM          Show last NUM lines (default: 30)
+  -s, --since     Show logs since time (e.g., "1 hour ago")
+EOF
+    exit 0
+fi
+
+# ── Build tail/follow command ─────────────────────────────────────────────
+tail_cmd() {
+    if [[ "$FOLLOW" == true ]]; then
+        tail -f "$@"
+    else
+        tail -n "$LINES" "$@"
+    fi
+}
+
+# ── Source dispatchers ────────────────────────────────────────────────────
+show_system() {
+    echo "=== Kernel Messages (dmesg) ==="
+    if [[ "$FOLLOW" == true ]]; then
+        dmesg -w -T 2>/dev/null || dmesg
+    else
+        dmesg -T 2>/dev/null | tail -n "$LINES" || dmesg | tail -n "$LINES"
+    fi
+    echo ""
+
+    echo "=== System Log ==="
+    local syslog=""
+    for f in /var/log/messages /var/log/syslog /var/log/log; do
+        [[ -f "$f" ]] && syslog="$f" && break
+    done
+    if [[ -n "$syslog" ]]; then
+        tail_cmd "$syslog"
+    else
+        echo "(no syslog found at standard locations)"
+        echo "Checking busybox syslog..."
+        logread 2>/dev/null | tail -n "$LINES" || echo "(logread not available)"
+    fi
+}
+
+show_disk() {
+    echo "=== Disk Action Logs ==="
+    local disk_log="${LOG_DIR}/disk-actions.log"
+    if [[ -f "$disk_log" ]]; then
+        tail_cmd "$disk_log"
+    else
+        echo "(no disk action logs found at $disk_log)"
+    fi
+}
+
+show_codex() {
+    echo "=== Codex Logs ==="
+    local codex_log="${LOG_DIR}/codex.log"
+    if [[ -f "$codex_log" ]]; then
+        tail_cmd "$codex_log"
+    else
+        echo "(no codex logs found at $codex_log)"
+    fi
+
+    # Also check for systemd/journal Codex entries
+    if command -v journalctl &>/dev/null; then
+        echo ""
+        echo "=== Journal: Codex ==="
+        journalctl -u codex --no-pager -n "$LINES" 2>/dev/null || true
+    fi
+}
+
+show_update() {
+    echo "=== Update Logs ==="
+    local update_log="${LOG_DIR}/update.log"
+    if [[ -f "$update_log" ]]; then
+        tail_cmd "$update_log"
+    else
+        echo "(no update logs found at $update_log)"
+    fi
+}
+
+show_network() {
+    echo "=== Network Logs ==="
+    local net_log="${LOG_DIR}/network.log"
+    if [[ -f "$net_log" ]]; then
+        tail_cmd "$net_log"
+    else
+        echo "(no network logs found at $net_log)"
+    fi
+
+    # Show wpa_supplicant logs if available
+    if [[ -f /var/log/wpa_supplicant.log ]]; then
+        echo ""
+        echo "=== wpa_supplicant ==="
+        tail_cmd /var/log/wpa_supplicant.log
+    fi
+}
+
+show_backup() {
+    echo "=== Backup Logs ==="
+    local backup_log="${LOG_DIR}/backup.log"
+    if [[ -f "$backup_log" ]]; then
+        tail_cmd "$backup_log"
+    else
+        echo "(no backup logs found at $backup_log)"
+    fi
+}
+
+# ── Default: summary ──────────────────────────────────────────────────────
+show_summary() {
+    echo "=== CodexOS Log Summary ==="
+    echo "Timestamp: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo ""
+
+    for log_name in disk-actions codex update network backup; do
+        local log_file="${LOG_DIR}/${log_name}.log"
+        local count=0
+        local last_entry=""
+        if [[ -f "$log_file" ]]; then
+            count="$(wc -l < "$log_file" | tr -d ' ')"
+            last_entry="$(tail -1 "$log_file" 2>/dev/null || echo '')"
+        fi
+        printf "  %-20s %5s entries  %s\n" "$log_name.log" "$count" "${last_entry:0:60}"
+    done
+
+    echo ""
+    echo "System uptime: $(uptime 2>/dev/null || echo 'unknown')"
+    echo ""
+
+    # Show any recent errors across all logs
+    echo "=== Recent Errors ==="
+    for log_file in "$LOG_DIR"/*.log; do
+        [[ -f "$log_file" ]] || continue
+        local errors
+        errors="$(grep -i 'error\|fail\|fatal\|warn' "$log_file" 2>/dev/null | tail -3 || true)"
+        if [[ -n "$errors" ]]; then
+            echo ""
+            echo "From ${log_file##*/}:"
+            echo "$errors"
+        fi
+    done
+}
+
+# ── Dispatch ──────────────────────────────────────────────────────────────
+case "$SOURCE" in
+    system)   show_system ;;
+    disk)     show_disk ;;
+    codex)    show_codex ;;
+    update)   show_update ;;
+    network)  show_network ;;
+    backup)   show_backup ;;
+    all)
+        show_system; echo -e "\n---\n"
+        show_disk;   echo -e "\n---\n"
+        show_codex;  echo -e "\n---\n"
+        show_update; echo -e "\n---\n"
+        show_network;echo -e "\n---\n"
+        show_backup
+        ;;
+    "")       show_summary ;;
+    *)
+        echo "Unknown log source: $SOURCE"
+        echo "Available: system, disk, codex, update, network, backup, all"
+        exit 1
+        ;;
+esac

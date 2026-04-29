@@ -1,0 +1,61 @@
+# CodexOS Lite GUI — Sway Configuration
+# Minimal sway config: borderless fullscreen terminal running codex-shell-gui
+# This is used as a fallback compositor if cage is not available.
+
+# =============================================================================
+# Input
+# =============================================================================
+input * {
+    xkb_layout us
+    xkb_variant ""
+    xkb_options ""
+}
+
+# =============================================================================
+# Output — use all connected displays
+# =============================================================================
+output * {
+    bg #1a1b26 solid_color
+}
+
+# =============================================================================
+# Global keybindings (minimal)
+# =============================================================================
+set $mod Mod4
+
+bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit CodexOS GUI?' -b 'Yes' 'swaymsg exit'
+bindsym $mod+Shift+Escape exec killall foot || killall sway
+bindsym Print exec grim /persist/logs/screenshot-$(date +%Y%m%d-%H%M%S).png
+
+# =============================================================================
+# Appearance — no borders, no gaps, no title bar
+# =============================================================================
+default_border none
+default_floating_border none
+hide_edge_borders both
+gaps outer 0
+gaps inner 0
+font DejaVu Sans Mono 11
+
+# =============================================================================
+# Autostart — fullscreen foot terminal running codex-shell-gui
+# =============================================================================
+exec --no-startup-id foot --fullscreen -- /usr/local/bin/codex-shell-gui
+
+# =============================================================================
+# Window rules
+# =============================================================================
+for_window [app_id="foot"] {
+    border none
+    gaps outer 0
+    gaps inner 0
+}
+
+# =============================================================================
+# Environment
+# =============================================================================
+set $SWAYSOCK /run/codex/sway-sock
+exec_always {
+    export XDG_RUNTIME_DIR="/run/user/1000"
+    export WAYLAND_DISPLAY="wayland-1"
+}

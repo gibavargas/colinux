@@ -1,0 +1,307 @@
+#!/bin/bash
+# =============================================================================
+# codex-shell-gui — GUI shell for CodexOS Lite GUI Edition
+# =============================================================================
+# This script is launched inside cage (Wayland kiosk) → foot (terminal).
+# It:
+#   1. Runs codex-network-stack.sh for ethernet (non-interactive)
+#   2. If no ethernet, runs codex-wifi-wizard.sh --auto or dialog wizard
+#   3. Launches cage -s -- foot -- codex  (or sway + fullscreen foot)
+#   4. Falls back to TTY if Wayland fails
+#   5. Logs all output to /persist/logs/gui-session.log
+#
+# This script is called in two contexts:
+#   A) Directly by the OpenRC codex-gui init service (as codex user)
+#   B) As the login shell for codex user on tty1
+#
+# Environment:
+#   MODE=gui, COMPOSITOR=cage, GUI_TERMINAL=foot (from /etc/codex-shell.conf)
+# =============================================================================
+
+set -euo pipefail
+
+# ── Configuration ────────────────────────────────────────────────────────────
+PERSIST_DIR="/persist"
+WORKSPACE_DIR="/workspace"
+LOG_DIR="${PERSIST_DIR}/logs"
+GUI_LOG="${PERSIST_DIR}/logs/gui-session.log"
+CODEX_LOG="${PERSIST_DIR}/logs/codex.log"
+CONTEXT_FILE="${WORKSPACE_DIR}/AGENTS.md"
+
+# Load config
+CONF_FILE="/etc/codex-shell.conf"
+MODE="gui"
+COMPOSITOR="cage"
+GUI_TERMINAL="foot"
+GUI_FALLBACK_TTY="true"
+
+if [[ -f "$CONF_FILE" ]]; then
+    source "$CONF_FILE"
+fi
+
+# Colors
+if [[ -t 1 ]]; then
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+else
+    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
+fi
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+log_msg() {
+    local level="$1"; shift
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S')"
+    local msg="[$ts] [$level] [gui] $*"
+    echo "$msg" >> "$GUI_LOG" 2>/dev/null || true
+    # Also echo to stderr for the terminal session
+    echo -e "${NC}[$ts] [$level] $*" >&2
+}
+
+log_info()  { log_msg "INFO"  "$*"; }
+log_warn()  { log_msg "WARN"  "$*"; }
+log_error() { log_msg "ERROR" "$*"; }
+
+# ── Ensure directories exist ─────────────────────────────────────────────────
+mkdir -p "$LOG_DIR" "$PERSIST_DIR/backups" "$PERSIST_DIR/state" \
+    /mnt/disks/by-device /mnt/disks/by-label /mnt/disks/by-uuid \
+    "$WORKSPACE_DIR" 2>/dev/null || true
+
+# ── Log session start ────────────────────────────────────────────────────────
+{
+    echo "=== codex-shell-gui started at $(date -u '+%Y-%m-%dT%H:%M:%SZ') ==="
+    echo "  user=$(whoami) uid=$(id -u) tty=$(tty 2>/dev/null || echo 'none')"
+    echo "  mode=$MODE compositor=$COMPOSITOR terminal=$GUI_TERMINAL"
+    echo "  WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset}"
+    echo "  XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-unset}"
+    echo "  DISPLAY=${DISPLAY:-unset}"
+} >> "$GUI_LOG" 2>/dev/null || true
+
+# ── Check if we're already inside a Wayland compositor ───────────────────────
+INSIDE_WAYLAND="false"
+if [[ -n "${WAYLAND_DISPLAY:-}" ]] || [[ -n "${SWAYSOCK:-}" ]]; then
+    INSIDE_WAYLAND="true"
+    log_info "Already inside Wayland compositor (DISPLAY=$WAYLAND_DISPLAY)"
+fi
+
+# ── Source workspace context ─────────────────────────────────────────────────
+if [[ -f "$CONTEXT_FILE" ]]; then
+    export CODEX_AGENTS_CONTEXT="$CONTEXT_FILE"
+fi
+
+# ── Set up environment ───────────────────────────────────────────────────────
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export EDITOR="${EDITOR:-vi}"
+export VISUAL="${VISUAL:-vi}"
+export TERM="${TERM:-xterm-256color}"
+export LANG="en_US.UTF-8"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
+
+if [[ -d "${WORKSPACE_DIR}/bin" ]]; then
+    export PATH="${WORKSPACE_DIR}/bin:${PATH}"
+fi
+
+# Source user profile if exists
+if [[ -f "${PERSIST_DIR}/profile" ]]; then
+    source "${PERSIST_DIR}/profile"
+fi
+
+# =============================================================================
+# Network Initialization
+# =============================================================================
+init_network() {
+    log_info "Initializing network..."
+
+    # Try ethernet first (non-interactive)
+    if command -v codex-network-stack &>/dev/null; then
+        if codex-network-stack --non-interactive --eth-only 2>&1 | tee -a "$GUI_LOG"; then
+            # Check if we got an IP
+            local ip_addr
+            ip_addr="$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)" || true
+            if [[ -n "$ip_addr" ]]; then
+                log_info "Ethernet connected: $ip_addr"
+                return 0
+            fi
+        fi
+    fi
+
+    # Try WiFi auto-reconnect
+    if command -v codex-wifi-wizard &>/dev/null; then
+        log_info "No ethernet — trying WiFi auto-reconnect..."
+        if codex-wifi-wizard --auto 2>&1 | tee -a "$GUI_LOG"; then
+            log_info "WiFi auto-reconnect succeeded"
+            return 0
+        fi
+
+        # If auto-reconnect failed and we're in a terminal, try dialog wizard
+        if [[ -t 0 ]]; then
+            log_warn "WiFi auto-reconnect failed — launching wizard..."
+            if codex-wifi-wizard 2>&1 | tee -a "$GUI_LOG"; then
+                log_info "WiFi wizard succeeded"
+                return 0
+            else
+                log_warn "WiFi wizard failed or cancelled"
+            fi
+        else
+            log_warn "No interactive TTY — WiFi requires manual setup"
+        fi
+    fi
+
+    log_warn "Network initialization incomplete — no connectivity"
+    return 1
+}
+
+# =============================================================================
+# Run disk inventory (same as lite edition)
+# =============================================================================
+run_disk_inventory() {
+    if command -v codex-disk-inventory &>/dev/null; then
+        log_info "Running disk inventory..."
+        if codex-disk-inventory 2>/dev/null >> "$GUI_LOG"; then
+            log_info "Disk inventory complete"
+        else
+            log_warn "Disk inventory had issues"
+        fi
+    fi
+}
+
+# =============================================================================
+# Launch Codex CLI
+# =============================================================================
+launch_codex() {
+    if command -v codex &>/dev/null; then
+        log_info "Launching Codex CLI..."
+        exec codex
+    else
+        log_error "Codex CLI not found. Run: codex-update"
+        echo ""
+        echo -e "${YELLOW}Codex CLI is not installed.${NC}"
+        echo "Run 'codex-update' to download and install it."
+        echo ""
+        exec /bin/bash
+    fi
+}
+
+# =============================================================================
+# Main GUI Launch
+# =============================================================================
+launch_gui() {
+    # If we're already inside a compositor, just launch the terminal + codex
+    if [[ "$INSIDE_WAYLAND" == "true" ]]; then
+        log_info "Already in Wayland — launching ${GUI_TERMINAL} + codex directly"
+
+        # Source AGENTS.md context
+        if [[ -f "$CONTEXT_FILE" ]]; then
+            echo ""
+            echo -e "${CYAN}Workspace context loaded from ${CONTEXT_FILE}${NC}"
+            echo ""
+        fi
+
+        launch_codex
+        return
+    fi
+
+    # Check if cage is available
+    if ! command -v cage &>/dev/null; then
+        log_error "cage not found — cannot start GUI"
+        fallback_tty
+        return
+    fi
+
+    # Check if foot is available
+    if ! command -v foot &>/dev/null; then
+        log_error "foot not found — cannot start GUI terminal"
+        fallback_tty
+        return
+    fi
+
+    # Ensure XDG_RUNTIME_DIR
+    if [[ ! -d "$XDG_RUNTIME_DIR" ]]; then
+        mkdir -p "$XDG_RUNTIME_DIR"
+        chown "$(id -u):$(id -g)" "$XDG_RUNTIME_DIR" 2>/dev/null || true
+        chmod 0700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+    fi
+
+    log_info "Launching cage Wayland kiosk..."
+
+    # Set environment for cage child process
+    export CODX_AGENTS_CONTEXT="${CODEX_AGENTS_CONTEXT:-}"
+
+    # Launch cage with foot running this script (it will detect INSIDE_WAYLAND=true)
+    case "$COMPOSITOR" in
+        sway)
+            log_info "Using sway compositor..."
+            if command -v sway &>/dev/null; then
+                exec sway
+            else
+                log_warn "sway not found — falling back to cage"
+                exec cage -s -- "$GUI_TERMINAL" -- "$0"
+            fi
+            ;;
+        cage|*)
+            exec cage -s -- "$GUI_TERMINAL" -- "$0"
+            ;;
+    esac
+}
+
+# =============================================================================
+# TTY Fallback
+# =============================================================================
+fallback_tty() {
+    log_warn "Falling back to TTY mode..."
+
+    if [[ "$GUI_FALLBACK_TTY" != "true" ]]; then
+        log_error "GUI fallback disabled — exiting"
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${YELLOW}╔════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║  CodexOS — GUI Failed, TTY Fallback        ║${NC}"
+    echo -e "${YELLOW}╚════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${RED}Wayland/GPU initialization failed.${NC}"
+    echo -e "Falling back to TTY mode (tmux + codex-shell)."
+    echo ""
+    echo "Possible fixes:"
+    echo "  1. Check GPU drivers: lspci -k | grep -A3 VGA"
+    echo "  2. Load kernel modules: modprobe i915  # (Intel)"
+    echo "  3. Check seatd: rc-service seatd status"
+    echo "  4. Restart GUI: rc-service codex-gui restart"
+    echo ""
+
+    # Try the TTY codex-shell
+    if [[ -x /usr/local/bin/codex-shell ]]; then
+        exec /usr/local/bin/codex-shell
+    else
+        # Minimal TTY fallback — just start bash
+        exec /bin/bash
+    fi
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+main() {
+    log_info "codex-shell-gui starting..."
+
+    # Step 1: Run disk inventory
+    run_disk_inventory
+
+    # Step 2: Initialize network (only if not already connected)
+    local has_ip
+    has_ip="$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)" || true
+    if [[ -z "$has_ip" ]]; then
+        init_network
+    else
+        log_info "Network already connected: $has_ip"
+    fi
+
+    # Step 3: Launch GUI or fallback
+    launch_gui
+
+    # If launch_gui returns (shouldn't happen with exec), fallback
+    fallback_tty
+}
+
+main "$@"

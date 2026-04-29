@@ -1,0 +1,93 @@
+# CodexOS — codex-gui OpenRC init service
+# Starts the GUI session (cage + foot + codex) after boot.
+# Depends on: localmount, seatd, dbus
+
+#!/sbin/openrc-run
+# /etc/init.d/codex-gui
+# CodexOS Lite GUI — Wayland kiosk session service
+
+name="codex-gui"
+description="CodexOS Lite GUI — Wayland kiosk (cage + foot + codex)"
+
+depend() {
+    need localmount
+    after bootmisc
+    after codex-network
+    want dbus
+    need seatd
+}
+
+GUI_LOG="/persist/logs/gui-session.log"
+GUI_BIN="/usr/local/bin/codex-shell-gui"
+CODEX_USER="codex"
+XDG_RUNTIME_DIR="/run/user/1000"
+
+start_pre() {
+    # Ensure runtime directories
+    checkpath --directory --owner "${CODEX_USER}:${CODEX_USER}" --mode 0700 "$XDG_RUNTIME_DIR" 2>/dev/null || \
+        mkdir -p "$XDG_RUNTIME_DIR" && chown "${CODEX_USER}:${CODEX_USER}" "$XDG_RUNTIME_DIR" && chmod 0700 "$XDG_RUNTIME_DIR"
+
+    checkpath --directory --owner root:root --mode 2755 /run/seatd 2>/dev/null || true
+    checkpath --directory --owner root:root /persist/logs 2>/dev/null || true
+
+    # Check for GPU / DRM device
+    if [ ! -d /dev/dri ]; then
+        ewarn "No /dev/dri found — GUI may use software rendering"
+    fi
+
+    # Load kernel modules for GPU
+    modprobe -a i915 drm 2>/dev/null || true
+    modprobe -a amdgpu 2>/dev/null || true
+}
+
+start() {
+    ebegin "Starting CodexOS GUI session"
+
+    # Only start on tty1 (the main console)
+    if [ "$(tty)" != "/dev/tty1" ]; then
+        eend 0 "Not tty1, skipping GUI autostart"
+        return 0
+    fi
+
+    # Check if XDG_RUNTIME_DIR exists
+    if [ ! -d "$XDG_RUNTIME_DIR" ]; then
+        mkdir -p "$XDG_RUNTIME_DIR"
+        chown "${CODEX_USER}:${CODEX_USER}" "$XDG_RUNTIME_DIR"
+        chmod 0700 "$XDG_RUNTIME_DIR"
+    fi
+
+    # Launch GUI as codex user
+    start-stop-daemon \
+        --background \
+        --make-pidfile \
+        --pidfile /run/codex-gui.pid \
+        --user "${CODEX_USER}" \
+        --env "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" \
+        --env "HOME=/home/codex" \
+        --exec "$GUI_BIN" \
+        -- >> "$GUI_LOG" 2>&1
+
+    eend $? "GUI session started (log: $GUI_LOG)"
+}
+
+stop() {
+    ebegin "Stopping CodexOS GUI session"
+
+    # Kill cage/sway gracefully
+    start-stop-daemon --stop --pidfile /run/codex-gui.pid --retry 10 2>/dev/null || true
+
+    # Cleanup any remaining cage/sway/foot processes
+    pkill -u "${CODEX_USER}" -f "cage" 2>/dev/null || true
+    pkill -u "${CODEX_USER}" -f "sway" 2>/dev/null || true
+    pkill -u "${CODEX_USER}" -f "codex-shell-gui" 2>/dev/null || true
+
+    eend 0 "GUI session stopped"
+}
+
+status() {
+    if [ -f /run/codex-gui.pid ]; then
+        einfo "CodexOS GUI is running (PID: $(cat /run/codex-gui.pid))"
+    else
+        einfo "CodexOS GUI is not running"
+    fi
+}

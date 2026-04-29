@@ -1,0 +1,17 @@
+[Unit]
+Description=CodexOS Compat First-Boot Setup
+After=network.target network-online.target
+Wants=network-online.target
+Before=codex-disk-inventory.service codex-auto-update.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/first-boot
+RemainAfterExit=yes
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal
+ConditionPathExists=!/var/lib/codexos/.first-boot-done
+
+[Install]
+WantedBy=multi-user.target

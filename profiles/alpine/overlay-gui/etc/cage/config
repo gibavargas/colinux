@@ -1,0 +1,8 @@
+# CodexOS — cage configuration (optional)
+# cage reads this file if present.  In most cases cage is launched
+# with command-line flags from codex-shell-gui, but this file provides
+# default overrides.
+
+# Environment variables passed to the child process
+WLR_BACKENDS=headless,drm
+WLR_RENDERER=gles2

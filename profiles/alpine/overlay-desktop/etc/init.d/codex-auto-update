@@ -1,0 +1,62 @@
+#!/sbin/openrc-run
+# CodexOS Desktop — codex-auto-update init (OpenRC)
+# Sets up cron job for Codex Desktop app + Codex CLI auto-updates.
+
+name="codex-auto-update"
+description="CodexOS Desktop auto-update cron setup"
+
+depend() {
+    need localmount
+    after codex-firstboot
+    after net
+    use logger
+}
+
+CRON_DIR="/etc/cron.d"
+CRON_LINK="${CRON_DIR}/codex-auto-update"
+CONFIG_FILE="/etc/config/auto-update.conf"
+LOG_DIR="/persist/logs"
+ENABLED="true"
+INTERVAL="6"
+
+config_load() {
+    if [ -f "${CONFIG_FILE}" ]; then
+        . "${CONFIG_FILE}"
+    fi
+}
+
+start() {
+    config_load
+
+    if [ "${ENABLED}" != "true" ]; then
+        einfo "Codex auto-update is disabled"
+        return 0
+    fi
+
+    ebegin "Setting up Codex Desktop auto-update cron job"
+    mkdir -p "${CRON_DIR}" 2>/dev/null
+    mkdir -p "${LOG_DIR}" 2>/dev/null
+
+    # Install periodic cron job for Codex Desktop
+    mkdir -p /etc/periodic/6h 2>/dev/null
+    if [ ! -f /etc/periodic/6h/codex-desktop-update ]; then
+        ln -sf /opt/codex-desktop/config/auto-update.sh /etc/periodic/6h/codex-desktop-update 2>/dev/null || true
+    fi
+
+    # Codex CLI auto-update
+    if [ -f /usr/local/bin/cron-codex-update ]; then
+        cat > "${CRON_LINK}" <<EOF
+# CodexOS Desktop auto-update (Codex CLI + Desktop app)
+* */${INTERVAL} * * * /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1
+EOF
+        chmod 0644 "${CRON_LINK}"
+    fi
+
+    eend 0 "Auto-update cron installed (every ${INTERVAL}h)"
+}
+
+stop() {
+    ebegin "Removing Codex auto-update cron job"
+    rm -f "${CRON_LINK}"
+    eend 0 "Auto-update cron removed"
+}

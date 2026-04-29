@@ -1,0 +1,115 @@
+# =============================================================================
+# CodexOS Compat — Debian Package List (TTY Only)
+# =============================================================================
+# Debian-based edition for hardware incompatible with Alpine.
+# TTY-only interface, no GUI. Built on Debian 12 (bookworm).
+#
+# Categories: Base System, Network, Disk Tools, Dev Tools, Security,
+#             Firmware, Boot, File Utils.
+# =============================================================================
+
+# --- Base System ---
+init
+systemd
+systemd-sysv
+locales
+keyboard-configuration
+console-setup
+dbus
+ca-certificates
+debian-archive-keyring
+apt-listchanges
+
+# --- Network ---
+network-manager
+network-manager-openvpn
+iwd
+wpasupplicant
+dhcpcd5
+wireless-tools
+iw
+rfkill
+ethtool
+crda
+dialog
+openssh-client
+curl
+wget
+gnutls-bin
+rsync
+
+# --- Disk & Filesystem Tools ---
+gdisk
+parted
+e2fsprogs
+dosfstools
+exfatprogs
+btrfs-progs
+xfsprogs
+cryptsetup
+lvm2
+mdadm
+ntfs-3g
+smartmontools
+nvme-cli
+hdparm
+pciutils
+usbutils
+gparted
+
+# --- Dev Tools & CLI ---
+git
+curl
+wget
+ca-certificates
+gnupg2
+htop
+tmux
+vim
+nano
+python3
+python3-pip
+jq
+ripgrep
+fd-find
+fzf
+less
+file
+tree
+ncdu
+strace
+lsof
+socat
+
+# --- Security ---
+apparmor
+apparmor-utils
+ufw
+sudo
+polkitd
+
+# --- Firmware (broad hardware support) ---
+linux-firmware-nonfree
+firmware-iwlwifi
+firmware-atheros
+firmware-b43-installer
+firmware-brcm80211
+broadcom-sta-dkms
+firmware-realtek
+firmware-zd1211
+
+# --- Boot ---
+grub2
+grub-efi-amd64
+grub-efi-ia32
+efibootmgr
+systemd-boot
+shim-signed
+
+# --- File Utilities ---
+p7zip-full
+unzip
+xz-utils
+tar
+gzip
+zstd

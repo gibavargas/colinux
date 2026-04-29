@@ -1,0 +1,61 @@
+#!/bin/sh
+# =============================================================================
+# codex-clipboard — Wayland clipboard helper for CodexOS GUI
+# =============================================================================
+# Provides simple clipboard read/write via wl-copy/wl-paste equivalents.
+# Uses wl-clipboard if available, falls back to a file-based approach.
+#
+# Usage:
+#   codex-clipboard set "text to copy"    — Copy text to clipboard
+#   codex-clipboard get                   — Paste from clipboard
+#   codex-clipboard watch                 — Watch for clipboard changes
+# =============================================================================
+
+set -euo pipefail
+
+CLIPBOARD_FILE="/tmp/codex-clipboard.txt"
+
+# Check for wl-clipboard
+if command -v wl-copy &>/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+    case "${1:-get}" in
+        set)
+            echo "$2" | wl-copy
+            echo "Copied to Wayland clipboard"
+            ;;
+        get)
+            wl-paste 2>/dev/null || echo "(clipboard empty)"
+            ;;
+        watch)
+            wl-paste --watch cat 2>/dev/null || echo "wl-paste watch not supported"
+            ;;
+        *)
+            echo "Usage: codex-clipboard {set|get|watch}" >&2
+            exit 1
+            ;;
+    esac
+else
+    # File-based fallback
+    case "${1:-get}" in
+        set)
+            echo "$2" > "$CLIPBOARD_FILE"
+            echo "Saved to $CLIPBOARD_FILE"
+            ;;
+        get)
+            if [[ -f "$CLIPBOARD_FILE" ]]; then
+                cat "$CLIPBOARD_FILE"
+            else
+                echo "(clipboard empty)"
+            fi
+            ;;
+        watch)
+            echo "Watching $CLIPBOARD_FILE for changes..."
+            inotifywait -m -e modify "$CLIPBOARD_FILE" 2>/dev/null || \
+                echo "inotifywait not available. Use: codex-clipboard get"
+            ;;
+        *)
+            echo "Usage: codex-clipboard {set|get|watch}" >&2
+            echo "Note: Install wl-clipboard for Wayland clipboard support" >&2
+            exit 1
+            ;;
+    esac
+fi

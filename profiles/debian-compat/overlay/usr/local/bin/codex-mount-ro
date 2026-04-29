@@ -1,0 +1,108 @@
+#!/bin/bash
+# codex-mount-ro — Mount a block device read-only under /mnt/disks/
+# Part of CodexOS Lite
+#
+# Usage: codex-mount-ro /dev/sdX1
+#   Mounts device at /mnt/disks/by-device/<devname>
+#   Creates symlinks: by-label/<label>, by-uuid/<uuid> if available
+#
+# Requires: root (uses mount), blkid for label/uuid detection
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+MOUNT_BASE="/mnt/disks"
+
+mkdir -p "$LOG_DIR" "$MOUNT_BASE/by-device" "$MOUNT_BASE/by-label" "$MOUNT_BASE/by-uuid"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] mount-ro: $*" >> "$LOGFILE"
+}
+
+usage() {
+    echo "Usage: codex-mount-ro <device>"
+    echo ""
+    echo "Mount a block device read-only at ${MOUNT_BASE}/by-device/<name>"
+    echo ""
+    echo "Examples:"
+    echo "  codex-mount-ro /dev/sdb1"
+    echo "  codex-mount-ro /dev/nvme0n1p3"
+    exit 1
+}
+
+# ── Argument validation ───────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+    usage
+fi
+
+DEVICE="$1"
+
+# Validate device exists
+if [[ ! -b "$DEVICE" ]]; then
+    echo "ERROR: $DEVICE is not a valid block device." >&2
+    log_action "FAILED device_not_block device=$DEVICE"
+    exit 1
+fi
+
+DEVNAME="${DEVICE##*/}"
+MOUNT_POINT="${MOUNT_BASE}/by-device/${DEVNAME}"
+
+# Check if already mounted
+if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+    echo "Device $DEVICE is already mounted at $MOUNT_POINT"
+    log_action "ALREADY_MOUNTED device=$DEVICE mountpoint=$MOUNT_POINT"
+    exit 0
+fi
+
+# ── Get filesystem info ───────────────────────────────────────────────────
+FS_TYPE=""
+LABEL=""
+UUID=""
+
+if command -v blkid &>/dev/null; then
+    FS_TYPE="$(blkid -s TYPE -o value "$DEVICE" 2>/dev/null || echo "")"
+    LABEL="$(blkid -s LABEL -o value "$DEVICE" 2>/dev/null || echo "")"
+    UUID="$(blkid -s UUID -o value "$DEVICE" 2>/dev/null || echo "")"
+fi
+
+if [[ -z "$FS_TYPE" ]]; then
+    echo "WARNING: Could not detect filesystem type for $DEVICE" >&2
+    echo "Attempting mount with auto-detection..." >&2
+    FS_TYPE="auto"
+fi
+
+# ── Perform mount ─────────────────────────────────────────────────────────
+mkdir -p "$MOUNT_POINT"
+
+if mount -o ro,nosuid,nodev,noexec "$DEVICE" "$MOUNT_POINT"; then
+    echo "Mounted $DEVICE (ro) at $MOUNT_POINT"
+    log_action "OK device=$DEVICE fs=$FS_TYPE mountpoint=$MOUNT_POINT"
+else
+    echo "ERROR: Failed to mount $DEVICE read-only." >&2
+    log_action "FAILED mount_error device=$DEVICE fs=$FS_TYPE"
+    exit 1
+fi
+
+# ── Create by-label symlink ───────────────────────────────────────────────
+if [[ -n "$LABEL" ]]; then
+    local_symlink_path="${MOUNT_BASE}/by-label/${LABEL}"
+    if [[ -L "$local_symlink_path" ]]; then
+        rm -f "$local_symlink_path"
+    fi
+    ln -s "$MOUNT_POINT" "$local_symlink_path"
+    echo "  → symlink: by-label/${LABEL}"
+fi
+
+# ── Create by-uuid symlink ────────────────────────────────────────────────
+if [[ -n "$UUID" ]]; then
+    local_symlink_path="${MOUNT_BASE}/by-uuid/${UUID}"
+    if [[ -L "$local_symlink_path" ]]; then
+        rm -f "$local_symlink_path"
+    fi
+    ln -s "$MOUNT_POINT" "$local_symlink_path"
+    echo "  → symlink: by-uuid/${UUID}"
+fi
+
+echo "Done."

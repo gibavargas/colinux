@@ -1,0 +1,23 @@
+# =============================================================================
+# CodexOS Compat — sudoers rules for the codex user
+# =============================================================================
+# Mirrors the Alpine doas.conf whitelist. The codex user can run these
+# specific commands as root without a password. All other sudo commands
+# require a password (if one is set).
+# =============================================================================
+
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-disk-inventory
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-mount-ro
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-mount-rw
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-usb-persist
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-install-usb
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-install-pc
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-network
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-update
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-backup
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-restore
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-logs
+codex ALL=(root) NOPASSWD: /usr/local/bin/codexctl
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-wifi-wizard
+codex ALL=(root) NOPASSWD: /usr/local/sbin/codex-network-stack
+codex ALL=(root) NOPASSWD: /usr/local/sbin/install-camoufox

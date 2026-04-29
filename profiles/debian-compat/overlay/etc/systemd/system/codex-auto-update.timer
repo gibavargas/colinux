@@ -1,0 +1,11 @@
+[Unit]
+Description=CodexOS Compat Auto-Update Timer
+Documentation=man:systemd.timer
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

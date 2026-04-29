@@ -1,0 +1,16 @@
+[Unit]
+Description=CodexOS Unified Network Initialization
+After=network-pre.target
+Wants=network-online.target
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/codex-network-stack --non-interactive
+RemainAfterExit=yes
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

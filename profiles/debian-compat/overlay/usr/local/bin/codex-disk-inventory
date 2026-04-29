@@ -1,0 +1,331 @@
+#!/bin/bash
+# codex-disk-inventory — Scan all block devices and produce JSON + Markdown reports
+# Part of CodexOS Lite
+#
+# Outputs:
+#   /run/codex/disks.json  — machine-readable inventory
+#   /run/codex/disks.md    — human-readable markdown summary
+set -euo pipefail
+
+RUN_DIR="/run/codex"
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+
+mkdir -p "$RUN_DIR" "$LOG_DIR"
+
+log_msg() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] inventory: $*" >> "$LOGFILE" 2>/dev/null || true
+}
+
+# ── Identify the boot device ──────────────────────────────────────────────
+find_boot_device() {
+    local root_dev=""
+
+    # Method 1: parse /proc/cmdline for root= parameter
+    if [[ -f /proc/cmdline ]]; then
+        local cmdline_root
+        cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
+        if [[ -n "$cmdline_root" ]]; then
+            # Resolve PARTUUID=, UUID=, /dev/... to a base block device
+            if [[ "$cmdline_root" == PARTUUID=* ]]; then
+                local puuid="${cmdline_root#PARTUUID=}"
+                root_dev="$(blkid -t "PARTUUID=${puuid}" -o device 2>/dev/null | head -1 || true)"
+            elif [[ "$cmdline_root" == UUID=* ]]; then
+                local uuid="${cmdline_root#UUID=}"
+                root_dev="$(blkid -t "UUID=${uuid}" -o device 2>/dev/null | head -1 || true)"
+            elif [[ "$cmdline_root" == /dev/* ]]; then
+                root_dev="$cmdline_root"
+            fi
+        fi
+    fi
+
+    # Method 2: check what device is mounted at /
+    if [[ -z "$root_dev" ]]; then
+        root_dev="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
+    fi
+
+    # Resolve partition device to parent disk
+    if [[ -n "$root_dev" ]]; then
+        # If it's a partition like /dev/sda1 or /dev/nvme0n1p3, get the parent
+        if [[ "$root_dev" =~ ^/dev/(nvme[0-9]+n[0-9]+)p[0-9]+$ ]]; then
+            echo "/dev/${BASH_REMATCH[1]}"
+        elif [[ "$root_dev" =~ ^/dev/([a-z]+)[0-9]+$ ]]; then
+            echo "/dev/${BASH_REMATCH[1]}"
+        elif [[ "$root_dev" =~ ^/dev/(mmcblk[0-9]+)p[0-9]+$ ]]; then
+            echo "/dev/${BASH_REMATCH[1]}"
+        elif [[ "$root_dev" =~ ^/dev/(loop[0-9]+)$ ]]; then
+            echo "$root_dev"  # loop device — no parent
+        else
+            echo "$root_dev"
+        fi
+    else
+        echo ""
+    fi
+}
+
+BOOT_DEV="$(find_boot_device)"
+log_msg "boot_device=${BOOT_DEV}"
+
+# ── Collect per-device info ───────────────────────────────────────────────
+declare -a DEVICES=()
+
+collect_device_info() {
+    local dev="$1"  # e.g. /dev/sda
+    local devname="${dev##*/}"
+
+    # Basic lsblk info (JSON output for parsing)
+    local lsblk_json
+    lsblk_json="$(lsblk -d -b -n -o NAME,SIZE,RO,RM,ROTA,TRAN,MODEL,SERIAL,PTTYPE "${dev}" -J 2>/dev/null || echo '{}')"
+
+    local size_bytes model serial transport pttype removable rotational
+    size_bytes="$(echo "$lsblk_json" | jq -r '.blockdevices[0].size // "0"')"
+    model="$(echo "$lsblk_json" | jq -r '.blockdevices[0].model // "Unknown"')"
+    serial="$(echo "$lsblk_json" | jq -r '.blockdevices[0].serial // ""')"
+    transport="$(echo "$lsblk_json" | jq -r '.blockdevices[0].tran // ""')"
+    pttype="$(echo "$lsblk_json" | jq -r '.blockdevices[0].pttype // "none"')"
+    removable="$(echo "$lsblk_json" | jq -r '.blockdevices[0].rm // "0"')"
+    rotational="$(echo "$lsblk_json" | jq -r '.blockdevices[0].rota // "1"')"
+
+    # Fallback for fields lsblk might not provide
+    [[ "$model" == "null" || -z "$model" ]] && model="Unknown"
+    [[ "$serial" == "null" ]] && serial=""
+
+    # Try hdparm for serial if lsblk didn't find it
+    if [[ -z "$serial" ]] && command -v hdparm &>/dev/null; then
+        serial="$(hdparm -I "$dev" 2>/dev/null | grep -i 'Serial Number' | awk -F: '{print $2}' | tr -d ' ' || true)"
+    fi
+
+    # Size in human-readable
+    local size_human
+    size_human="$(numfmt --to=iec --suffix=B "$size_bytes" 2>/dev/null || echo "${size_bytes}B")"
+
+    # Boot device flag
+    local is_boot="false"
+    if [[ "$dev" == "$BOOT_DEV" ]]; then
+        is_boot="true"
+    fi
+
+    # Partition and filesystem info
+    local partitions="[]"
+    local part_json
+    part_json="$(lsblk -b -n -o NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT "${dev}" -J 2>/dev/null || echo '{"blockdevices":[]}')"
+
+    # Build partition array
+    # lsblk JSON nests children under .blockdevices[0].children
+    partitions="$(echo "$part_json" | jq -c '
+        if (.blockdevices[0].children // [] | length > 0) then
+            [.blockdevices[0].children[] | {
+                name: .name,
+                size: (if .size then (./1024/1024/1024 | tostring + "G") else "0G" end),
+                filesystem: (if .fstype then .fstype else "none" end),
+                label: (if .label then .label else "" end),
+                uuid: (if .uuid then .uuid else "" end),
+                mountpoint: (if .mountpoint then .mountpoint else "" end)
+            }]
+        else
+            []
+        end
+    ' 2>/dev/null || echo '[]')"
+
+    # Check mount status for the whole device
+    local mount_status="unmounted"
+    if echo "$partitions" | jq -e '.[].mountpoint | select(. != "" and . != null)' &>/dev/null; then
+        mount_status="mounted"
+    fi
+
+    # Detect LUKS
+    local has_luks="false"
+    local luks_status=""
+    if lsblk -n -o FSTYPE "${dev}" 2>/dev/null | grep -qi 'crypto_LUKS\|luks'; then
+        has_luks="true"
+        luks_status="locked"
+    fi
+    # Check if any LUKS child is open
+    if lsblk -n -o TYPE "${dev}" 2>/dev/null | grep -q 'crypt'; then
+        has_luks="true"
+        luks_status="unlocked"
+    fi
+    # Also check partitions
+    if echo "$partitions" | jq -e '.[].filesystem | select(test("crypto_LUKS|luks"; "i"))' &>/dev/null; then
+        has_luks="true"
+        if [[ -z "$luks_status" ]]; then
+            luks_status="locked"
+        fi
+    fi
+
+    # Detect BitLocker (NTFS with BitLocker attribute — best-effort on Linux)
+    local has_bitlocker="false"
+    if command -v dislocker &>/dev/null; then
+        if echo "$partitions" | jq -e '.[].filesystem | select(. == "ntfs")' &>/dev/null; then
+            # Try to detect BitLocker from ntfs metadata
+            local ntfs_parts
+            ntfs_parts="$(echo "$partitions" | jq -r '.[] | select(.filesystem == "ntfs") | .name' 2>/dev/null || true)"
+            for p in $ntfs_parts; do
+                if dislocker -V "/dev/${p}" &>/dev/null; then
+                    has_bitlocker="true"
+                    break
+                fi
+            done
+        fi
+    fi
+
+    # SMART summary
+    local smart_summary="unavailable"
+    if command -v smartctl &>/dev/null; then
+        local smart_out
+        if smart_out="$(smartctl -H -A "$dev" 2>/dev/null)"; then
+            local health
+            health="$(echo "$smart_out" | grep -i 'SMART overall-health' | sed 's/.*: //' | head -1 || true)"
+            if [[ -z "$health" ]]; then
+                health="$(echo "$smart_out" | grep -i 'result:' | sed 's/.*result: //' | head -1 || true)"
+            fi
+            local temp
+            temp="$(echo "$smart_out" | grep -i 'Temperature_Celsius' | awk '{print $NF}' | head -1 || true)"
+            if [[ -n "$temp" ]]; then
+                smart_summary="${health:-UNKNOWN}, temp=${temp}C"
+            else
+                smart_summary="${health:-UNKNOWN}"
+            fi
+        fi
+    fi
+
+    # NVMe specific health
+    if [[ "$transport" == "nvme" ]] && command -v nvme &>/dev/null; then
+        local nvme_health
+        nvme_health="$(nvme smart-log "$dev" 2>/dev/null | grep -E 'percentage used|critical_warning|temperature' | head -3 || true)"
+        if [[ -n "$nvme_health" ]]; then
+            smart_summary="$(echo "$nvme_health" | tr '\n' '; ' | sed 's/; $//')"
+        fi
+    fi
+
+    # Removable flag (string)
+    local is_removable="false"
+    if [[ "$removable" == "1" ]] || [[ "$transport" == "usb" ]]; then
+        is_removable="true"
+    fi
+
+    # Emit JSON fragment
+    jq -n \
+        --arg device "$dev" \
+        --arg model "$model" \
+        --arg serial "$serial" \
+        --arg size "$size_human" \
+        --argjson size_bytes "$size_bytes" \
+        --arg transport "$transport" \
+        --arg partition_table "$pttype" \
+        --arg mount_status "$mount_status" \
+        --argjson partitions "$partitions" \
+        --arg has_luks "$has_luks" \
+        --arg luks_status "$luks_status" \
+        --arg has_bitlocker "$has_bitlocker" \
+        --arg smart_summary "$smart_summary" \
+        --arg is_boot "$is_boot" \
+        --arg is_removable "$is_removable" \
+        '{
+            device: $device,
+            model: $model,
+            serial: $serial,
+            size: $size,
+            size_bytes: $size_bytes,
+            transport: $transport,
+            partition_table: $partition_table,
+            mount_status: $mount_status,
+            partitions: $partitions,
+            has_luks: ($has_luks == "true"),
+            luks_status: $luks_status,
+            has_bitlocker: ($has_bitlocker == "true"),
+            smart_summary: $smart_summary,
+            is_boot: ($is_boot == "true"),
+            is_removable: ($is_removable == "true")
+        }'
+}
+
+# ── Enumerate all block devices ───────────────────────────────────────────
+DISK_LIST=()
+if [[ -d /sys/block ]]; then
+    for b in /sys/block/*; do
+        name="${b##*/}"
+        # Skip loop devices, ram, zram
+        case "$name" in
+            loop*|ram*|zram*|fd*|md*) continue ;;
+        esac
+        DISK_LIST+=("/dev/${name}")
+    done
+fi
+
+# ── Build JSON array ──────────────────────────────────────────────────────
+JSON_ARRAY="["
+first=true
+for dev in "${DISK_LIST[@]}"; do
+    if [[ "$first" == true ]]; then
+        first=false
+    else
+        JSON_ARRAY+=","
+    fi
+    JSON_ARRAY+="$(collect_device_info "$dev")"
+done
+JSON_ARRAY+="]"
+
+# ── Write JSON output ─────────────────────────────────────────────────────
+TIMESTAMP="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+FULL_JSON="$(echo "$JSON_ARRAY" | jq -c --arg timestamp "$TIMESTAMP" --arg boot_device "$BOOT_DEV" '{
+    timestamp: $timestamp,
+    boot_device: $boot_device,
+    total_devices: length,
+    devices: .
+}')"
+
+echo "$FULL_JSON" | jq '.' > "${RUN_DIR}/disks.json"
+
+# ── Generate Markdown output ──────────────────────────────────────────────
+{
+    echo "# CodexOS Disk Inventory"
+    echo ""
+    echo "**Generated:** ${TIMESTAMP}  "
+    echo "**Boot Device:** \`${BOOT_DEV}\`  "
+    echo "**Total Devices:** ${#DISK_LIST[@]}"
+    echo ""
+    echo "---"
+    echo ""
+
+    echo "$FULL_JSON" | jq -r '.devices[] | '
+    '## \(.device)  \(.is_boot | if . then "★ BOOT" else "" end)\(.is_removable | if . then " 🔌 USB" else "" end)"
+
+    echo ""
+    echo "| Property | Value |"
+    echo "|----------|-------|"
+    echo "| Model | \(.model // "Unknown") |"
+    echo "| Serial | `\(.serial // "N/A")` |"
+    echo "| Size | \(.size) |"
+    echo "| Transport | \(.transport // "N/A") |"
+    echo "| Partition Table | \(.partition_table // "none") |"
+    echo "| Mount Status | \(.mount_status) |"
+    echo "| LUKS | \(.has_luks | if . then "Yes (\(.luks_status))" else "No" end) |"
+    echo "| BitLocker | \(.has_bitlocker | if . then "⚠ Yes" else "No" end) |"
+    echo "| SMART | \(.smart_summary) |"
+    echo ""
+    if (.partitions | length > 0) then
+        "### Partitions"
+        echo ""
+        "| # | Name | Size | FS | Label | UUID | Mount |"
+        echo "|---|------|------|----|-------|------|-------|"
+        (.partitions | to_entries[] |
+            "| \(.key + 1) | \(.value.name) | \(.value.size) | \(.value.filesystem) | \(.value.label // "-") | `\(.value.uuid // "-")` | \(.value.mountpoint // "-") |"
+        )
+        echo ""
+    end
+    echo "---"
+    echo ""'
+
+} > "${RUN_DIR}/disks.md"
+
+log_msg "inventory_complete devices=${#DISK_LIST[@]}"
+
+# Print summary to stdout
+echo "CodexOS Disk Inventory — ${#DISK_LIST[@]} device(s) scanned"
+echo "  JSON: ${RUN_DIR}/disks.json"
+echo "  Markdown: ${RUN_DIR}/disks.md"
+echo ""
+echo "$FULL_JSON" | jq -r '.devices[] | "  \(.device)  \(.model)  \(.size)  \(.transport // "N/A")\(.is_boot | if . then "  [BOOT]" else "" end)\(.is_removable | if . then "  [USB]" else "" end)"'
