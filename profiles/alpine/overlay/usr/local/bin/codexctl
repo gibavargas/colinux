@@ -22,6 +22,7 @@
 #   logs --follow   Follow log output
 #   backup          Create a backup snapshot
 #   backup --list   List existing backups
+#   restore FILE    Safely restore a backup
 #   version         Show CodexOS and Codex CLI versions
 set -euo pipefail
 
@@ -311,6 +312,12 @@ cmd_backup() {
     codex-backup "$@"
 }
 
+# ── Command: restore ──────────────────────────────────────────────────────
+cmd_restore() {
+    shift  # remove 'restore'
+    try_root codex-restore "$@"
+}
+
 # ── Command: usb-persist ──────────────────────────────────────────────────
 cmd_usb_persist() {
     shift  # remove 'usb-persist'
@@ -357,6 +364,9 @@ case "$COMMAND" in
     backup)
         cmd_backup "$@"
         ;;
+    restore)
+        cmd_restore "$@"
+        ;;
     usb-persist)
         cmd_usb_persist "$@"
         ;;
@@ -384,6 +394,7 @@ Commands:
   network             Network setup and status
   logs [source]       View system logs
   backup [--list]     Create/list backups
+  restore FILE        Safely restore a backup
   usb-persist         USB persistence management
   version             Show version info
 

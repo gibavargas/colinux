@@ -1,14 +1,15 @@
 # CodexOS Desktop — Sudoers configuration for codex user
-# Provides passwordless access to disk operations, network, and updates.
+# Provides passwordless access to specific, audited operations only.
 # Installed to: /etc/sudoers.d/codex-desktop
+#
+# SECURITY: Each line is explicitly listed. Wildcards are minimized.
+# Raw mount/umount and broad udisksctl access are intentionally REMOVED.
 
-# Disk operations (disk safety model)
+# Disk operations (disk safety model — use codex-* wrappers only)
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-mount-ro
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-backup
+codex ALL=(root) NOPASSWD: /usr/local/bin/codex-restore
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-disk-inventory
-codex ALL=(root) NOPASSWD: /bin/mount -o ro *
-codex ALL=(root) NOPASSWD: /bin/umount *
-codex ALL=(root) NOPASSWD: /usr/bin/udisksctl *
 
 # System updates
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-system-autoupdate
@@ -16,15 +17,18 @@ codex ALL=(root) NOPASSWD: /usr/local/bin/codex-desktop-autoupdate
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-update
 codex ALL=(root) NOPASSWD: /usr/sbin/unattended-upgrade
 
-# Network (via NetworkManager)
-codex ALL=(root) NOPASSWD: /usr/bin/nmcli *
-codex ALL=(root) NOPASSWD: /usr/sbin/ifup *
-codex ALL=(root) NOPASSWD: /usr/sbin/ifdown *
+# Network (restricted — status and connection only, no destructive ops)
+codex ALL=(root) NOPASSWD: /usr/bin/nmcli device status
+codex ALL=(root) NOPASSWD: /usr/bin/nmcli connection show
+codex ALL=(root) NOPASSWD: /usr/bin/nmcli connection up *
+codex ALL=(root) NOPASSWD: /usr/bin/nmcli connection down *
+codex ALL=(root) NOPASSWD: /usr/bin/nmcli general reload
 
 # System info (read-only)
-codex ALL=(root) NOPASSWD: /usr/bin/smartctl *
-codex ALL=(root) NOPASSWD: /usr/sbin/hdparm *
-codex ALL=(root) NOPASSWD: /usr/sbin/nvme *
+codex ALL=(root) NOPASSWD: /usr/bin/smartctl -H *
+codex ALL=(root) NOPASSWD: /usr/bin/smartctl -A *
+codex ALL=(root) NOPASSWD: /usr/sbin/hdparm -I *
+codex ALL=(root) NOPASSWD: /usr/sbin/nvme smart-log *
 codex ALL=(root) NOPASSWD: /sbin/blkid
 
 # Codex Desktop management

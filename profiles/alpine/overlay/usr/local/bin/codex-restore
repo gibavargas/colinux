@@ -1,0 +1,200 @@
+#!/bin/bash
+# codex-restore — Safely restore a CodexOS backup with path validation
+# Part of CodexOS Lite
+#
+# Usage: codex-restore [OPTIONS] FILE
+#
+# SECURITY: This script runs as root via doas. It extracts backups to a
+# staging directory first, validates all paths, and only restores files
+# under /persist/* and /workspace/*. No absolute paths, no symlinks
+# escaping the staging directory are permitted.
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+WORKSPACE_DIR="/workspace"
+BACKUP_DIR="${PERSIST_DIR}/backups"
+LOG_DIR="${PERSIST_DIR}/logs"
+LOGFILE="${LOG_DIR}/backup.log"
+
+mkdir -p "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] restore: $*" >> "$LOGFILE"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+usage() {
+    echo "Usage: codex-restore [OPTIONS] FILE"
+    echo ""
+    echo "Safely restore a CodexOS backup to /persist and /workspace only."
+    echo ""
+    echo "Options:"
+    echo "  --persist-only   Only restore /persist files"
+    echo "  --workspace-only Only restore /workspace files"
+    echo "  --list           List contents of backup without restoring"
+    echo "  --help           Show this help"
+    echo ""
+    echo "SECURITY: Only /persist/* and /workspace/* paths are restored."
+    echo "          Symlinks and absolute paths are blocked."
+    exit 0
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────
+RESTORE_FILE=""
+PERSIST_ONLY=false
+WORKSPACE_ONLY=false
+LIST_ONLY=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --persist-only)
+            PERSIST_ONLY=true
+            shift
+            ;;
+        --workspace-only)
+            WORKSPACE_ONLY=true
+            shift
+            ;;
+        --list)
+            LIST_ONLY=true
+            shift
+            ;;
+        --help|-h)
+            usage
+            ;;
+        *)
+            if [[ -n "$RESTORE_FILE" ]]; then
+                die "Multiple files specified. Use only one."
+            fi
+            RESTORE_FILE="$1"
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$RESTORE_FILE" ]]; then
+    die "No backup file specified. Usage: codex-restore <file>"
+fi
+
+# Resolve backup file path
+if [[ ! -f "$RESTORE_FILE" ]]; then
+    if [[ -f "${BACKUP_DIR}/${RESTORE_FILE}" ]]; then
+        RESTORE_FILE="${BACKUP_DIR}/${RESTORE_FILE}"
+    else
+        die "Backup file not found: $RESTORE_FILE"
+    fi
+fi
+
+# ── List mode ─────────────────────────────────────────────────────────────
+if [[ "$LIST_ONLY" == true ]]; then
+    echo "=== Backup Contents: $(basename "$RESTORE_FILE") ==="
+    tar tzf "$RESTORE_FILE" 2>/dev/null || die "Failed to read tar archive."
+    exit 0
+fi
+
+# ── Interactive confirmation ──────────────────────────────────────────────
+local_f="${RESTORE_FILE##*/}"
+echo "⚠ WARNING: Restoring a backup will overwrite files in /persist and /workspace."
+echo ""
+echo "Backup: $local_f"
+echo "Size:   $(du -sh "$RESTORE_FILE" | awk '{print $1}')"
+echo ""
+echo -n "Type RESTORE to confirm: "
+read -r confirm
+if [[ "$confirm" != "RESTORE" ]]; then
+    echo "Aborted."
+    exit 0
+fi
+
+log_action "restore_start file=$local_f"
+
+# ── Extract to staging directory ─────────────────────────────────────────
+STAGING_DIR="$(mktemp -d)"
+trap 'rm -rf "$STAGING_DIR"' EXIT
+
+echo "Extracting to staging directory..."
+tar xzf "$RESTORE_FILE" -C "$STAGING_DIR" 2>&1 || {
+    die "Failed to extract backup archive."
+}
+
+# ── Validate paths: block dangerous entries ───────────────────────────────
+echo "Validating backup contents..."
+
+DANGEROUS=false
+while IFS= read -r -d '' entry; do
+    # Get the relative path within the staging dir
+    rel_path="${entry#$STAGING_DIR/}"
+
+    # Skip the top-level persist/workspace dirs themselves
+    if [[ "$rel_path" == "persist" || "$rel_path" == "workspace" ]]; then
+        continue
+    fi
+
+    # Block absolute paths (shouldn't exist in staging but double-check)
+    if [[ "$rel_path" == /* ]]; then
+        echo "  ✗ BLOCKED: Absolute path found: $rel_path"
+        DANGEROUS=true
+        continue
+    fi
+
+    # Block symlinks that escape staging
+    if [[ -L "$entry" ]]; then
+        link_target="$(readlink -f "$entry" 2>/dev/null || true)"
+        # Check if symlink target is outside staging
+        if [[ -n "$link_target" && "$link_target" != "$STAGING_DIR"/* ]]; then
+            echo "  ✗ BLOCKED: Escaping symlink: $rel_path -> $link_target"
+            DANGEROUS=true
+            continue
+        fi
+    fi
+
+    # Block paths not under persist/ or workspace/
+    if [[ "$rel_path" != persist/* && "$rel_path" != workspace/* ]]; then
+        echo "  ✗ BLOCKED: Path outside allowed directories: $rel_path"
+        DANGEROUS=true
+    fi
+done < <(find "$STAGING_DIR" -print0 2>/dev/null)
+
+if [[ "$DANGEROUS" == true ]]; then
+    die "Backup contains dangerous paths. Refusing to restore. Manual review required."
+fi
+
+echo "  ✓ Path validation passed."
+
+# ── Restore validated paths ──────────────────────────────────────────────
+restored_count=0
+
+if [[ "$WORKSPACE_ONLY" != true ]] && [[ -d "$STAGING_DIR/persist" ]]; then
+    echo "Restoring /persist..."
+    # Use rsync or cp to merge; skip the backups dir to avoid infinite recursion
+    if command -v rsync &>/dev/null; then
+        rsync -a --exclude='backups/*.tar.gz' "$STAGING_DIR/persist/" "$PERSIST_DIR/"
+    else
+        cp -a --no-preserve=ownership "$STAGING_DIR/persist/." "$PERSIST_DIR/" 2>/dev/null || true
+    fi
+    restored_count=$(($(find "$STAGING_DIR/persist" -type f 2>/dev/null | wc -l)))
+fi
+
+if [[ "$PERSIST_ONLY" != true ]] && [[ -d "$STAGING_DIR/workspace" ]]; then
+    echo "Restoring /workspace..."
+    if command -v rsync &>/dev/null; then
+        rsync -a "$STAGING_DIR/workspace/" "$WORKSPACE_DIR/"
+    else
+        cp -a --no-preserve=ownership "$STAGING_DIR/workspace/." "$WORKSPACE_DIR/" 2>/dev/null || true
+    fi
+    restored_count=$((restored_count + $(find "$STAGING_DIR/workspace" -type f 2>/dev/null | wc -l)))
+fi
+
+# ── Fix ownership ────────────────────────────────────────────────────────
+chown -R codex:codex "$PERSIST_DIR" 2>/dev/null || true
+chown -R codex:codex "$WORKSPACE_DIR" 2>/dev/null || true
+
+echo "✓ Restore complete. $restored_count file(s) restored."
+log_action "restore_ok file=$local_f files=$restored_count"

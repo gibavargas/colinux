@@ -7,9 +7,12 @@
 #   --persist    — Only backup /persist
 #   --workspace  — Only backup /workspace
 #   --list       — List existing backups
-#   --restore FILE — Restore a specific backup
 #   --prune N    — Keep only the last N backups, delete older ones
 #   --dest DIR   — Backup destination (default: /persist/backups)
+#
+# NOTE: To restore a backup, use codex-restore (separate command with
+# path validation). Restore functionality was removed from this script
+# for security reasons.
 set -euo pipefail
 
 PERSIST_DIR="/persist"
@@ -36,7 +39,6 @@ die() {
 BACKUP_PERSIST=true
 BACKUP_WORKSPACE=true
 LIST_ONLY=false
-RESTORE_FILE=""
 PRUNE_COUNT=0
 
 while [[ $# -gt 0 ]]; do
@@ -55,10 +57,6 @@ while [[ $# -gt 0 ]]; do
             LIST_ONLY=true
             shift
             ;;
-        --restore)
-            RESTORE_FILE="${2:?--restore requires a filename}"
-            shift 2
-            ;;
         --prune)
             PRUNE_COUNT="${2:?--prune requires a number}"
             shift 2
@@ -76,9 +74,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --persist       Only backup /persist"
             echo "  --workspace     Only backup /workspace"
             echo "  --list          List existing backups"
-            echo "  --restore FILE  Restore a specific backup"
             echo "  --prune N       Keep only last N backups"
             echo "  --dest DIR      Backup destination (default: /persist/backups)"
+            echo ""
+            echo "To restore: use codex-restore (separate command)"
             exit 0
             ;;
         *)
@@ -111,45 +110,6 @@ if [[ "$LIST_ONLY" == true ]]; then
     echo ""
     echo "Total: $(ls -1 "$BACKUP_DIR"/*.tar.gz 2>/dev/null | wc -l) backup(s)"
     echo "Size:  $(du -sh "$BACKUP_DIR" 2>/dev/null | awk '{print $1}')"
-    exit 0
-fi
-
-# ── Restore backup ────────────────────────────────────────────────────────
-if [[ -n "$RESTORE_FILE" ]]; then
-    if [[ ! -f "$RESTORE_FILE" ]]; then
-        # Try to find it in backup dir
-        if [[ -f "${BACKUP_DIR}/${RESTORE_FILE}" ]]; then
-            RESTORE_FILE="${BACKUP_DIR}/${RESTORE_FILE}"
-        else
-            die "Backup file not found: $RESTORE_FILE"
-        fi
-    fi
-
-    local_f="${RESTORE_FILE##*/}"
-
-    echo "⚠ WARNING: Restoring a backup will overwrite existing files."
-    echo ""
-    echo "Backup: $local_f"
-    echo "Size:   $(du -sh "$RESTORE_FILE" | awk '{print $1}')"
-    echo ""
-    echo -n "Type RESTORE to confirm: "
-    read -r confirm
-    if [[ "$confirm" != "RESTORE" ]]; then
-        echo "Aborted."
-        exit 0
-    fi
-
-    echo "Restoring $RESTORE_FILE..."
-    log_action "restore_start file=$local_f"
-
-    # Extract to /
-    tar xzf "$RESTORE_FILE" -C / --recursive-unlink --warning=no-file-changed 2>&1 || {
-        echo "✗ Restore completed with warnings. Some files may not have been restored."
-        log_action "restore_partial file=$local_f"
-    }
-
-    echo "✓ Restore complete."
-    log_action "restore_ok file=$local_f"
     exit 0
 fi
 

@@ -113,9 +113,10 @@ collect_device_info() {
     part_json="$(lsblk -b -n -o NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT "${dev}" -J 2>/dev/null || echo '{"blockdevices":[]}')"
 
     # Build partition array
+    # lsblk JSON nests children under .blockdevices[0].children
     partitions="$(echo "$part_json" | jq -c '
-        if .blockdevices | length > 1 then
-            [.blockdevices[1:][] | {
+        if (.blockdevices[0].children // [] | length > 0) then
+            [.blockdevices[0].children[] | {
                 name: .name,
                 size: (if .size then (./1024/1024/1024 | tostring + "G") else "0G" end),
                 filesystem: (if .fstype then .fstype else "none" end),

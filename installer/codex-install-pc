@@ -48,7 +48,8 @@ Options:
   --dual-boot       Preserve existing OS — only add CodexOS partitions
   --efi-size N      Size in MB for EFI partition (default: 512)
   --system-size N   Size in MB for system partition (default: 4096)
-  --no-confirm      Skip interactive confirmation (DANGEROUS)
+  --no-confirm      [REMOVED — unsafe, use --ci with CODXOS_CI_BUILD=1]
+  --ci              CI mode: skip confirmation only if CODXOS_CI_BUILD=1
   --help            Show this help
 
 Examples:
@@ -71,6 +72,7 @@ VOLUME_LABEL="CODEXOS"
 DUAL_BOOT=false
 EXTERNAL=false
 NO_CONFIRM=false
+CI_MODE=false
 
 # ── Architecture detection ─────────────────────────────────────────────────
 case "$(uname -m)" in
@@ -109,7 +111,11 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --no-confirm)
-            NO_CONFIRM=true
+            # REMOVED: Refuse to use --no-confirm for safety
+            die "SECURITY: --no-confirm has been removed. Use --ci with CODXOS_CI_BUILD=1 for automated builds."
+            ;;
+        --ci)
+            CI_MODE=true
             shift
             ;;
         --help|-h)
@@ -210,7 +216,12 @@ fi
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 
-if [[ "$NO_CONFIRM" != true ]]; then
+if [[ "$CI_MODE" == true ]]; then
+    if [[ "${CODXOS_CI_BUILD:-}" != "1" ]]; then
+        die "SECURITY: --ci flag requires CODXOS_CI_BUILD=1 environment variable."
+    fi
+    echo "CI mode: skipping serial confirmation (CODXOS_CI_BUILD=1)"
+else
     echo -n "Type the serial number to confirm [${SERIAL}]: "
     read -r CONFIRM_INPUT
     if [[ "$CONFIRM_INPUT" != "$SERIAL" ]]; then

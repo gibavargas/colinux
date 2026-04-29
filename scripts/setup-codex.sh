@@ -102,11 +102,12 @@ check_existing() {
 
 # ── Get latest release version from GitHub ───────────────────────────────────
 get_latest_version() {
-    local url="https://api.github.com/repos/${GITHUB_REPO}/releases/${CHANNEL}"
+    # Use 'releases/latest' for stable channel (GitHub's canonical endpoint)
+    local url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
 
-    # If channel is "preview", use "latest" endpoint but filter
+    # If channel is "preview", list all releases and pick the first non-draft
     if [ "$CHANNEL" = "preview" ]; then
-        url="https://api.github.com/repos/${GITHUB_REPO}/releases"
+        url="https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=5"
     fi
 
     local version

@@ -162,6 +162,21 @@ profile_codexos_lite_overlay() {
     mkdir -p "$WORKDIR"/usr/local/bin
     mkdir -p "$WORKDIR"/usr/local/sbin
     mkdir -p "$WORKDIR"/var/log/codex
+    mkdir -p "$WORKDIR"/var/lib/codexos
+
+    # Create codex user with consistent uid/gid
+    if ! grep -q '^codex:' "$WORKDIR"/etc/passwd 2>/dev/null; then
+        echo "codex:x:1000:1000:CodexOS User:/home/codex:/bin/bash" >> "$WORKDIR"/etc/passwd
+        echo "codex:x:1000:" >> "$WORKDIR"/etc/group
+        echo "codex:!:$(date +%s):0:99999:7:::" >> "$WORKDIR"/etc/shadow
+    fi
+
+    # Set up autologin for tty1 (getty)
+    mkdir -p "$WORKDIR"/etc/conf.d
+    cat > "$WORKDIR"/etc/conf.d/agetty <<'AGETTYCFG'
+# Autologin codex user on tty1
+agetty_options="--autologin codex --noclear"
+AGETTYCFG
 
     # Copy overlay files from profile directory
     local overlay_dir="${mkimg_profiles_dir:-.}/codexos-lite/overlay"
@@ -172,4 +187,6 @@ profile_codexos_lite_overlay() {
     # Ensure proper permissions
     chown -R root:root "$WORKDIR"
     chmod 755 "$WORKDIR"/home/codex
+    chown 1000:1000 "$WORKDIR"/home/codex
+    chmod 700 "$WORKDIR"/var/lib/codexos
 }

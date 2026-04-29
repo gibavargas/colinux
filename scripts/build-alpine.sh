@@ -282,46 +282,132 @@ inject_codex() {
         exit 1
     fi
 
-    log_info "Mounting ISO to inject Codex binary..."
+    # Extract ISO, inject files, then repack (ISOs are read-only when mounted)
+    log_info "Extracting ISO for file injection..."
 
-    local mount_dir
-    mount_dir="$(mktemp -d)"
-    mount -o loop "$iso_file" "$mount_dir" || {
-        # If loop mount fails (e.g. in container), try to rebuild with the binary
-        log_warn "Cannot loop-mount ISO (might be in a container)."
-        log_info "Codex binary saved to: $codex_bin"
-        log_info "You can inject it manually or use setup-codex.sh on first boot."
-        return 0
-    }
+    local iso_staging
+    iso_staging="$(mktemp -d)"
+    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $iso_staging"
 
-    # Copy binary into the ISO filesystem
-    mkdir -p "$mount_dir/usr/local/bin"
-    cp "$codex_bin" "$mount_dir/usr/local/bin/codex"
-    chmod 755 "$mount_dir/usr/local/bin/codex"
+    # Extract ISO contents using xorriso (handles ISO 9660 properly)
+    if command -v xorriso &>/dev/null; then
+        xorriso -osirrox on -indev "$iso_file" -extract / "$iso_staging" 2>/dev/null || {
+            log_warn "xorriso extraction failed, trying alternative method..."
+            # Fallback: mount read-only and copy
+            local ro_mount
+            ro_mount="$(mktemp -d)"
+            mount -o loop,ro "$iso_file" "$ro_mount" 2>/dev/null || {
+                log_error "Cannot mount ISO for extraction."
+                log_info "Codex binary saved to: $codex_bin"
+                log_info "Use setup-codex.sh on first boot instead."
+                return 0
+            }
+            cp -a "$ro_mount"/. "$iso_staging"/
+            umount "$ro_mount"
+            rmdir "$ro_mount"
+        }
+    elif command -v bsdtar &>/dev/null; then
+        bsdtar -xf "$iso_file" -C "$iso_staging" 2>/dev/null || {
+            log_error "Cannot extract ISO."
+            log_info "Codex binary saved to: $codex_bin"
+            log_info "Use setup-codex.sh on first boot instead."
+            return 0
+        }
+    else
+        # Last resort: mount read-only and copy
+        local ro_mount
+        ro_mount="$(mktemp -d)"
+        mount -o loop,ro "$iso_file" "$ro_mount" 2>/dev/null || {
+            log_error "Cannot mount ISO for extraction."
+            log_info "Codex binary saved to: $codex_bin"
+            log_info "Use setup-codex.sh on first boot instead."
+            return 0
+        }
+        cp -a "$ro_mount"/. "$iso_staging"/
+        umount "$ro_mount"
+        rmdir "$ro_mount"
+    fi
+
+    # Inject files into the staging directory
+    mkdir -p "$iso_staging/usr/local/bin"
+    cp "$codex_bin" "$iso_staging/usr/local/bin/codex"
+    chmod 755 "$iso_staging/usr/local/bin/codex"
 
     # Also copy setup-codex.sh for first-boot use
     if [ -f "$PROJECT_ROOT/scripts/setup-codex.sh" ]; then
-        cp "$PROJECT_ROOT/scripts/setup-codex.sh" "$mount_dir/usr/local/bin/setup-codex"
-        chmod 755 "$mount_dir/usr/local/bin/setup-codex"
+        cp "$PROJECT_ROOT/scripts/setup-codex.sh" "$iso_staging/usr/local/bin/setup-codex"
+        chmod 755 "$iso_staging/usr/local/bin/setup-codex"
     fi
 
     # Copy first-boot.sh
     if [ -f "$PROJECT_ROOT/scripts/first-boot.sh" ]; then
-        cp "$PROJECT_ROOT/scripts/first-boot.sh" "$mount_dir/usr/local/bin/first-boot"
-        chmod 755 "$mount_dir/usr/local/bin/first-boot"
+        cp "$PROJECT_ROOT/scripts/first-boot.sh" "$iso_staging/usr/local/bin/first-boot"
+        chmod 755 "$iso_staging/usr/local/bin/first-boot"
     fi
 
     # Copy cron update script
     if [ -f "$PROJECT_ROOT/scripts/cron-codex-update.sh" ]; then
-        cp "$PROJECT_ROOT/scripts/cron-codex-update.sh" "$mount_dir/usr/local/bin/cron-codex-update"
-        chmod 755 "$mount_dir/usr/local/bin/cron-codex-update"
+        cp "$PROJECT_ROOT/scripts/cron-codex-update.sh" "$iso_staging/usr/local/bin/cron-codex-update"
+        chmod 755 "$iso_staging/usr/local/bin/cron-codex-update"
     fi
 
-    sync
-    umount "$mount_dir"
-    rmdir "$mount_dir"
+    # Repack into a new ISO
+    local repacked_iso="${iso_file%.iso}-injected.iso"
+    log_info "Repacking ISO with injected files..."
 
-    log_info "Codex CLI injected into ISO."
+    if command -v xorriso &>/dev/null; then
+        xorriso -as mkisofs \
+            -o "$repacked_iso" \
+            -isohybrid-mbr /usr/share/syslinux/mbr.bin \
+            -c boot/boot.cat \
+            -b boot/isolinux/isolinux.bin \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            -eltorito-alt-boot \
+            -e boot/grub/efi.img \
+            -no-emul-boot \
+            -isohybrid-gpt-basdat \
+            -V "CODEXOS" \
+            "$iso_staging" 2>/dev/null || {
+            log_warn "xorriso repack failed. Trying genisoimage..."
+            if command -v genisoimage &>/dev/null; then
+                genisoimage -o "$repacked_iso" \
+                    -R -J -V "CODEXOS" \
+                    -b boot/isolinux/isolinux.bin \
+                    -c boot/boot.cat \
+                    -no-emul-boot \
+                    -boot-load-size 4 \
+                    -boot-info-table \
+                    "$iso_staging" 2>/dev/null || {
+                    log_warn "genisoimage also failed."
+                    repacked_iso=""
+                }
+            else
+                log_warn "genisoimage not available."
+                repacked_iso=""
+            fi
+        }
+    elif command -v genisoimage &>/dev/null; then
+        genisoimage -o "$repacked_iso" \
+            -R -J -V "CODEXOS" \
+            "$iso_staging" 2>/dev/null || {
+            log_warn "genisoimage failed."
+            repacked_iso=""
+        }
+    else
+        log_warn "No ISO repacking tool available (xorriso or genisoimage)."
+        repacked_iso=""
+    fi
+
+    if [[ -n "$repacked_iso" && -f "$repacked_iso" ]]; then
+        # Replace the original ISO with the repacked one
+        mv "$repacked_iso" "$iso_file"
+        log_info "Codex CLI injected into ISO successfully."
+    else
+        log_warn "Could not repack ISO. Codex binary will need to be installed on first boot."
+        log_info "Codex binary saved to: $codex_bin"
+    fi
 }
 
 # ── Step 6: Create raw disk image from ISO ───────────────────────────────────

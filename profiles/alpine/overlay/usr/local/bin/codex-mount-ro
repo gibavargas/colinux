@@ -62,17 +62,8 @@ LABEL=""
 UUID=""
 
 if command -v blkid &>/dev/null; then
-    eval "$(blkid -o export "$DEVICE" 2>/dev/null || true)"
-fi
-
-# Fallback: parse blkid output directly
-if [[ -z "$FS_TYPE" ]]; then
     FS_TYPE="$(blkid -s TYPE -o value "$DEVICE" 2>/dev/null || echo "")"
-fi
-if [[ -z "$LABEL" ]]; then
     LABEL="$(blkid -s LABEL -o value "$DEVICE" 2>/dev/null || echo "")"
-fi
-if [[ -z "$UUID" ]]; then
     UUID="$(blkid -s UUID -o value "$DEVICE" 2>/dev/null || echo "")"
 fi
 

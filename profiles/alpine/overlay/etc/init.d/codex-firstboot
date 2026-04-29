@@ -16,18 +16,11 @@ depend() {
     before codex-auto-update
 }
 
-FIRSTBOOT_DONE="/persist/.first-boot-done"
+FIRSTBOOT_DONE="/var/lib/codexos/.first-boot-done"
 FIRSTBOOT_SCRIPT="/usr/local/bin/first-boot"
 FIRSTBOOT_LOG="/persist/logs/first-boot.log"
 
 start() {
-    # Check if persistence is available
-    if ! mountpoint -q /persist 2>/dev/null; then
-        einfo "No persistence partition found — skipping first-boot setup"
-        einfo "Run 'codexctl persistence setup /dev/sdX' to enable persistence"
-        return 0
-    fi
-
     # Check if first boot has already been done
     if [ -f "${FIRSTBOOT_DONE}" ]; then
         einfo "First boot already completed — skipping"

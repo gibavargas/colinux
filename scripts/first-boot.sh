@@ -24,7 +24,7 @@ CODEX_RUNTIME="/run/codex"
 CODEX_CONFIG="$CODEX_PERSIST/config"
 CODEX_LOGS="$CODEX_PERSIST/logs"
 CODEX_DATA="$CODEX_PERSIST/data"
-FIRST_BOOT_FLAG="$CODEX_PERSIST/.first-boot-done"
+FIRST_BOOT_FLAG="/var/lib/codexos/.first-boot-done"
 MOTD_FILE="/etc/motd"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -225,17 +225,19 @@ setup_codex_auth() {
 
     local auth_file="$CODEX_CONFIG/codex.conf"
 
-    # Check if already configured
+    # Check if already configured (safe parse, never source)
     if [ -f "$auth_file" ] && grep -q "OPENAI_API_KEY\|CODEX_AUTH" "$auth_file" 2>/dev/null; then
         log_info "Codex authentication already configured."
         return 0
     fi
 
-    # Source any existing environment
-    [ -f "$auth_file" ] && . "$auth_file" 2>/dev/null || true
+    # Safely check for existing OPENAI_API_KEY in config (never source it)
+    local existing_key=""
+    if [ -f "$auth_file" ]; then
+        existing_key="$(grep '^OPENAI_API_KEY=' "$auth_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+    fi
 
-    if [ -n "${OPENAI_API_KEY:-}" ]; then
-        log_info "OPENAI_API_KEY found in environment."
+    if [ -n "$existing_key" ]; then
         cat > "$auth_file" <<EOF
 # CodexOS authentication configuration
 # Created: $(date -Iseconds)
@@ -354,7 +356,10 @@ setup_cron() {
 
 # ── Mark first boot complete ─────────────────────────────────────────────────
 mark_complete() {
+    mkdir -p "$(dirname "$FIRST_BOOT_FLAG")"
     date -Iseconds > "$FIRST_BOOT_FLAG"
+    chown root:root "$FIRST_BOOT_FLAG"
+    chmod 644 "$FIRST_BOOT_FLAG"
     log_info "First boot initialization complete."
 }
 
