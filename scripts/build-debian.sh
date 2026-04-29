@@ -191,11 +191,15 @@ configure_lb() {
     cd "$BUILD_DIR"
 
     # Initialize live-build config
+    # Explicitly set Debian mirrors to avoid inheriting Ubuntu runner defaults
     lb config \
         --distribution bookworm \
         --debian-installer none \
         --architectures amd64 \
         --archive-areas main \
+        --mirror http://deb.debian.org/debian \
+        --parent-mirror http://deb.debian.org/debian \
+        --security-mirror http://security.debian.org/debian-security \
         --bootloader syslinux,grub-efi \
         --memtest none \
         --source false \
