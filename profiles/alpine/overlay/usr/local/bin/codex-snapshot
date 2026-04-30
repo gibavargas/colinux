@@ -239,6 +239,13 @@ if [[ "$MODE" == "restore" ]]; then
         fi
     fi
 
+    # Resolve and validate path — prevent traversal (P0-4)
+    RESTORE_FILE="$(realpath --relative-to="$SNAPSHOT_DIR" "$RESTORE_FILE" 2>/dev/null || echo "$RESTORE_FILE")"
+    case "$RESTORE_FILE" in
+        ../*|/*) die "Invalid snapshot path: $RESTORE_FILE" ;;
+    esac
+    RESTORE_FILE="${SNAPSHOT_DIR}/${RESTORE_FILE}"
+
     echo "=== RESTORE WARNING ==="
     echo "This will overwrite /persist with the snapshot contents."
     echo "  Source: $RESTORE_FILE"
@@ -252,14 +259,16 @@ if [[ "$MODE" == "restore" ]]; then
     log_action "restore_start source=$RESTORE_FILE"
 
     # Extract snapshot
-    tar xzf "$RESTORE_FILE" -C /tmp/codexos-restore 2>&1
+    RESTORE_TMP="$(mktemp -d /tmp/codexos-restore.XXXXXX)"
+    tar xzf "$RESTORE_FILE" -C "$RESTORE_TMP" 2>&1
 
     # Find extracted directory
-    EXTRACTED_DIR="$(ls -1d /tmp/codexos-restore/*/ 2>/dev/null | head -1 || true)"
+    EXTRACTED_DIR="$(ls -1d "$RESTORE_TMP"/*/ 2>/dev/null | head -1 || true)"
     if [[ -n "$EXTRACTED_DIR" ]] && [[ -d "$EXTRACTED_DIR" ]]; then
         cp -a "${EXTRACTED_DIR}"* "$PERSIST_DIR/" 2>&1
-        rm -rf /tmp/codexos-restore
+        rm -rf "$RESTORE_TMP"
     else
+        rm -rf "$RESTORE_TMP"
         die "Failed to extract snapshot."
     fi
 

@@ -13,6 +13,19 @@
 # Total footprint: ~1MB additional packages
 set -euo pipefail
 
+PXE_PID=""
+
+# ── Cleanup trap ─────────────────────────────────────────────────────────
+cleanup_pxe() {
+    if [[ -f "$PXE_PIDFILE" ]]; then
+        local pid
+        pid="$(cat "$PXE_PIDFILE" 2>/dev/null)"
+        kill "$pid" 2>/dev/null || true
+        rm -f "$PXE_PIDFILE"
+    fi
+}
+trap cleanup_pxe EXIT INT TERM
+
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/network.log"
 PERSIST_DIR="/persist"
@@ -47,6 +60,7 @@ Options:
   --stop                 Stop PXE server
   --status               Show server status + connected clients
   --clients              List machines that PXE-booted
+  --yes, -y              Skip confirmation prompts
   --help                 Show this help
 
 How it works:
@@ -229,7 +243,7 @@ interface=${iface}
 bind-interfaces
 
 # DHCP
-dhcp-range=${dhcp_range_start},${dhcp_range_end},255.255.255.0,12h
+dhcp-range=${dhcp_range_start},${dhcp_range_end},${DHCP_NETMASK},12h
 dhcp-boot=pxelinux.0
 
 # TFTP
@@ -242,7 +256,7 @@ user=root
 # Logging
 log-queries
 log-dhcp
-log-facility=${LOGFILE}
+# Logging handled via stderr (dnsmasq logs to foreground)
 
 # Lease file
 dhcp-leasefile=${PXE_LEASES}
@@ -250,12 +264,42 @@ dhcp-leasefile=${PXE_LEASES}
 # Don't override existing DNS
 DNSCONF
 
+    # Detect netmask from interface (P0-2)
+    local cidr_prefix
+    cidr_prefix="$(ip -4 addr show "$iface" 2>/dev/null | grep -oP 'inet \K[0-9./]+' | head -1 | cut -d/ -f2)"
+    if [[ -z "$cidr_prefix" || "$cidr_prefix" -le 0 || "$cidr_prefix" -gt 30 ]]; then
+        cidr_prefix=24
+    fi
+    # Convert CIDR prefix to dotted notation
+    cidr2mask() {
+        local i mask="" prefix="$1"
+        for ((i=0;i<4;i++)); do
+            local n=$((8 - (prefix > 8 ? 8 : prefix)))
+            mask+=$((256 - 2**n)).
+            prefix=$((prefix > 8 ? prefix - 8 : 0))
+        done
+        echo "${mask%.}"
+    }
+    DHCP_NETMASK="$(cidr2mask "$cidr_prefix")"
+
     echo "Starting CodexOS PXE Server..."
     echo "  Interface:   $iface"
     echo "  Server IP:   $subnet"
     echo "  DHCP range:  ${dhcp_range_start} - ${dhcp_range_end}"
+    echo "  Netmask:     ${DHCP_NETMASK}"
     echo "  Boot files:  ${PXE_BOOT}/"
     echo ""
+
+    # Warn about DHCP conflict (P0-3)
+    if [[ "$SKIP_CONFIRM" != true ]]; then
+        echo "WARNING: Starting a DHCP server will conflict with any existing DHCP on this network."
+        echo "  This may temporarily disrupt other devices on: ${subnet%.*}.0/24"
+        read -rp "Continue? (yes/no): " dhcp_confirm
+        if [[ "$dhcp_confirm" != "yes" ]]; then
+            echo "Aborted."
+            exit 0
+        fi
+    fi
 
     # Start dnsmasq
     dnsmasq \
@@ -264,7 +308,7 @@ DNSCONF
         --log-queries \
         --log-dhcp \
         --keep-in-foreground \
-        &
+        >> "$LOGFILE" 2>&1 &
 
     PXE_PID=$!
     echo "$PXE_PID" > "$PXE_PIDFILE"
@@ -364,6 +408,7 @@ pxe_status() {
 MODE=""
 IFACE=""
 ISO_PATH=""
+SKIP_CONFIRM=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -383,6 +428,7 @@ while [[ $# -gt 0 ]]; do
         --stop)   MODE="stop"; shift ;;
         --status) MODE="status"; shift ;;
         --clients) MODE="status"; shift ;;  # Same as status for now
+        --yes|-y) SKIP_CONFIRM=true; shift ;;
         --help|-h) usage ;;
         *) die "Unknown option: $1" ;;
     esac

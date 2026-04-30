@@ -194,8 +194,10 @@ if [[ "$RUN_NETWORK" == true ]]; then
     NET_URL=""
     for url in "${TEST_URLS[@]}"; do
         SPEED="$(curl -o /dev/null -w '%{speed_download}' --connect-timeout 5 --max-time 15 "$url" 2>/dev/null || echo 0)"
+        # Truncate decimal portion (P1-5)
+        SPEED="${SPEED%%.*}"
         if [[ "$SPEED" =~ ^[0-9]+$ ]] && [[ "$SPEED" -gt 1000 ]]; then
-            SPEED_MBPS="$((SPEED / 1024 / 1024 * 8))"
+            SPEED_MBPS="$(( SPEED * 8 / 1024 / 1024 ))"
             NET_SPEED="${SPEED_MBPS} Mbps"
             NET_URL="$url"
             break

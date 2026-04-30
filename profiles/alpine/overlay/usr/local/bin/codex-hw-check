@@ -164,6 +164,10 @@ if command -v dmidecode &>/dev/null; then
 fi
 
 # ── Output ────────────────────────────────────────────────────────────────
+# Ensure KERNEL_ERRORS is a valid integer (P1-4)
+KERNEL_ERRORS="${KERNEL_ERRORS:-0}"
+[[ "$KERNEL_ERRORS" =~ ^[0-9]+$ ]] || KERNEL_ERRORS=0
+
 if [[ "$OUTPUT_FMT" == "json" ]]; then
     jq -n \
         --arg hostname "$(hostname -s 2>/dev/null || echo codex)" \

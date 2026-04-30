@@ -139,20 +139,20 @@ mkdir -p /run/codex
 
 # ── Clone ─────────────────────────────────────────────────────────────────
 if [[ "$MODE" == "clone" ]]; then
-    MAPFILE="/run/codex/clone-${TIMESTAMP}.mapfile"
+    DDRESCUE_MAP="/run/codex/clone-${TIMESTAMP}.mapfile"
 
     echo ""
     echo "Starting clone: $SOURCE -> $DEST"
-    echo "  Mapfile: $MAPFILE"
+    echo "  Mapfile: $DDRESCUE_MAP"
     echo ""
-    log_action "start source=$SOURCE dest=$DEST mapfile=$MAPFILE"
+    log_action "start source=$SOURCE dest=$DEST mapfile=$DDRESCUE_MAP"
 
     ddrescue \
         --force \
         --idirect \
         --verify-on-error \
         --log-rates=30s \
-        --logfile="$MAPFILE" \
+        --logfile="$DDRESCUE_MAP" \
         "$SOURCE" "$DEST" \
         2>&1 | tee "/run/codex/clone-${TIMESTAMP}.log" \
         || true

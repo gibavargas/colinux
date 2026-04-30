@@ -96,12 +96,12 @@ if [[ ! -b "$DEVICE" ]]; then
 fi
 
 # ── Check tools ───────────────────────────────────────────────────────────
-if [[ "$MODE" == "scan" ]] && ! command -v testdisk &>/dev/null; then
-    die "testdisk not found. Install with: apk add testdisk"
+if ! command -v photorec &>/dev/null; then
+    die "photorec not found. Install with: apk add testdisk"
 fi
 
-if [[ "$MODE" == "deep" ]] && ! command -v photorec &>/dev/null; then
-    die "photorec not found. Install with: apk add testdisk"
+if [[ "$MODE" == "scan" ]] && ! command -v testdisk &>/dev/null; then
+    die "testdisk not found. Install with: apk add testdisk"
 fi
 
 # ── Create output directory ───────────────────────────────────────────────
@@ -123,9 +123,6 @@ if [[ "$MODE" == "scan" ]]; then
     # First, try to read filesystem and list recoverable files
     echo "Running filesystem analysis with testdisk..."
     echo ""
-
-    # Create testdisk log directory
-    LOG_OUT="${OUT_DIR}/testdisk.log"
 
     # Run testdisk in non-interactive mode to analyze
     # /photorec is the photorec sub-command within testdisk

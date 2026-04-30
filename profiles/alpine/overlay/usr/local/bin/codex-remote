@@ -120,6 +120,12 @@ case "$MODE" in
         TARGET_URL="${1:-localhost:22}"
         shift 2>/dev/null || true
 
+        # Validate tunnel target URL (P1-8)
+        case "$TARGET_URL" in
+            http://*|https://*|localhost:*|localhost|127.0.0.1:*|127.0.0.1) ;;
+            *) die "Invalid tunnel target: $TARGET_URL (must be http://, https://, or localhost)" ;;
+        esac
+
         if ! command -v cloudflared &>/dev/null; then
             echo "Installing cloudflared..."
             ARCH="$(uname -m)"
