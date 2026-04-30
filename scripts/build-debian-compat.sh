@@ -398,7 +398,7 @@ create_squashfs() {
         -comp xz \
         -Xdict-size 1M \
         -noappend \
-        -e "chroot/proc" "chroot/sys" "chroot/dev" "chroot/run"
+        -e proc sys dev run
 
     local size_mb
     size_mb=$(du -mh "$squashfs" | cut -f1)
@@ -429,12 +429,13 @@ generate_iso() {
     # Copy kernel and initrd from chroot
     local chroot="$BUILD_DIR/chroot"
     local kernel_initrd_dir="$chroot/boot"
-    if [[ -f "$kernel_initrd_dir/vmlinuz"* ]]; then
-        cp "$kernel_initrd_dir"/vmlinuz* "$iso_staging/boot/vmlinuz" 2>/dev/null || true
-    fi
-    if [[ -f "$kernel_initrd_dir/initrd"* ]]; then
-        cp "$kernel_initrd_dir"/initrd* "$iso_staging/boot/initrd.img" 2>/dev/null || true
-    fi
+    local f
+    for f in "$kernel_initrd_dir"/vmlinuz*; do
+        [ -f "$f" ] && cp "$f" "$iso_staging/boot/vmlinuz" 2>/dev/null || true
+    done
+    for f in "$kernel_initrd_dir"/initrd*; do
+        [ -f "$f" ] && cp "$f" "$iso_staging/boot/initrd.img" 2>/dev/null || true
+    done
 
     # Create GRUB configuration
     cat > "$iso_staging/boot/grub/grub.cfg" <<'GRUBCFG'
