@@ -21,7 +21,14 @@ INTERVAL="6"
 
 config_load() {
     if [ -f "${CONFIG_FILE}" ]; then
-        . "${CONFIG_FILE}"
+        # Safe key=value parser — never sources untrusted files
+        while IFS='=' read -r key value; do
+            case "$key" in
+                \#*|"") continue ;;
+                enabled) ENABLED="$(echo "$value" | xargs 2>/dev/null)" ;;
+                interval) INTERVAL="$(echo "$value" | xargs 2>/dev/null)" ;;
+            esac
+        done < "${CONFIG_FILE}"
     fi
 }
 
@@ -45,6 +52,16 @@ start() {
 
     # Codex CLI auto-update
     if [ -f /usr/local/bin/cron-codex-update ]; then
+        # Validate interval is a positive integer
+        case "${INTERVAL}" in
+            [1-9]|[1-9][0-9])
+                # Valid interval
+                ;;
+            *)
+                ewarn "Invalid INTERVAL=${INTERVAL}, using default (6)"
+                INTERVAL="6"
+                ;;
+        esac
         cat > "${CRON_LINK}" <<EOF
 # CodexOS Desktop auto-update (Codex CLI + Desktop app)
 * */${INTERVAL} * * * /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1

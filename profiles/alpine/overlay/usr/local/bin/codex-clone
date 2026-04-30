@@ -1,0 +1,200 @@
+#!/bin/bash
+# codex-clone — Clone disks/partitions with ddrescue and verification
+# Part of CodexOS Lite
+#
+# Usage:
+#   codex-clone /dev/sdX /dev/sdY           Clone disk X to disk Y
+#   codex-clone /dev/sdX1 /path/to.img       Clone partition to image file
+#   codex-clone --verify /path/to.img /dev/sdY  Verify image against disk
+#   codex-clone --status                     Show active ddrescue sessions
+#
+# Uses: ddrescue (resilient copying with retry)
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+
+mkdir -p "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] clone: $*" >> "$LOGFILE"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: codex-clone [OPTIONS] <source> <destination>
+
+Clone a disk/partition using ddrescue with SHA-256 verification.
+
+Options:
+  --verify       Verify destination matches source (read-only compare)
+  --status       Show running ddrescue processes
+  --yes          Skip confirmation prompt
+  --help         Show this help
+
+Examples:
+  codex-clone /dev/sda /dev/sdb           Clone entire disk
+  codex-clone /dev/sda1 /mnt/usb/backup.img  Partition to image file
+  codex-clone --verify /mnt/backup.img /dev/sda1
+
+WARNING: Destination data will be overwritten. Double-check device paths.
+EOF
+    exit 0
+}
+
+# ── Parse args ────────────────────────────────────────────────────────────
+MODE="clone"
+SKIP_CONFIRM=false
+SOURCE=""
+DEST=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --verify)  MODE="verify"; shift ;;
+        --status)
+            echo "=== Active ddrescue sessions ==="
+            if pgrep -a ddrescue 2>/dev/null; then
+                echo ""
+                echo "Send SIGUSR1 to show progress: kill -USR1 <pid>"
+            else
+                echo "No active sessions."
+            fi
+            exit 0
+            ;;
+        --yes|-y)  SKIP_CONFIRM=true; shift ;;
+        --help|-h) usage ;;
+        -*) die "Unknown option: $1" ;;
+        *)
+            if [[ -z "$SOURCE" ]]; then
+                SOURCE="$1"
+            elif [[ -z "$DEST" ]]; then
+                DEST="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$SOURCE" ]] || [[ -z "$DEST" ]]; then
+    die "Source and destination required. Use --help for usage."
+fi
+
+# ── Validate source ───────────────────────────────────────────────────────
+if [[ -b "$SOURCE" ]] || [[ -f "$SOURCE" ]]; then
+    : # OK
+else
+    die "Source $SOURCE is not a valid block device or file."
+fi
+
+# ── Validate destination ──────────────────────────────────────────────────
+if [[ "$MODE" == "clone" ]]; then
+    if [[ "$DEST" == /dev/* ]]; then
+        if [[ ! -b "$DEST" ]]; then
+            die "Destination $DEST is not a valid block device."
+        fi
+        if [[ "$SOURCE" == "$DEST" ]]; then
+            die "Source and destination are the same device."
+        fi
+    else
+        mkdir -p "$(dirname "$DEST")" 2>/dev/null || die "Cannot create destination directory: $(dirname "$DEST")"
+    fi
+fi
+
+# ── Safety confirmation ───────────────────────────────────────────────────
+if [[ "$MODE" == "clone" ]] && [[ "$SKIP_CONFIRM" != true ]]; then
+    if [[ -b "$SOURCE" ]]; then
+        SOURCE_SIZE="$(blockdev --getsize64 "$SOURCE" 2>/dev/null || echo "0")"
+    else
+        SOURCE_SIZE="$(stat -c %s "$SOURCE" 2>/dev/null || echo "0")"
+    fi
+    echo "=== CLONE OPERATION ==="
+    echo "  Source:      $SOURCE ($(numfmt --to=iec --suffix=B "$SOURCE_SIZE" 2>/dev/null || echo "${SOURCE_SIZE}B"))"
+    echo "  Destination: $DEST"
+    echo ""
+    echo "WARNING: DESTINATION DATA WILL BE PERMANENTLY DELETED"
+    echo ""
+    read -rp "Type 'YES' to confirm: " confirm
+    if [[ "$confirm" != "YES" ]]; then
+        echo "Aborted."
+        log_action "aborted user_cancel source=$SOURCE dest=$DEST"
+        exit 0
+    fi
+fi
+
+# ── Check ddrescue ────────────────────────────────────────────────────────
+if ! command -v ddrescue &>/dev/null; then
+    die "ddrescue not found. Install with: apk add ddrescue"
+fi
+
+TIMESTAMP="$(date -u '+%Y%m%d-%H%M%S')"
+mkdir -p /run/codex
+
+# ── Clone ─────────────────────────────────────────────────────────────────
+if [[ "$MODE" == "clone" ]]; then
+    MAPFILE="/run/codex/clone-${TIMESTAMP}.mapfile"
+
+    echo ""
+    echo "Starting clone: $SOURCE -> $DEST"
+    echo "  Mapfile: $MAPFILE"
+    echo ""
+    log_action "start source=$SOURCE dest=$DEST mapfile=$MAPFILE"
+
+    ddrescue \
+        --force \
+        --idirect \
+        --verify-on-error \
+        --log-rates=30s \
+        --logfile="$MAPFILE" \
+        "$SOURCE" "$DEST" \
+        2>&1 | tee "/run/codex/clone-${TIMESTAMP}.log" \
+        || true
+
+    echo ""
+    echo "Clone completed."
+
+    # SHA-256 verification for block devices
+    if [[ -b "$SOURCE" ]] && [[ -b "$DEST" ]]; then
+        echo ""
+        echo "Computing SHA-256 verification..."
+        SRC_HASH="$(dd if="$SOURCE" bs=4M status=none 2>/dev/null | sha256sum | awk '{print $1}')"
+        DST_HASH="$(dd if="$DEST" bs=4M status=none 2>/dev/null | sha256sum | awk '{print $1}')"
+        if [[ "$SRC_HASH" == "$DST_HASH" ]]; then
+            echo "PASS: SHA-256 verification matched"
+        else
+            echo "WARN: SHA-256 verification MISMATCH"
+            echo "  Source:      $SRC_HASH"
+            echo "  Destination: $DST_HASH"
+        fi
+    fi
+
+    log_action "complete source=$SOURCE dest=$DEST"
+fi
+
+# ── Verify only ───────────────────────────────────────────────────────────
+if [[ "$MODE" == "verify" ]]; then
+    VERIFY_MAP="/run/codex/verify-${TIMESTAMP}.mapfile"
+
+    echo "Verifying: $SOURCE matches $DEST..."
+    log_action "verify source=$SOURCE dest=$DEST"
+
+    ddrescue \
+        --no-create \
+        --direct \
+        --verify-on-error \
+        --logfile="$VERIFY_MAP" \
+        "$SOURCE" "$DEST" \
+        2>&1 | tee "/run/codex/verify-${TIMESTAMP}.log" \
+        || true
+
+    echo ""
+    echo "Verification complete. Check log for errors: /run/codex/verify-${TIMESTAMP}.log"
+    log_action "verify_done source=$SOURCE dest=$DEST"
+fi

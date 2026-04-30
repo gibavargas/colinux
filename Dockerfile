@@ -17,7 +17,6 @@ RUN apk add --no-cache \
     util-linux \
     eudev \
     doas \
-    sudo \
     tmux \
     git \
     openssh-client \
@@ -71,6 +70,7 @@ RUN mkdir -p /run/codex \
 
 # Create codex user
 RUN adduser -D -s /bin/bash -h /home/codex codex && \
+    mkdir -p /etc/sudoers.d && \
     echo "codex ALL=(root) NOPASSWD: /usr/local/bin/codex-disk-inventory, /usr/local/bin/codex-network, /usr/local/bin/codex-backup, /usr/local/bin/codex-restore, /usr/local/bin/codex-update, /usr/local/bin/codex-shell, /usr/local/bin/codexctl, /usr/local/bin/codex-logs, /usr/local/bin/codex-mount-rw, /usr/local/bin/codex-mount-ro, /usr/local/bin/codex-usb-persist" > /etc/sudoers.d/codex && \
     chown -R codex:codex /home/codex /workspace /persist
 

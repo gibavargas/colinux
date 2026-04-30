@@ -1,0 +1,246 @@
+#!/bin/bash
+# codex-hw-check — Hardware diagnostics for CodexOS
+# Part of CodexOS Lite
+#
+# Usage:
+#   codex-hw-check              Run full diagnostics
+#   codex-hw-check --quick      Quick summary only (RAM + disk health)
+#   codex-hw-check --json       Output as JSON
+#   codex-hw-check --smart DEV Show SMART data for specific device
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/system.log"
+
+mkdir -p "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] hw-check: $*" >> "$LOGFILE"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: codex-hw-check [OPTIONS]
+
+Hardware diagnostics — RAM, disks, CPU, battery, kernel errors.
+
+Options:
+  --quick       Quick summary (RAM + disk health only)
+  --json        Output as JSON
+  --smart DEV   Show SMART data for specific device (e.g. /dev/sda)
+  --help        Show this help
+
+Zero extra dependencies — uses /sys, /proc, smartmontools, dmidecode.
+EOF
+    exit 0
+}
+
+# ── Parse args ────────────────────────────────────────────────────────────
+MODE="full"
+OUTPUT_FMT="text"
+SMART_DEV=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --quick)  MODE="quick"; shift ;;
+        --json)   OUTPUT_FMT="json"; shift ;;
+        --smart)  MODE="smart"; SMART_DEV="${2:?--smart requires a device}"; shift 2 ;;
+        --help|-h) usage ;;
+        *) die "Unknown option: $1" ;;
+    esac
+done
+
+# ── SMART detail ──────────────────────────────────────────────────────────
+if [[ "$MODE" == "smart" ]]; then
+    if [[ ! -b "$SMART_DEV" ]]; then
+        die "$SMART_DEV is not a valid block device."
+    fi
+    if ! command -v smartctl &>/dev/null; then
+        die "smartctl not found. Install with: apk add smartmontools"
+    fi
+    echo "=== SMART Data: $SMART_DEV ==="
+    echo ""
+    smartctl -H -A "$SMART_DEV" 2>&1
+    exit 0
+fi
+
+# ── Collect data ──────────────────────────────────────────────────────────
+
+# RAM info
+TOTAL_RAM_KB="$(grep MemTotal /proc/meminfo | awk '{print $2}')"
+AVAILABLE_RAM_KB="$(grep MemAvailable /proc/meminfo | awk '{print $2}')"
+TOTAL_RAM="$(numfmt --to=iec --suffix=B "${TOTAL_RAM_KB}K" 2>/dev/null || echo "${TOTAL_RAM_KB}K")"
+USED_RAM="$(numfmt --to=iec --suffix=B "$((TOTAL_RAM_KB - AVAILABLE_RAM_KB))K" 2>/dev/null || echo "$((TOTAL_RAM_KB - AVAILABLE_RAM_KB))K")"
+RAM_PCT="$(( (TOTAL_RAM_KB - AVAILABLE_RAM_KB) * 100 / TOTAL_RAM_KB ))"
+
+# CPU info
+CPU_MODEL="$(grep 'model name' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | xargs || echo 'unknown')"
+CPU_CORES="$(nproc 2>/dev/null || echo '?')"
+CPU_TEMP=""
+if [[ -f /sys/class/thermal/thermal_zone0/temp ]]; then
+    RAW_TEMP="$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0)"
+    if [[ "$RAW_TEMP" -gt 1000 ]]; then
+        CPU_TEMP="$((RAW_TEMP / 1000))C"
+    else
+        CPU_TEMP="${RAW_TEMP}C"
+    fi
+fi
+# CPU load
+LOAD1="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo '?')"
+LOAD5="$(awk '{print $2}' /proc/loadavg 2>/dev/null || echo '?')"
+
+# Uptime
+UPTIME="$(uptime -p 2>/dev/null || uptime | sed 's/.*up /up /')"
+
+# Disk summary
+DISK_INFO=""
+DISK_JSON="[]"
+while IFS= read -r dev; do
+    if [[ -z "$dev" ]]; then continue; fi
+    devname="${dev##*/}"
+    dev_size="$(blockdev --getsize64 "$dev" 2>/dev/null || echo 0)"
+    dev_size_hr="$(numfmt --to=iec --suffix=B "$dev_size" 2>/dev/null || echo "${dev_size}B")"
+
+    # SMART health
+    smart_health="n/a"
+    smart_temp=""
+    if command -v smartctl &>/dev/null; then
+        smart_out="$(smartctl -H "$dev" 2>/dev/null || true)"
+        smart_health="$(echo "$smart_out" | grep -i 'SMART overall-health\|result:' | sed 's/.*: //' | head -1 || echo 'n/a')"
+
+        if [[ -z "$smart_health" ]]; then
+            smart_health="unknown"
+        fi
+        smart_temp="$(smartctl -A "$dev" 2>/dev/null | grep Temperature_Celsius | awk '{print $NF}' | head -1 || true)"
+    fi
+
+    if [[ "$OUTPUT_FMT" == "json" ]]; then
+        DISK_JSON="$(echo "$DISK_JSON" | jq -c \
+            --arg dev "$dev" \
+            --arg size "$dev_size_hr" \
+            --arg health "$smart_health" \
+            --arg temp "${smart_temp:-null}" \
+            '. + [{"device": $dev, "size": $size, "smart_health": $health, "temp": ($temp // null)}]')"
+    else
+        DISK_INFO="${DISK_INFO}  ${dev}  ${dev_size_hr}  SMART: ${smart_health}"
+        [[ -n "$smart_temp" ]] && DISK_INFO="${DISK_INFO}  Temp: ${smart_temp}C"
+        DISK_INFO="${DISK_INFO}\n"
+    fi
+done < <(lsblk -dn -o NAME 2>/dev/null | grep -v -E 'loop|ram|zram|fd|md' | while read -r name; do echo "/dev/$name"; done)
+
+# Battery
+BATTERY_INFO=""
+if [[ -d /sys/class/power_supply ]]; then
+    for bat in /sys/class/power_supply/BAT*; do
+        [[ -d "$bat" ]] || continue
+        bat_status="$(cat "${bat}/status" 2>/dev/null || echo 'unknown')"
+        bat_capacity="$(cat "${bat}/capacity" 2>/dev/null || echo '?')%"
+        BATTERY_INFO="${BATTERY_INFO}  Battery: ${bat_status} ${bat_capacity}\n"
+    done
+fi
+
+# Kernel errors (last 24h)
+KERNEL_ERRORS=""
+if [[ -f /var/log/dmesg ]]; then
+    KERNEL_ERRORS="$(grep -c -E 'error|fail|critical|panic' /var/log/dmesg 2>/dev/null || echo 0)"
+fi
+if [[ "$KERNEL_ERRORS" == "" ]]; then
+    KERNEL_ERRORS="$(dmesg 2>/dev/null | grep -c -iE 'error|fail|critical|panic' || echo 0)"
+fi
+
+# DMI info (if available)
+DMI_VENDOR=""
+DMI_PRODUCT=""
+if command -v dmidecode &>/dev/null; then
+    DMI_VENDOR="$(dmidecode -s system-manufacturer 2>/dev/null || echo '')"
+    DMI_PRODUCT="$(dmidecode -s system-product-name 2>/dev/null || echo '')"
+fi
+
+# ── Output ────────────────────────────────────────────────────────────────
+if [[ "$OUTPUT_FMT" == "json" ]]; then
+    jq -n \
+        --arg hostname "$(hostname -s 2>/dev/null || echo codex)" \
+        --arg timestamp "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        --arg uptime "$UPTIME" \
+        --arg cpu "$CPU_MODEL" \
+        --argjson cores "$CPU_CORES" \
+        --arg load1 "$LOAD1" \
+        --arg load5 "$LOAD5" \
+        --arg cpu_temp "${CPU_TEMP:-null}" \
+        --arg total_ram "$TOTAL_RAM" \
+        --arg used_ram "$USED_RAM" \
+        --argjson ram_pct "$RAM_PCT" \
+        --argjson disks "$DISK_JSON" \
+        --arg vendor "$DMI_VENDOR" \
+        --arg product "$DMI_PRODUCT" \
+        --argjson kernel_errors "$((KERNEL_ERRORS))" \
+        '{
+            hostname: $hostname,
+            timestamp: $timestamp,
+            uptime: $uptime,
+            cpu: { model: $cpu, cores: $cores, load_1m: $load1, load_5m: $load5, temp: ($cpu_temp // null) },
+            memory: { total: $total_ram, used: $used_ram, percent: $ram_pct },
+            disks: $disks,
+            system: { vendor: $vendor, product: $product },
+            kernel_errors: $kernel_errors
+        }'
+    exit 0
+fi
+
+echo "======================================"
+echo "  CodexOS Hardware Diagnostics"
+echo "======================================"
+echo ""
+
+if [[ -n "$DMI_VENDOR" ]] && [[ -n "$DMI_PRODUCT" ]]; then
+    echo "  System:    ${DMI_VENDOR} ${DMI_PRODUCT}"
+fi
+echo "  Uptime:    $UPTIME"
+echo "  Kernel:    $(uname -r 2>/dev/null || echo unknown)"
+echo ""
+
+echo "--- CPU ---"
+echo "  Model:     $CPU_MODEL"
+echo "  Cores:     $CPU_CORES"
+echo "  Load:      ${LOAD1} (1m) / ${LOAD5} (5m)"
+if [[ -n "$CPU_TEMP" ]]; then
+    echo "  Temp:      $CPU_TEMP"
+fi
+echo ""
+
+echo "--- Memory ---"
+echo "  Total:     $TOTAL_RAM"
+echo "  Used:      $USED_RAM (${RAM_PCT}%)"
+echo ""
+
+echo "--- Disks ---"
+echo -e "$DISK_INFO"
+echo ""
+
+if [[ "$MODE" == "full" ]]; then
+    if [[ -n "$BATTERY_INFO" ]]; then
+        echo "--- Battery ---"
+        echo -e "$BATTERY_INFO"
+    fi
+
+    echo "--- Kernel ---"
+    echo "  Errors (dmesg): $KERNEL_ERRORS"
+    echo ""
+
+    echo "--- Network ---"
+    ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '127\.' | while read -r addr; do
+        echo "  IP: $addr"
+    done
+
+    echo ""
+    echo "Use 'codex-hw-check --smart /dev/sdX' for detailed disk health."
+fi
+
+log_action "complete ram_pct=${RAM_PCT}% kernel_errors=${KERNEL_ERRORS}"

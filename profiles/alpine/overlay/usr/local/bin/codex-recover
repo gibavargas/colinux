@@ -1,0 +1,207 @@
+#!/bin/bash
+# codex-recover — Recover deleted files from block devices
+# Part of CodexOS Lite
+#
+# Usage:
+#   codex-recover --scan /dev/sdX1           Scan for recoverable files
+#   codex-recover --scan /dev/sdX1 --type all  (jpg,pdf,doc,zip,all)
+#   codex-recover --deep /dev/sdX1            Deep scan with photorec
+#   codex-recover --deep /dev/sdX1 --outdir /mnt/recovery
+#   codex-recover --list                      List mounted recovery targets
+#
+# Tools used: testdisk (filesystem repair), photorec (file carving)
+# Output goes to /mnt/recovery/ by default
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/disk-actions.log"
+RECOVERY_BASE="/mnt/recovery"
+
+mkdir -p "$LOG_DIR" "$RECOVERY_BASE"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] recover: $*" >> "$LOGFILE"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: codex-recover [OPTIONS] <device>
+
+Recover deleted files from a block device using testdisk/photorec.
+
+Options:
+  --scan       Quick filesystem-level recovery with testdisk
+  --deep       Deep file carving with photorec (slower, more thorough)
+  --type TYPE  File types to recover (jpg,pdf,doc,xls,zip,png,all)
+               Default: all
+  --outdir DIR Output directory (default: /mnt/recovery)
+  --list       List mounted devices suitable for recovery
+  --help       Show this help
+
+Examples:
+  codex-recover --scan /dev/sdb1
+  codex-recover --deep /dev/sda2 --type jpg,pdf --outdir /mnt/recovery/photos
+  codex-recover --list
+EOF
+    exit 0
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────
+MODE=""
+DEVICE=""
+FILE_TYPE="all"
+OUT_DIR="$RECOVERY_BASE"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --scan)  MODE="scan";  shift ;;
+        --deep)  MODE="deep";  shift ;;
+        --type)  FILE_TYPE="${2:?--type requires a value}"; shift 2 ;;
+        --outdir) OUT_DIR="${2:?--outdir requires a directory}"; shift 2 ;;
+        --list|list)
+            echo "=== Devices available for recovery ==="
+            echo ""
+            if command -v lsblk &>/dev/null; then
+                lsblk -l -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,RO \
+                    | grep -v -E 'loop|ram|zram|fd'
+            fi
+            echo ""
+            echo "Use: codex-recover --scan|--deep /dev/<device>"
+            exit 0
+            ;;
+        --help|-h) usage ;;
+        -*) die "Unknown option: $1" ;;
+        *)  DEVICE="$1"; shift ;;
+    esac
+done
+
+if [[ -z "$MODE" ]]; then
+    die "Specify --scan or --deep. Use --help for usage."
+fi
+
+if [[ -z "$DEVICE" ]]; then
+    die "No device specified."
+fi
+
+if [[ ! -b "$DEVICE" ]]; then
+    die "$DEVICE is not a valid block device."
+fi
+
+# ── Check tools ───────────────────────────────────────────────────────────
+if [[ "$MODE" == "scan" ]] && ! command -v testdisk &>/dev/null; then
+    die "testdisk not found. Install with: apk add testdisk"
+fi
+
+if [[ "$MODE" == "deep" ]] && ! command -v photorec &>/dev/null; then
+    die "photorec not found. Install with: apk add testdisk"
+fi
+
+# ── Create output directory ───────────────────────────────────────────────
+SESSION_NAME="$(date -u '+%Y%m%d-%H%M%S')_${DEVICE##*/}"
+OUT_DIR="${OUT_DIR}/${SESSION_NAME}"
+mkdir -p "$OUT_DIR"
+
+echo "CodexOS File Recovery"
+echo "====================="
+echo "  Device:   $DEVICE"
+echo "  Mode:     $MODE"
+echo "  File type: $FILE_TYPE"
+echo "  Output:   $OUT_DIR"
+echo ""
+log_action "start mode=$MODE device=$DEVICE type=$FILE_TYPE outdir=$OUT_DIR"
+
+# ── Quick scan (testdisk) ────────────────────────────────────────────────
+if [[ "$MODE" == "scan" ]]; then
+    # First, try to read filesystem and list recoverable files
+    echo "Running filesystem analysis with testdisk..."
+    echo ""
+
+    # Create testdisk log directory
+    LOG_OUT="${OUT_DIR}/testdisk.log"
+
+    # Run testdisk in non-interactive mode to analyze
+    # /photorec is the photorec sub-command within testdisk
+    if testdisk /log "${OUT_DIR}/testdisk.log" /cmd "$DEVICE" list 2>&1 | tee "${OUT_DIR}/analysis.txt"; then
+        echo ""
+        echo "Analysis complete. Review: ${OUT_DIR}/analysis.txt"
+    fi
+
+    # Attempt automatic recovery with photorec (quick pass)
+    echo ""
+    echo "Starting file recovery..."
+    photorec_args=()
+    photorec_args+=("/d" "$OUT_DIR")
+    photorec_args+=("/cmd" "$DEVICE" "partition_none")
+
+    # Map type filter to photorec options
+    case "$FILE_TYPE" in
+        all)  photorec_args+=("fileopt" "everything") ;;
+        jpg|jpeg|png|gif|bmp)
+            photorec_args+=("fileopt" "jpg,png,gif,bmp")
+            ;;
+        pdf|doc|docx|xls|xlsx|ppt|pptx)
+            photorec_args+=("fileopt" "pdf,doc,xls,ppt")
+            ;;
+        zip|tar|gz|7z|rar)
+            photorec_args+=("fileopt" "zip,tar,gz")
+            ;;
+        *)
+            photorec_args+=("fileopt" "everything")
+            ;;
+    esac
+
+    photorec "${photorec_args[@]}" 2>&1 | tee "${OUT_DIR}/recovery.log" || true
+
+    echo ""
+    echo "Recovery complete."
+fi
+
+# ── Deep scan (photorec full carving) ─────────────────────────────────────
+if [[ "$MODE" == "deep" ]]; then
+    echo "Starting deep file carving (this may take a while)..."
+    echo ""
+
+    photorec_args=()
+    photorec_args+=("/d" "$OUT_DIR")
+    photorec_args+=("/cmd" "$DEVICE" "partition_none")
+
+    case "$FILE_TYPE" in
+        all)  photorec_args+=("fileopt" "everything") ;;
+        jpg|jpeg|png|gif|bmp)
+            photorec_args+=("fileopt" "jpg,png,gif,bmp")
+            ;;
+        pdf|doc|docx|xls|xlsx|ppt|pptx)
+            photorec_args+=("fileopt" "pdf,doc,xls,ppt")
+            ;;
+        zip|tar|gz|7z|rar)
+            photorec_args+=("fileopt" "zip,tar,gz")
+            ;;
+        *)
+            photorec_args+=("fileopt" "everything")
+            ;;
+    esac
+
+    photorec "${photorec_args[@]}" 2>&1 | tee "${OUT_DIR}/recovery.log" || true
+
+    echo ""
+    echo "Deep recovery complete."
+fi
+
+# ── Summary ───────────────────────────────────────────────────────────────
+echo ""
+echo "=== Recovery Summary ==="
+echo "  Output:    $OUT_DIR"
+echo "  Files:     $(find "$OUT_DIR" -type f ! -name '*.log' ! -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')"
+echo "  Size:      $(du -sh "$OUT_DIR" 2>/dev/null | awk '{print $1}')"
+echo "  Log:       ${OUT_DIR}/recovery.log"
+echo ""
+
+log_action "complete mode=$MODE device=$DEVICE files=$(find "$OUT_DIR" -type f ! -name '*.log' ! -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')"

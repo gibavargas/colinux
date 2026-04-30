@@ -1,0 +1,418 @@
+#!/bin/bash
+# codex-pxe — Network boot server for CodexOS (PXE/iPXE)
+# Part of CodexOS Lite
+#
+# Usage:
+#   codex-pxe --start [IFACE]       Start PXE server on interface (default: eth0)
+#   codex-pxe --start --iso FILE     Extract boot files from ISO and start
+#   codex-pxe --stop                 Stop PXE server
+#   codex-pxe --status               Show PXE server status and connected clients
+#   codex-pxe --clients              Show machines that PXE-booted
+#
+# Requirements: dnsmasq (DHCP+TFTP+HTTP), syslinux (bootloader)
+# Total footprint: ~1MB additional packages
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/network.log"
+PERSIST_DIR="/persist"
+PXE_DIR="${PERSIST_DIR}/pxe"
+PXE_BOOT="${PXE_DIR}/boot"
+PXE_PIDFILE="/run/codex/pxe.pid"
+PXE_LEASES="${PXE_DIR}/dnsmasq.leases"
+
+mkdir -p "$LOG_DIR" "$PXE_BOOT" /run/codex
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] pxe: $*" >> "$LOGFILE"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: codex-pxe [OPTIONS]
+
+Set up a PXE network boot server to boot CodexOS on other machines.
+
+Options:
+  --start [IFACE]        Start PXE server (default interface: eth0)
+  --start --iso FILE     Extract boot files from an ISO image and start
+  --stop                 Stop PXE server
+  --status               Show server status + connected clients
+  --clients              List machines that PXE-booted
+  --help                 Show this help
+
+How it works:
+  1. Starts dnsmasq with DHCP + TFTP + HTTP on the given interface
+  2. Serves the Alpine kernel and initramfs to any PXE-capable machine
+  3. The client boots into CodexOS over the network — no USB needed
+
+Requirements: dnsmasq, syslinux (~1MB total)
+Install:      apk add dnsmasq syslinux
+
+Examples:
+  codex-pxe --start                 Start on default interface
+  codex-pxe --start eth1            Start on specific interface
+  codex-pxe --start --iso /path/to/codexos.iso
+  codex-pxe --status
+  codex-pxe --stop
+EOF
+    exit 0
+}
+
+# ── Check dependencies ────────────────────────────────────────────────────
+check_deps() {
+    local missing=()
+    command -v dnsmasq &>/dev/null || missing+=("dnsmasq")
+    command -v pxelinux &>/dev/null || missing+=("syslinux")
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "Installing missing packages: ${missing[*]}"
+        apk add --no-progress "${missing[@]}" 2>&1 || die "Failed to install: ${missing[*]}"
+        log_action "deps_installed packages=${missing[*]}"
+    fi
+}
+
+# ── Find interface ────────────────────────────────────────────────────────
+find_default_iface() {
+    # First non-loopback interface with a carrier
+    for iface in /sys/class/net/*; do
+        name="${iface##*/}"
+        [[ "$name" == "lo" ]] && continue
+        # Check for carrier (link up)
+        if [[ -f "${iface}/carrier" ]] && [[ "$(cat "${iface}/carrier" 2>/dev/null)" == "1" ]]; then
+            echo "$name"
+            return 0
+        fi
+    done
+    # Fallback: first non-loopback
+    ip -4 link show up 2>/dev/null | grep -oP '^\d+: \K[^\s:]+' | grep -v lo | head -1
+}
+
+# ── Get subnet from interface ─────────────────────────────────────────────
+get_subnet() {
+    local iface="$1"
+    ip -4 addr show "$iface" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1
+}
+
+# ── Extract boot files from ISO ───────────────────────────────────────────
+extract_from_iso() {
+    local iso_path="$1"
+
+    if [[ ! -f "$iso_path" ]]; then
+        die "ISO not found: $iso_path"
+    fi
+
+    echo "Extracting boot files from ISO..."
+    mkdir -p "${PXE_BOOT}/iso"
+
+    # Try different mount approaches
+    local mount_point
+    mount_point="/mnt/codex-iso-$$"
+
+    mkdir -p "$mount_point"
+
+    if mount -o ro,loop "$iso_path" "$mount_point" 2>/dev/null; then
+        # Alpine ISO structure: /boot/vmlinuz-lts, /boot/initramfs-lts
+        for kernel in "$mount_point"/boot/vmlinuz-lts "$mount_point"/boot/vmlinuz-*; do
+            [[ -f "$kernel" ]] && cp "$kernel" "${PXE_BOOT}/vmlinuz" && break
+        done
+        for initramfs in "$mount_point"/boot/initramfs-lts "$mount_point"/boot/initramfs-*; do
+            [[ -f "$initramfs" ]] && cp "$initramfs" "${PXE_BOOT}/initramfs" && break
+        done
+        for modloop in "$mount_point"/boot/modloop-lts "$mount_point"/boot/modloop-*; do
+            [[ -f "$modloop" ]] && cp "$modloop" "${PXE_BOOT}/modloop" && break
+        done
+
+        umount "$mount_point" 2>/dev/null || true
+        rmdir "$mount_point" 2>/dev/null || true
+    else
+        # Fallback: extract with bsdtar/7z
+        if command -v bsdtar &>/dev/null; then
+            bsdtar -xf "$iso_path" -C "${PXE_BOOT}/iso" boot/ 2>/dev/null || true
+            find "${PXE_BOOT}/iso" -name 'vmlinuz*' -exec cp {} "${PXE_BOOT}/vmlinuz" \;
+            find "${PXE_BOOT}/iso" -name 'initramfs*' -exec cp {} "${PXE_BOOT}/initramfs" \;
+        elif command -v 7z &>/dev/null; then
+            7z x -o"${PXE_BOOT}/iso" "$iso_path" boot/ -y 2>/dev/null || true
+            find "${PXE_BOOT}/iso" -name 'vmlinuz*' -exec cp {} "${PXE_BOOT}/vmlinuz" \;
+            find "${PXE_BOOT}/iso" -name 'initramfs*' -exec cp {} "${PXE_BOOT}/initramfs" \;
+        else
+            rmdir "$mount_point" 2>/dev/null || true
+            die "Cannot mount or extract ISO. Install: apk add p7zip or bsdtar"
+        fi
+    fi
+
+    if [[ -f "${PXE_BOOT}/vmlinuz" ]] && [[ -f "${PXE_BOOT}/initramfs" ]]; then
+        echo "  Kernel:    ${PXE_BOOT}/vmlinuz"
+        echo "  Initramfs: ${PXE_BOOT}/initramfs"
+    else
+        die "Failed to extract kernel/initramfs from ISO."
+    fi
+
+    log_action "iso_extracted source=$iso_path"
+}
+
+# ── Setup pxelinux bootloader ─────────────────────────────────────────────
+setup_bootloader() {
+    mkdir -p "${PXE_BOOT}/pxelinux.cfg"
+
+    # Copy pxelinux bootloader
+    if [[ -f /usr/share/syslinux/pxelinux.0 ]]; then
+        cp /usr/share/syslinux/pxelinux.0 "${PXE_BOOT}/"
+    elif [[ -f /usr/lib/syslinux/pxelinux.0 ]]; then
+        cp /usr/lib/syslinux/pxelinux.0 "${PXE_BOOT}/"
+    fi
+
+    # Copy required modules
+    for mod in ldlinux.c32 libcom32.c32 libutil.c32 vesamenu.c32 menu.c32; do
+        for dir in /usr/share/syslinux /usr/lib/syslinux; do
+            [[ -f "${dir}/${mod}" ]] && cp "${dir}/${mod}" "${PXE_BOOT}/" && break
+        done
+    done
+
+    # Default config — auto-boot CodexOS
+    cat > "${PXE_BOOT}/pxelinux.cfg/default" <<'PXECFG'
+DEFAULT codexos
+TIMEOUT 30
+PROMPT 0
+
+LABEL codexos
+    MENU LABEL CodexOS Lite (Network Boot)
+    KERNEL vmlinuz
+    APPEND initrd=initramfs modules=loop,squashfs,sd-mod,usb-storage nomodeset
+PXECFG
+
+    # Also write a simple lpxelinux config for HTTP-based loading
+    cp "${PXE_BOOT}/pxelinux.cfg/default" "${PXE_BOOT}/pxelinux.cfg/default.lpxelinux"
+}
+
+# ── Start PXE server ──────────────────────────────────────────────────────
+pxe_start() {
+    local iface="$1"
+    local subnet
+    subnet="$(get_subnet "$iface")"
+
+    if [[ -z "$subnet" ]]; then
+        die "No IP address on interface $iface. Check your network connection."
+    fi
+
+    # Check if already running
+    if [[ -f "$PXE_PIDFILE" ]] && kill -0 "$(cat "$PXE_PIDFILE")" 2>/dev/null; then
+        die "PXE server already running (PID: $(cat "$PXE_PIDFILE")). Stop it first: codex-pxe --stop"
+    fi
+
+    # Check for boot files
+    if [[ ! -f "${PXE_BOOT}/vmlinuz" ]] || [[ ! -f "${PXE_BOOT}/initramfs" ]]; then
+        die "No boot files found in ${PXE_BOOT}/. Use --iso to extract from a CodexOS image."
+    fi
+
+    check_deps
+    setup_bootloader
+
+    # Calculate DHCP range (simple: x.x.x.100-200)
+    local dhcp_range_start dhcp_range_end
+    dhcp_range_start="${subnet%.*}.100"
+    dhcp_range_end="${subnet%.*}.200"
+
+    # Write dnsmasq config
+    local dnsmasq_conf="${PXE_DIR}/dnsmasq.conf"
+    cat > "$dnsmasq_conf" <<DNSCONF
+# CodexOS PXE Server
+# Interface
+interface=${iface}
+bind-interfaces
+
+# DHCP
+dhcp-range=${dhcp_range_start},${dhcp_range_end},255.255.255.0,12h
+dhcp-boot=pxelinux.0
+
+# TFTP
+enable-tftp
+tftp-root=${PXE_BOOT}
+
+# HTTP (for larger files like modloop)
+user=root
+
+# Logging
+log-queries
+log-dhcp
+log-facility=${LOGFILE}
+
+# Lease file
+dhcp-leasefile=${PXE_LEASES}
+
+# Don't override existing DNS
+DNSCONF
+
+    echo "Starting CodexOS PXE Server..."
+    echo "  Interface:   $iface"
+    echo "  Server IP:   $subnet"
+    echo "  DHCP range:  ${dhcp_range_start} - ${dhcp_range_end}"
+    echo "  Boot files:  ${PXE_BOOT}/"
+    echo ""
+
+    # Start dnsmasq
+    dnsmasq \
+        --conf-file="$dnsmasq_conf" \
+        --no-daemon \
+        --log-queries \
+        --log-dhcp \
+        --keep-in-foreground \
+        &
+
+    PXE_PID=$!
+    echo "$PXE_PID" > "$PXE_PIDFILE"
+
+    echo "PXE server started (PID: $PXE_PID)"
+    echo ""
+    echo "Instructions for the client machine:"
+    echo "  1. Connect to the same network"
+    echo "  2. Boot and press the network boot key (F12, Esc, or F8)"
+    echo "  3. Select 'PXE' or 'Network' from boot menu"
+    echo "  4. CodexOS will load over the network"
+    echo ""
+    echo "Press Ctrl+C to stop the server."
+
+    log_action "started iface=$iface ip=$subnet pid=$PXE_PID dhcp_range=${dhcp_range_start}-${dhcp_range_end}"
+
+    # Wait for process
+    wait "$PXE_PID" 2>/dev/null || true
+
+    # Cleanup on exit
+    rm -f "$PXE_PIDFILE"
+    log_action "stopped pid=$PXE_PID"
+    echo ""
+    echo "PXE server stopped."
+}
+
+# ── Stop PXE server ───────────────────────────────────────────────────────
+pxe_stop() {
+    if [[ -f "$PXE_PIDFILE" ]]; then
+        local pid
+        pid="$(cat "$PXE_PIDFILE")"
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping PXE server (PID: $pid)..."
+            kill "$pid" 2>/dev/null || true
+            sleep 1
+            kill -9 "$pid" 2>/dev/null || true
+            rm -f "$PXE_PIDFILE"
+            log_action "stopped pid=$pid"
+            echo "Stopped."
+        else
+            rm -f "$PXE_PIDFILE"
+            echo "PXE server was not running (stale PID file)."
+        fi
+    else
+        # Try to find dnsmasq running as PXE
+        local pids
+        pids="$(pgrep -f 'codex-pxe' 2>/dev/null || true)"
+        if [[ -n "$pids" ]]; then
+            echo "Stopping PXE dnsmasq processes..."
+            kill $pids 2>/dev/null || true
+            log_action "stopped pids=$pids"
+            echo "Stopped."
+        else
+            echo "PXE server is not running."
+        fi
+    fi
+}
+
+# ── Status ────────────────────────────────────────────────────────────────
+pxe_status() {
+    echo "=== CodexOS PXE Server Status ==="
+    echo ""
+
+    if [[ -f "$PXE_PIDFILE" ]] && kill -0 "$(cat "$PXE_PIDFILE")" 2>/dev/null; then
+        echo "  Server:   running (PID: $(cat "$PXE_PIDFILE"))"
+    else
+        echo "  Server:   not running"
+    fi
+
+    echo ""
+    echo "  Boot files:"
+    for f in vmlinuz initramfs modloop pxelinux.0; do
+        if [[ -f "${PXE_BOOT}/${f}" ]]; then
+            echo "    ${f}: $(du -sh "${PXE_BOOT}/${f}" | awk '{print $1}')"
+        else
+            echo "    ${f}: missing"
+        fi
+    done
+
+    echo ""
+    echo "  DHCP leases:"
+    if [[ -f "$PXE_LEASES" ]]; then
+        if [[ -s "$PXE_LEASES" ]]; then
+            cat "$PXE_LEASES" | while read -r line; do
+                [[ -z "$line" ]] && continue
+                echo "    $line"
+            done
+        else
+            echo "    (no leases yet)"
+        fi
+    else
+        echo "    (none)"
+    fi
+}
+
+# ── Parse args ────────────────────────────────────────────────────────────
+MODE=""
+IFACE=""
+ISO_PATH=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --start)
+            MODE="start"
+            shift
+            # Next arg could be interface or --iso
+            if [[ $# -gt 0 ]] && [[ "$1" != --* ]]; then
+                IFACE="$1"
+                shift
+            fi
+            ;;
+        --iso)
+            ISO_PATH="${2:?--iso requires a file path}"
+            shift 2
+            ;;
+        --stop)   MODE="stop"; shift ;;
+        --status) MODE="status"; shift ;;
+        --clients) MODE="status"; shift ;;  # Same as status for now
+        --help|-h) usage ;;
+        *) die "Unknown option: $1" ;;
+    esac
+done
+
+if [[ -z "$MODE" ]]; then
+    usage
+fi
+
+case "$MODE" in
+    start)
+        # Extract ISO if provided
+        if [[ -n "$ISO_PATH" ]]; then
+            extract_from_iso "$ISO_PATH"
+        fi
+
+        # Find default interface if not specified
+        if [[ -z "$IFACE" ]]; then
+            IFACE="$(find_default_iface)"
+            if [[ -z "$IFACE" ]]; then
+                die "No network interface found. Specify one: codex-pxe --start eth0"
+            fi
+        fi
+
+        pxe_start "$IFACE"
+        ;;
+    stop)
+        pxe_stop
+        ;;
+    status)
+        pxe_status
+        ;;
+esac

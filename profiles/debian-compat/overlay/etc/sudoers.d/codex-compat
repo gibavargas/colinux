@@ -10,8 +10,9 @@ codex ALL=(root) NOPASSWD: /usr/local/bin/codex-disk-inventory
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-mount-ro
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-mount-rw
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-usb-persist
-codex ALL=(root) NOPASSWD: /usr/local/bin/codex-install-usb
-codex ALL=(root) NOPASSWD: /usr/local/bin/codex-install-pc
+# SECURITY: codex-install-usb and codex-install-pc are intentionally NOT
+# whitelisted — they perform destructive disk writes and must require
+# explicit root authentication (sudo password or root login).
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-network
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-update
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-backup

@@ -117,7 +117,7 @@ setup_persistence() {
         log_info "Opening encrypted partition..."
 
         # Try to open — if no keyfile, prompt on console
-        local mapper_name="codex_persist"
+        local mapper_name="codex-persist"
         local keyfile="$CODEX_CONFIG/persist.key"
 
         if [ -f "$keyfile" ]; then
@@ -232,9 +232,12 @@ setup_codex_auth() {
     fi
 
     # Safely check for existing OPENAI_API_KEY in config (never source it)
-    local existing_key=""
     if [ -f "$auth_file" ]; then
-        existing_key="$(grep '^OPENAI_API_KEY=' "$auth_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+        existing_key="$(grep '^OPENAI_API_KEY=' "$auth_file" 2>/dev/null | head -1 | sed 's/^OPENAI_API_KEY=//' | tr -d '"' | tr -d "'" || true)"
+        # Skip if the key is just masked placeholder
+        if [ "$existing_key" = "***" ] || [ -z "$existing_key" ]; then
+            existing_key=""
+        fi
     fi
 
     if [ -n "$existing_key" ]; then

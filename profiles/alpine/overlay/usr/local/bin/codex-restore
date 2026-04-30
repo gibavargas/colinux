@@ -168,6 +168,9 @@ fi
 
 echo "  ✓ Path validation passed."
 
+# ── Strip all symlinks from staging to prevent any escape ─────────────────
+find "$STAGING_DIR" -type l -delete 2>/dev/null || true
+
 # ── Restore validated paths ──────────────────────────────────────────────
 restored_count=0
 

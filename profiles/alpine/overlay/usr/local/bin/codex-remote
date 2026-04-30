@@ -1,0 +1,197 @@
+#!/bin/bash
+# codex-remote — Set up remote access to CodexOS via SSH or tunnel
+# Part of CodexOS Lite
+#
+# Usage:
+#   codex-remote --ssh              Show SSH connection info
+#   codex-remote --ssh-key          Generate new SSH key pair
+#   codex-remote --tunnel [URL]     Create Cloudflare Quick Tunnel
+#   codex-remote --qr               Show connection info as QR code
+#   codex-remote --status           Show remote access status
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/network.log"
+PERSIST_DIR="/persist"
+SSH_DIR="${PERSIST_DIR}/ssh"
+
+mkdir -p "$LOG_DIR" "$SSH_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] remote: $*" >> "$LOGFILE"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: codex-remote [OPTIONS]
+
+Set up remote access to CodexOS.
+
+Options:
+  --ssh          Show SSH connection info (IP, port, keys)
+  --ssh-key      Generate a new SSH key pair
+  --tunnel [URL] Create a Cloudflare Quick Tunnel (optionally to local URL)
+  --qr           Show connection info as QR code
+  --status       Show remote access status
+  --help         Show this help
+
+Examples:
+  codex-remote --ssh
+  codex-remote --ssh-key
+  codex-remote --tunnel localhost:22
+  codex-remote --qr
+EOF
+    exit 0
+}
+
+MODE="${1:---help}"
+shift 2>/dev/null || true
+
+case "$MODE" in
+    --ssh)
+        echo "=== SSH Connection Info ==="
+        echo ""
+        echo "Network addresses:"
+        ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | while read -r addr; do
+            echo "  -> $addr"
+        done
+
+        if pgrep -x sshd &>/dev/null || pgrep -x dropbear &>/dev/null; then
+            SSH_PORT="$(ss -tlnp 2>/dev/null | grep -E 'sshd|dropbear' | grep -oP ':\K[0-9]+' | head -1 || echo "22")"
+            echo ""
+            echo "SSH server: running (port ${SSH_PORT})"
+            echo "  Connect: ssh codex@<ip> -p ${SSH_PORT}"
+        else
+            echo ""
+            echo "SSH server: not running"
+            echo "  Start with: rc-service sshd start"
+        fi
+
+        if [[ -f "${SSH_DIR}/id_ed25519.pub" ]]; then
+            echo ""
+            echo "Public key:"
+            echo "  $(cat "${SSH_DIR}/id_ed25519.pub")"
+        elif [[ -f "${SSH_DIR}/id_rsa.pub" ]]; then
+            echo ""
+            echo "Public key:"
+            echo "  $(cat "${SSH_DIR}/id_rsa.pub")"
+        else
+            echo ""
+            echo "No SSH keys found. Generate with: codex-remote --ssh-key"
+        fi
+        ;;
+
+    --ssh-key)
+        echo "Generating SSH key pair..."
+        KEY_TYPE="ed25519"
+        KEY_PATH="${SSH_DIR}/id_${KEY_TYPE}"
+
+        if [[ -f "$KEY_PATH" ]]; then
+            BACKUP="${KEY_PATH}.bak.$(date +%s)"
+            mv "$KEY_PATH" "${BACKUP}" 2>/dev/null || true
+            mv "${KEY_PATH}.pub" "${BACKUP}.pub" 2>/dev/null || true
+            echo "  Backed up existing key to: ${BACKUP}"
+        fi
+
+        if command -v ssh-keygen &>/dev/null; then
+            ssh-keygen -t "$KEY_TYPE" -f "$KEY_PATH" -N "" -C "codexos@$(hostname -s 2>/dev/null || echo localhost)"
+            echo ""
+            echo "Keys generated:"
+            echo "  Private: $KEY_PATH"
+            echo "  Public:  ${KEY_PATH}.pub"
+            echo ""
+            echo "Public key:"
+            echo "  $(cat "${KEY_PATH}.pub")"
+            log_action "ssh_key_generated type=$KEY_TYPE"
+        else
+            die "ssh-keygen not found. Install with: apk add openssh"
+        fi
+        ;;
+
+    --tunnel)
+        TARGET_URL="${1:-localhost:22}"
+        shift 2>/dev/null || true
+
+        if ! command -v cloudflared &>/dev/null; then
+            echo "Installing cloudflared..."
+            ARCH="$(uname -m)"
+            case "$ARCH" in
+                x86_64)  CF_ARCH="amd64" ;;
+                aarch64) CF_ARCH="arm64" ;;
+                armv7l)  CF_ARCH="armhf" ;;
+                *)       die "Unsupported architecture: $ARCH" ;;
+            esac
+
+            CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}"
+            CF_BIN="/usr/local/bin/cloudflared"
+
+            curl -fsSL "$CF_URL" -o "$CF_BIN" || die "Failed to download cloudflared"
+            chmod +x "$CF_BIN"
+            echo "cloudflared installed"
+            log_action "cloudflared_installed arch=$CF_ARCH"
+        fi
+
+        echo "Creating Cloudflare Quick Tunnel..."
+        echo "  Target: $TARGET_URL"
+        echo ""
+        log_action "tunnel_started target=$TARGET_URL"
+
+        # Run in foreground so user sees output
+        exec cloudflared tunnel --url "$TARGET_URL"
+        ;;
+
+    --qr)
+        PRIMARY_IP="$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '127\.' | head -1 || echo 'unknown')"
+
+        if command -v qrencode &>/dev/null; then
+            echo "SSH Connection QR Code:"
+            echo "  ssh codex@${PRIMARY_IP}"
+            echo ""
+            echo "codexos://${PRIMARY_IP}:22" | qrencode -t ANSIUTF8
+        else
+            echo "Install qrencode for QR codes: apk add qrencode"
+            echo ""
+            echo "Connection info:"
+            echo "  ssh codex@${PRIMARY_IP}"
+        fi
+        ;;
+
+    --status)
+        echo "=== Remote Access Status ==="
+        echo ""
+
+        if pgrep -x sshd &>/dev/null || pgrep -x dropbear &>/dev/null; then
+            SSH_PORT="$(ss -tlnp 2>/dev/null | grep -E 'sshd|dropbear' | grep -oP ':\K[0-9]+' | head -1 || echo "22")"
+            echo "  SSH:      running (port ${SSH_PORT})"
+        else
+            echo "  SSH:      not running"
+        fi
+
+        PRIMARY_IP="$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '127\.' | head -1 || echo 'none')"
+        echo "  IP:       $PRIMARY_IP"
+
+        if pgrep -x cloudflared &>/dev/null; then
+            echo "  Tunnel:   cloudflared running (PID: $(pgrep -x cloudflared))"
+        else
+            echo "  Tunnel:   not running"
+        fi
+
+        if [[ -f "${SSH_DIR}/id_ed25519.pub" ]] || [[ -f "${SSH_DIR}/id_rsa.pub" ]]; then
+            echo "  SSH keys: present"
+        else
+            echo "  SSH keys: none found"
+        fi
+        ;;
+
+    --help|-h|*)
+        usage
+        ;;
+esac

@@ -1,0 +1,234 @@
+#!/bin/bash
+# codex-benchmark — Quick hardware benchmark for CodexOS
+# Part of CodexOS Lite
+#
+# Usage:
+#   codex-benchmark              Run full benchmark (CPU, disk, network)
+#   codex-benchmark --cpu        CPU benchmark only
+#   codex-benchmark --disk DEV   Disk benchmark (default: first non-boot disk)
+#   codex-benchmark --network    Network benchmark only
+#   codex-benchmark --json       Output as JSON
+set -euo pipefail
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/system.log"
+
+mkdir -p "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] benchmark: $*" >> "$LOGFILE"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: codex-benchmark [OPTIONS]
+
+Quick hardware benchmark — CPU, disk I/O, and network throughput.
+
+Options:
+  --cpu          CPU benchmark only (AES, SHA, RSA)
+  --disk DEV     Disk benchmark (default: /persist or /tmp)
+  --network      Network benchmark only (download speed)
+  --json         Output results as JSON
+  --help         Show this help
+
+Uses: openssl (CPU), dd (disk), curl (network). Zero extra dependencies.
+EOF
+    exit 0
+}
+
+# ── Parse args ────────────────────────────────────────────────────────────
+RUN_CPU=false
+RUN_DISK=false
+RUN_NETWORK=false
+OUTPUT_FMT="text"
+DISK_TARGET=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --cpu)    RUN_CPU=true; shift ;;
+        --disk)   RUN_DISK=true; DISK_TARGET="${2:-}"; shift 2 ;;
+        --network) RUN_NETWORK=true; shift ;;
+        --json)   OUTPUT_FMT="json"; shift ;;
+        --help|-h) usage ;;
+        *) die "Unknown option: $1" ;;
+    esac
+done
+
+# Default: run all
+if [[ "$RUN_CPU" == false ]] && [[ "$RUN_DISK" == false ]] && [[ "$RUN_NETWORK" == false ]]; then
+    RUN_CPU=true
+    RUN_DISK=true
+    RUN_NETWORK=true
+fi
+
+TIMESTAMP="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+RESULTS="{}"
+
+# ── CPU Benchmark ─────────────────────────────────────────────────────────
+if [[ "$RUN_CPU" == true ]]; then
+    echo "=== CPU Benchmark ==="
+
+    if ! command -v openssl &>/dev/null; then
+        die "openssl not found. Install with: apk add openssl"
+    fi
+
+    CPU_MODEL="$(grep 'model name' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | xargs || echo 'unknown')"
+    echo "  CPU: $CPU_MODEL"
+    echo ""
+
+    # AES-256-CBC
+    echo -n "  AES-256-CBC:     "
+    AES_SPEED="$(openssl speed -evp aes-256-cbc 2>/dev/null | grep -oP '\d+(?=\s+KBytes/sec)' | tail -1 || echo 0)"
+    AES_MBPS="$((AES_SPEED / 1024))"
+    echo "${AES_MBPS} MB/s"
+    RESULTS="$(echo "$RESULTS" | jq -c --arg val "${AES_MBPS} MB/s" '. + {cpu_aes: $val}')"
+
+    # SHA-256
+    echo -n "  SHA-256:         "
+    SHA_SPEED="$(openssl speed sha256 2>/dev/null | grep -oP '\d+(?=\s+KBytes/sec)' | tail -1 || echo 0)"
+    SHA_MBPS="$((SHA_SPEED / 1024))"
+    echo "${SHA_MBPS} MB/s"
+    RESULTS="$(echo "$RESULTS" | jq -c --arg val "${SHA_MBPS} MB/s" '. + {cpu_sha256: $val}')"
+
+    # RSA 2048 sign
+    echo -n "  RSA-2048 sign:   "
+    RSA_SIGN="$(openssl speed rsa2048 2>/dev/null | grep 'sign' | grep -oP '\d+(?=\s+signs/sec)' | tail -1 || echo 0)"
+    echo "${RSA_SIGN} ops/s"
+    RESULTS="$(echo "$RESULTS" | jq -c --arg val "${RSA_SIGN} ops/s" '. + {cpu_rsa2048_sign: $val}')"
+
+    echo ""
+fi
+
+# ── Disk Benchmark ────────────────────────────────────────────────────────
+if [[ "$RUN_DISK" == true ]]; then
+    echo "=== Disk Benchmark ==="
+
+    # Select target
+    if [[ -z "$DISK_TARGET" ]]; then
+        if [[ -d /persist ]] && [[ -w /persist ]]; then
+            DISK_TARGET="/persist"
+        else
+            DISK_TARGET="/tmp"
+        fi
+    fi
+
+    if [[ ! -d "$DISK_TARGET" ]]; then
+        die "Disk target not writable: $DISK_TARGET"
+    fi
+
+    TEST_FILE="${DISK_TARGET}/.codex-benchmark-test"
+    echo "  Target: $DISK_TARGET"
+    echo ""
+
+    # Sequential write
+    echo -n "  Seq write:       "
+    WRITE_SPEED="$(dd if=/dev/zero of="$TEST_FILE" bs=1M count=256 oflag=direct 2>&1 | grep -oP '\d+(?=\s+bytes/sec)' | tail -1 || echo 0)"
+    if [[ "$WRITE_SPEED" -gt 0 ]]; then
+        WRITE_HR="$(numfmt --to=iec --suffix=B "$WRITE_SPEED" 2>/dev/null || echo "${WRITE_SPEED}B")/s"
+    else
+        WRITE_HR="n/a (no direct I/O support)"
+    fi
+    echo "$WRITE_HR"
+    RESULTS="$(echo "$RESULTS" | jq -c --arg val "$WRITE_HR" --arg target "$DISK_TARGET" '. + {disk_write: $val, disk_target: $target}')"
+
+    # Sequential read
+    if [[ -f "$TEST_FILE" ]]; then
+        echo -n "  Seq read:        "
+        # Clear caches if possible
+        sync 2>/dev/null
+        echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+
+        READ_SPEED="$(dd if="$TEST_FILE" of=/dev/null bs=1M count=256 iflag=direct 2>&1 | grep -oP '\d+(?=\s+bytes/sec)' | tail -1 || echo 0)"
+        if [[ "$READ_SPEED" -gt 0 ]]; then
+            READ_HR="$(numfmt --to=iec --suffix=B "$READ_SPEED" 2>/dev/null || echo "${READ_SPEED}B")/s"
+        else
+            READ_HR="n/a (no direct I/O support)"
+        fi
+        echo "$READ_HR"
+        RESULTS="$(echo "$RESULTS" | jq -c --arg val "$READ_HR" '. + {disk_read: $val}')"
+    fi
+
+    # Random I/O (4K)
+    if [[ -f "$TEST_FILE" ]]; then
+        echo -n "  Random 4K write: "
+        RAND_SPEED="$(dd if=/dev/urandom of="$TEST_FILE.rand" bs=4K count=10000 oflag=direct 2>&1 | grep -oP '\d+(?=\s+bytes/sec)' | tail -1 || echo 0)"
+        if [[ "$RAND_SPEED" -gt 0 ]]; then
+            RAND_HR="$(numfmt --to=iec --suffix=B "$RAND_SPEED" 2>/dev/null || echo "${RAND_SPEED}B")/s"
+        else
+            RAND_HR="n/a"
+        fi
+        echo "$RAND_HR"
+        RESULTS="$(echo "$RESULTS" | jq -c --arg val "$RAND_HR" '. + {disk_random_4k: $val}')"
+    fi
+
+    # Cleanup
+    rm -f "$TEST_FILE" "$TEST_FILE.rand" 2>/dev/null || true
+
+    echo ""
+fi
+
+# ── Network Benchmark ─────────────────────────────────────────────────────
+if [[ "$RUN_NETWORK" == true ]]; then
+    echo "=== Network Benchmark ==="
+
+    if ! command -v curl &>/dev/null; then
+        die "curl not found. Install with: apk add curl"
+    fi
+
+    # Download test (Cloudflare speed test endpoint — 10MB)
+    TEST_URLS=(
+        "https://speed.cloudflare.com/__down?bytes=10000000"
+        "http://proof.ovh.net/files/10Mb.dat"
+        "http://speedtest.tele2.net/10MB.zip"
+    )
+
+    NET_SPEED="n/a"
+    NET_URL=""
+    for url in "${TEST_URLS[@]}"; do
+        SPEED="$(curl -o /dev/null -w '%{speed_download}' --connect-timeout 5 --max-time 15 "$url" 2>/dev/null || echo 0)"
+        if [[ "$SPEED" =~ ^[0-9]+$ ]] && [[ "$SPEED" -gt 1000 ]]; then
+            SPEED_MBPS="$((SPEED / 1024 / 1024 * 8))"
+            NET_SPEED="${SPEED_MBPS} Mbps"
+            NET_URL="$url"
+            break
+        fi
+    done
+
+    echo "  Download:    $NET_SPEED"
+    RESULTS="$(echo "$RESULTS" | jq -c --arg val "$NET_SPEED" '. + {network_download: $val}')"
+
+    # Latency check
+    echo -n "  Latency:        "
+    LATENCY="$(curl -o /dev/null -sw '%{time_total}' --connect-timeout 5 "https://1.1.1.1" 2>/dev/null || echo 0)"
+    echo "${LATENCY}s"
+    RESULTS="$(echo "$RESULTS" | jq -c --arg val "${LATENCY}s" '. + {network_latency: $val}')"
+
+    # DNS resolution time
+    echo -n "  DNS resolve:    "
+    DNS_TIME="$(curl -o /dev/null -sw '%{time_namelookup}' --connect-timeout 5 "https://google.com" 2>/dev/null || echo 0)"
+    echo "${DNS_TIME}s"
+    RESULTS="$(echo "$RESULTS" | jq -c --arg val "${DNS_TIME}s" '. + {network_dns: $val}')"
+
+    echo ""
+fi
+
+# ── Final output ──────────────────────────────────────────────────────────
+if [[ "$OUTPUT_FMT" == "json" ]]; then
+    echo "$RESULTS" | jq -c --arg timestamp "$TIMESTAMP" --arg hostname "$(hostname -s 2>/dev/null || echo codex)" \
+        '{hostname: $hostname, timestamp: $timestamp} + .'
+    exit 0
+fi
+
+echo "=== Summary ==="
+echo "$RESULTS" | jq -r 'to_entries[] | "  \(.key): \(.value)"' 2>/dev/null || echo "$RESULTS"
+echo ""
+
+log_action "complete"

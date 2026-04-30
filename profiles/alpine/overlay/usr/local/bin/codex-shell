@@ -67,7 +67,19 @@ if [[ -f "${PERSIST_DIR}/profile" ]]; then
             [[ "$line" =~ ^[[:space:]]*# ]] && continue
             [[ -z "$line" ]] && continue
             if [[ "$line" =~ ^export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*= ]]; then
-                eval "$line"
+                # Safe export: parse name=value without eval to prevent shell injection
+                varname="${line#export }"
+                varname="${varname%%=*}"
+                varval="${line#*=}"
+                # Strip leading/trailing quotes
+                varval="${varval#\"}" ; varval="${varval%\"}"
+                varval="${varval#\'}" ; varval="${varval%\'}"
+                # Reject values containing command substitution or subshells
+                if [[ "$varval" == *'$('* ]] || [[ "$varval" == *'`'* ]] || [[ "$varval" == *'${'* ]]; then
+                    echo "WARNING: Skipping unsafe export line for $varname (contains command substitution)" >&2
+                    continue
+                fi
+                export "$varname=$varval"
             fi
         done < "${PERSIST_DIR}/profile"
     fi
@@ -86,8 +98,11 @@ if ! command -v tmux &>/dev/null; then
     exec /bin/bash
 fi
 
-# Kill stale session if it exists
-tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
+# Reattach existing session or create new one
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    echo "Attaching to existing CodexOS session..."
+    exec tmux attach-session -t "$SESSION_NAME"
+fi
 
 # Create new session
 tmux new-session -d -s "$SESSION_NAME" -x "$(tput cols 2>/dev/null || echo 80)" -y "$(tput lines 2>/dev/null || echo 24)"

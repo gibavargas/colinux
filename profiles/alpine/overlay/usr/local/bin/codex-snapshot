@@ -1,0 +1,285 @@
+#!/bin/bash
+# codex-snapshot — Create portable state snapshots with metadata
+# Part of CodexOS Lite
+#
+# Usage:
+#   codex-snapshot                          Create a timestamped snapshot
+#   codex-snapshot --upload URL             Upload snapshot to remote URL
+#   codex-snapshot --list                   List existing snapshots
+#   codex-snapshot --restore <file>         Restore a snapshot
+#   codex-snapshot --prune N                Keep only last N snapshots
+set -euo pipefail
+
+PERSIST_DIR="/persist"
+SNAPSHOT_DIR="${PERSIST_DIR}/snapshots"
+LOG_DIR="${PERSIST_DIR}/logs"
+LOGFILE="${LOG_DIR}/backup.log"
+META_FILE="snapshot.json"
+
+mkdir -p "$SNAPSHOT_DIR" "$LOG_DIR"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] snapshot: $*" >> "$LOGFILE"
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    log_action "FATAL $*"
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: codex-snapshot [OPTIONS]
+
+Create portable state snapshots with metadata for easy transfer.
+
+Options:
+  (no args)     Create a new snapshot
+  --upload URL  Upload snapshot to remote URL (via curl PUT)
+  --list        List existing snapshots with metadata
+  --restore F   Restore from a snapshot file
+  --prune N     Keep only the last N snapshots
+  --help        Show this help
+
+Examples:
+  codex-snapshot
+  codex-snapshot --upload https://example.com/backups/
+  codex-snapshot --list
+  codex-snapshot --prune 5
+EOF
+    exit 0
+}
+
+# ── Parse args ────────────────────────────────────────────────────────────
+MODE="create"
+TARGET_URL=""
+RESTORE_FILE=""
+PRUNE_COUNT=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --upload) MODE="upload"; TARGET_URL="${2:?--upload requires a URL}"; shift 2 ;;
+        --list|list) MODE="list"; shift ;;
+        --restore) MODE="restore"; RESTORE_FILE="${2:?--restore requires a file}"; shift 2 ;;
+        --prune) MODE="prune"; PRUNE_COUNT="${2:?--prune requires a number}"; shift 2 ;;
+        --help|-h) usage ;;
+        *) die "Unknown option: $1" ;;
+    esac
+done
+
+# ── Gather metadata ───────────────────────────────────────────────────────
+gather_metadata() {
+    local hostname_val kernel_val arch_val timestamp_val
+    hostname_val="$(hostname -s 2>/dev/null || echo 'codex')"
+    kernel_val="$(uname -r 2>/dev/null || echo 'unknown')"
+    arch_val="$(uname -m 2>/dev/null || echo 'unknown')"
+    timestamp_val="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+    # Hardware ID — use first disk serial or machine-id
+    local hw_id
+    if [[ -f /etc/machine-id ]]; then
+        hw_id="$(cat /etc/machine-id 2>/dev/null | cut -c1-12)"
+    elif [[ -f /var/lib/dbus/machine-id ]]; then
+        hw_id="$(cat /var/lib/dbus/machine-id 2>/dev/null | cut -c1-12)"
+    else
+        hw_id="$(ip link show 2>/dev/null | grep -oP 'link/ether \K[0-9a-f:]+' | head -1 | tr -d ':' || echo 'unknown')"
+    fi
+
+    # Disk info
+    local boot_dev boot_size
+    boot_dev="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || echo 'unknown')"
+    if [[ -b "$boot_dev" ]] && command -v blockdev &>/dev/null; then
+        boot_size="$(numfmt --to=iec --suffix=B "$(blockdev --getsize64 "$boot_dev" 2>/dev/null || echo 0)")"
+    else
+        boot_size="unknown"
+    fi
+
+    # Persist size
+    local persist_size
+    persist_size="$(du -sh "$PERSIST_DIR" 2>/dev/null | awk '{print $1}' || echo 'unknown')"
+
+    jq -n \
+        --arg hostname "$hostname_val" \
+        --arg kernel "$kernel_val" \
+        --arg arch "$arch_val" \
+        --arg timestamp "$timestamp_val" \
+        --arg hw_id "$hw_id" \
+        --arg boot_device "$boot_dev" \
+        --arg boot_size "$boot_size" \
+        --arg persist_size "$persist_size" \
+        --arg codexos_version "lite-$(cat /etc/codexos-version 2>/dev/null || echo 'dev')" \
+        '{
+            hostname: $hostname,
+            kernel: $kernel,
+            arch: $arch,
+            timestamp: $timestamp,
+            hw_id: $hw_id,
+            boot_device: $boot_device,
+            boot_size: $boot_size,
+            persist_size: $persist_size,
+            codexos_version: $codexos_version
+        }'
+}
+
+# ── Create snapshot ───────────────────────────────────────────────────────
+if [[ "$MODE" == "create" ]]; then
+    TIMESTAMP="$(date -u '+%Y%m%d-%H%M%S')"
+    HOSTNAME="$(hostname -s 2>/dev/null || echo 'codex')"
+    SNAP_NAME="codexos-${HOSTNAME}-${TIMESTAMP}.tar.gz"
+    SNAP_PATH="${SNAPSHOT_DIR}/${SNAP_NAME}"
+
+    echo "Creating CodexOS state snapshot..."
+    echo "  Output: ${SNAP_NAME}"
+
+    # Generate metadata
+    META_JSON="$(gather_metadata)"
+    META_TMP="$(mktemp)"
+    echo "$META_JSON" > "$META_TMP"
+
+    log_action "create_start snapshot=${SNAP_NAME}"
+
+    # Create archive with metadata embedded
+    tar czf "$SNAP_PATH" \
+        --exclude='*.sock' \
+        --exclude='*.pid' \
+        --exclude='__pycache__' \
+        --exclude='.cache' \
+        --exclude='snapshots/*.tar.gz' \
+        --exclude='backups/*.tar.gz' \
+        --transform "s,^persist,${HOSTNAME}-${TIMESTAMP}," \
+        -C /persist \
+        . 2>&1
+
+    # Append metadata as separate file
+    cp "$META_TMP" "${SNAP_PATH}.meta.json"
+    rm -f "$META_TMP"
+
+    SNAP_SIZE="$(du -sh "$SNAP_PATH" | awk '{print $1}')"
+    echo ""
+    echo "Snapshot created:"
+    echo "  File:     ${SNAP_NAME} ($SNAP_SIZE)"
+    echo "  Metadata: ${SNAP_NAME}.meta.json"
+    echo ""
+    echo "Metadata:"
+    echo "$META_JSON" | jq '.' 2>/dev/null || echo "$META_JSON"
+    echo ""
+
+    log_action "create_ok snapshot=${SNAP_NAME} size=$SNAP_SIZE"
+fi
+
+# ── Upload snapshot ───────────────────────────────────────────────────────
+if [[ "$MODE" == "upload" ]]; then
+    # Find latest snapshot
+    LATEST="$(ls -1t "${SNAPSHOT_DIR}"/*.tar.gz 2>/dev/null | head -1 || true)"
+    if [[ -z "$LATEST" ]]; then
+        die "No snapshots found. Create one first: codex-snapshot"
+    fi
+
+    SNAP_NAME="${LATEST##*/}"
+    echo "Uploading ${SNAP_NAME} to ${TARGET_URL}..."
+    log_action "upload_start snapshot=${SNAP_NAME} url=$TARGET_URL"
+
+    HTTP_CODE="$(curl -w '%{http_code}' -o /dev/null -T "$LATEST" "${TARGET_URL}${SNAP_NAME}" 2>&1)"
+
+    if [[ "$HTTP_CODE" -ge 200 ]] && [[ "$HTTP_CODE" -lt 300 ]]; then
+        echo "Uploaded successfully (HTTP ${HTTP_CODE})"
+        log_action "upload_ok snapshot=${SNAP_NAME} url=$TARGET_URL http=$HTTP_CODE"
+    else
+        die "Upload failed (HTTP ${HTTP_CODE})"
+    fi
+fi
+
+# ── List snapshots ────────────────────────────────────────────────────────
+if [[ "$MODE" == "list" ]]; then
+    echo "=== CodexOS Snapshots ==="
+    echo "Location: $SNAPSHOT_DIR"
+    echo ""
+
+    count=0
+    for snap in "${SNAPSHOT_DIR}"/*.tar.gz; do
+        [[ -f "$snap" ]] || continue
+        count=$((count + 1))
+        snap_name="${snap##*/}"
+        snap_size="$(du -sh "$snap" | awk '{print $1}')"
+        snap_date="$(stat -c '%y' "$snap" 2>/dev/null | cut -d. -f1)"
+
+        # Read metadata if available
+        meta_file="${snap}.meta.json"
+        if [[ -f "$meta_file" ]]; then
+            meta_host="$(jq -r '.hostname // "?"' "$meta_file" 2>/dev/null)"
+            meta_hw="$(jq -r '.hw_id // "?"' "$meta_file" 2>/dev/null)"
+            meta_kernel="$(jq -r '.kernel // "?"' "$meta_file" 2>/dev/null)"
+            echo "  $snap_name  ($snap_size)  $snap_date"
+            echo "    Host: ${meta_host} | HW: ${meta_hw} | Kernel: ${meta_kernel}"
+        else
+            echo "  $snap_name  ($snap_size)  $snap_date"
+        fi
+    done
+
+    if [[ $count -eq 0 ]]; then
+        echo "  (no snapshots found)"
+    else
+        echo ""
+        echo "Total: $count snapshot(s)"
+        echo "Size:  $(du -sh "$SNAPSHOT_DIR" 2>/dev/null | awk '{print $1}')"
+    fi
+fi
+
+# ── Restore snapshot ──────────────────────────────────────────────────────
+if [[ "$MODE" == "restore" ]]; then
+    if [[ ! -f "$RESTORE_FILE" ]]; then
+        # Try in snapshot dir
+        if [[ -f "${SNAPSHOT_DIR}/${RESTORE_FILE}" ]]; then
+            RESTORE_FILE="${SNAPSHOT_DIR}/${RESTORE_FILE}"
+        else
+            die "Snapshot not found: $RESTORE_FILE"
+        fi
+    fi
+
+    echo "=== RESTORE WARNING ==="
+    echo "This will overwrite /persist with the snapshot contents."
+    echo "  Source: $RESTORE_FILE"
+    echo ""
+    read -rp "Type 'RESTORE' to confirm: " confirm
+    if [[ "$confirm" != "RESTORE" ]]; then
+        echo "Aborted."
+        exit 0
+    fi
+
+    log_action "restore_start source=$RESTORE_FILE"
+
+    # Extract snapshot
+    tar xzf "$RESTORE_FILE" -C /tmp/codexos-restore 2>&1
+
+    # Find extracted directory
+    EXTRACTED_DIR="$(ls -1d /tmp/codexos-restore/*/ 2>/dev/null | head -1 || true)"
+    if [[ -n "$EXTRACTED_DIR" ]] && [[ -d "$EXTRACTED_DIR" ]]; then
+        cp -a "${EXTRACTED_DIR}"* "$PERSIST_DIR/" 2>&1
+        rm -rf /tmp/codexos-restore
+    else
+        die "Failed to extract snapshot."
+    fi
+
+    echo "Snapshot restored to /persist"
+    echo "Reboot recommended for full effect."
+    log_action "restore_ok source=$RESTORE_FILE"
+fi
+
+# ── Prune ─────────────────────────────────────────────────────────────────
+if [[ "$MODE" == "prune" ]]; then
+    total="$(ls -1 "${SNAPSHOT_DIR}"/*.tar.gz 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$total" -gt "$PRUNE_COUNT" ]]; then
+        delete_count=$((total - PRUNE_COUNT))
+        echo "Pruning: keeping last $PRUNE_COUNT, deleting $delete_count..."
+        ls -1t "${SNAPSHOT_DIR}"/*.tar.gz | tail -n "$delete_count" | while read -r old_snap; do
+            echo "  Deleting: ${old_snap##*/}"
+            rm -f "$old_snap" "${old_snap}.meta.json"
+        done
+        log_action "prune kept=$PRUNE_COUNT deleted=$delete_count"
+    else
+        echo "Nothing to prune ($total snapshot(s) exist)."
+    fi
+fi

@@ -122,9 +122,9 @@ verify_checksum() {
     local expected_sha256="$2"
 
     if ! command -v sha256sum &>/dev/null; then
-        log_action "WARN sha256sum not available, skipping checksum verification"
-        echo "WARNING: sha256sum not found. Cannot verify checksum. Skipping."
-        return 0
+        log_action "FAIL sha256sum not available, refusing to install"
+        echo "ERROR: sha256sum not found. Cannot verify checksum. Refusing to install."
+        return 1
     fi
 
     local actual_sha256

@@ -17,11 +17,9 @@ codex ALL=(root) NOPASSWD: /usr/local/bin/codex-desktop-autoupdate
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-update
 codex ALL=(root) NOPASSWD: /usr/sbin/unattended-upgrade
 
-# Network (restricted — status and connection only, no destructive ops)
+# Network (restricted — status and read-only queries; no destructive wildcard ops)
 codex ALL=(root) NOPASSWD: /usr/bin/nmcli device status
 codex ALL=(root) NOPASSWD: /usr/bin/nmcli connection show
-codex ALL=(root) NOPASSWD: /usr/bin/nmcli connection up *
-codex ALL=(root) NOPASSWD: /usr/bin/nmcli connection down *
 codex ALL=(root) NOPASSWD: /usr/bin/nmcli general reload
 
 # System info (read-only)

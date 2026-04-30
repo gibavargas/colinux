@@ -1,7 +1,23 @@
 polkit.addRule(function(action, subject) {
     if (subject.user == "codex") {
-        if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0) {
+        // Only allow specific NetworkManager actions — not blanket approval
+        var allowedNM = [
+            "org.freedesktop.NetworkManager.wifi-scan",
+            "org.freedesktop.NetworkManager.network-control",
+            "org.freedesktop.NetworkManager.wifi-share.protected",
+            "org.freedesktop.NetworkManager.check-permissions",
+            "org.freedesktop.NetworkManager.enable-disable-wifi",
+            "org.freedesktop.NetworkManager.enable-disable-wwan",
+            "org.freedesktop.NetworkManager.settings.modify.system",
+            "org.freedesktop.NetworkManager.reload",
+            "org.freedesktop.NetworkManager.sleep-wake"
+        ];
+        if (allowedNM.indexOf(action.id) !== -1) {
             return polkit.Result.YES;
+        }
+        // Explicitly deny dangerous actions
+        if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0) {
+            return polkit.Result.NO;
         }
     }
 });

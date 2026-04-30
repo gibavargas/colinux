@@ -4,7 +4,7 @@
 #
 # On first login, sets up the GNOME desktop environment and launches
 # the Electron Codex Desktop app. Falls back to a terminal if needed.
-set -uo pipefail
+set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────
 PERSIST_DIR="/persist"
@@ -51,7 +51,19 @@ if [[ -f "${PERSIST_DIR}/profile" ]]; then
             [[ "$line" =~ ^[[:space:]]*# ]] && continue
             [[ -z "$line" ]] && continue
             if [[ "$line" =~ ^export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*= ]]; then
-                eval "$line"
+                # Safe export: parse name=value without eval to prevent shell injection
+                varname="${line#export }"
+                varname="${varname%%=*}"
+                varval="${line#*=}"
+                # Strip leading/trailing quotes
+                varval="${varval#\"}" ; varval="${varval%\"}"
+                varval="${varval#\'}" ; varval="${varval%\'}"
+                # Reject values containing command substitution or subshells
+                if [[ "$varval" == *'$('* ]] || [[ "$varval" == *'`'* ]] || [[ "$varval" == *'${'* ]]; then
+                    echo "WARNING: Skipping unsafe export line for $varname (contains command substitution)" >&2
+                    continue
+                fi
+                export "$varname=$varval"
             fi
         done < "${PERSIST_DIR}/profile"
     fi
