@@ -79,7 +79,33 @@
 3. On I/O errors, immediately remount affected filesystems read-only and
    notify the user.
 
+## 9. Available Commands
+
+Core commands (whitelisted in `doas.conf`):
+
+| Command | Purpose |
+|---------|---------|
+| `codex-disk-inventory` | Scan and inventory all block devices |
+| `codex-mount-ro` / `codex-mount-rw` | Mount devices (read-only or read-write) |
+| `codex-backup` / `codex-restore` | Create and restore workspace backups |
+| `codex-snapshot` | Portable state snapshots with metadata |
+| `codex-network` | Configure network interfaces |
+| `codex-update` | Update Codex CLI binary |
+| `codex-shell` | Safe shell escalation |
+| `codex-install-usb` / `codex-install-pc` | Install CodexOS to media |
+| `codex-usb-persist` | Set up USB persistence |
+| `codex-logs` | View system logs |
+| `codex-recover` | Recover deleted files (testdisk/photorec) |
+| `codex-clone` | Clone disks with ddrescue + SHA-256 |
+| `codex-remote` | SSH keys, Cloudflare tunnels, QR codes |
+| `codex-hw-check` | Hardware diagnostics (RAM, SMART, CPU, battery) |
+| `codex-benchmark` | Quick benchmarks (CPU, disk, network) |
+| `codex-pxe` | Network boot server (PXE) |
+
+Use `codex-<command> --help` for usage. All commands support `--json` or
+structured output where applicable.
+
 ---
 
-*Last updated: 2025-01-01T00:00:00+00:00*
+*Last updated: 2026-04-30T22:40:00+00:00*
 *CodexOS Lite — Alpine Linux + OpenAI Codex CLI*

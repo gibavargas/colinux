@@ -53,6 +53,13 @@ CodexOS Lite is not a general-purpose Linux distribution. It's a purpose-built a
 - 🔍 **Forensic mode** — block-level imaging with write-protect guarantees and SHA-256 verification.
 - 🔄 **Auto-updates** — periodic Codex CLI version checks via cron with configurable channels.
 - 📝 **Comprehensive logging** — all disk operations, Codex commands, and system events logged to `/persist/logs/`.
+- 🗃️ **File recovery** — recover deleted files from any filesystem using testdisk/photorec (`codex-recover`).
+- 📀 **Disk cloning** — resilient disk/partition cloning with ddrescue and SHA-256 verification (`codex-clone`).
+- 🌐 **Remote access** — SSH key management, Cloudflare tunnels, and QR code sharing (`codex-remote`).
+- 📸 **State snapshots** — portable snapshots with metadata for easy transfer and restore (`codex-snapshot`).
+- 🩺 **Hardware diagnostics** — RAM, SMART disk health, CPU temperature, battery info (`codex-hw-check`).
+- ⏱️ **Benchmarks** — quick CPU crypto, disk I/O, and network speed tests (`codex-benchmark`).
+- 🖧 **Network boot (PXE)** — boot CodexOS on other machines over the network, no USB needed (`codex-pxe`).
 
 ## Screenshots
 
@@ -142,14 +149,27 @@ codexos/
 │   │       │   │   └── auto-update.conf
 │   │       │   ├── codex-update-crontab
 │   │       │   └── doas.conf          # doas privilege rules
-│   │       ├── usr/
-│   │       │   ├── local/bin/         # Custom scripts
-│   │       │   │   ├── codexctl       # Codex control surface
-│   │       │   │   ├── safe-mount     # Safe mount wrapper
-│   │       │   │   ├── safe-write     # Write escalation gate
-│   │       │   │   ├── disk-inventory # Disk inventory collector
-│   │       │   │   └── first-boot.sh  # First-boot setup
-│   │       │   └── share/codexos/     # Shared resources
+│       ├── usr/
+│       │   ├── local/bin/         # codex-* command wrappers
+│       │   │   ├── codexctl       # Codex control surface
+│       │   │   ├── codex-backup   # Workspace persistence backups
+│       │   │   ├── codex-restore  # Restore from backups
+│       │   │   ├── codex-disk-inventory  # Disk inventory (JSON + Markdown)
+│       │   │   ├── codex-mount-ro / codex-mount-rw  # Safe mount wrappers
+│       │   │   ├── codex-network  # Network configuration
+│       │   │   ├── codex-update   # Codex CLI updater
+│       │   │   ├── codex-shell    # Safe shell escalation
+│       │   │   ├── codex-usb-persist  # USB persistence setup
+│       │   │   ├── codex-install-usb / codex-install-pc  # Installers
+│       │   │   ├── codex-recover  # File recovery (testdisk/photorec)
+│       │   │   ├── codex-clone    # Disk cloning (ddrescue + SHA-256)
+│       │   │   ├── codex-remote   # Remote access (SSH, tunnels, QR)
+│       │   │   ├── codex-snapshot # Portable state snapshots
+│       │   │   ├── codex-hw-check # Hardware diagnostics
+│       │   │   ├── codex-benchmark # Quick benchmarks (CPU/disk/net)
+│       │   │   ├── codex-pxe      # Network boot server (PXE)
+│       │   │   └── codex-logs     # Log viewer
+│       │   └── share/codexos/     # Shared resources
 │   │       │       └── safety-phrases # Safety phrase bank
 │   │       └── var/                   # Runtime state
 │   └── debian/                        # Debian-based compat profile
@@ -566,6 +586,75 @@ codexctl backup --list          # List existing backups
 codexctl install-usb /dev/sdX   # Install CodexOS to USB
 codexctl install-pc             # Install to internal disk
 ```
+
+### codex-* Command Reference
+
+Beyond `codexctl`, CodexOS provides specialized command-line tools for specific tasks:
+
+#### Recovery & Cloning
+
+```bash
+# File recovery — scan for and recover deleted files
+codex-recover --scan /dev/sdb1              # Quick filesystem scan
+codex-recover --deep /dev/sdb1              # Deep file carving (slower)
+codex-recover --deep /dev/sdb1 --type jpg,pdf  # Recover specific file types
+codex-recover --list                        # List devices available for recovery
+
+# Disk cloning — resilient copy with ddrescue
+codex-clone /dev/sda /dev/sdb               # Clone entire disk
+codex-clone /dev/sda1 /mnt/usb/backup.img   # Partition to image file
+codex-clone --verify /mnt/backup.img /dev/sda1  # Verify image integrity
+codex-clone --status                        # Show active clone sessions
+```
+
+#### Remote Access
+
+```bash
+codex-remote --ssh                          # Show SSH connection info
+codex-remote --ssh-key                      # Generate new SSH key pair
+codex-remote --tunnel localhost:22           # Create Cloudflare tunnel
+codex-remote --qr                           # Show connection QR code
+codex-remote --status                       # Show remote access status
+```
+
+#### Snapshots & Backups
+
+```bash
+codex-snapshot                              # Create timestamped snapshot with metadata
+codex-snapshot --list                       # List snapshots with metadata
+codex-snapshot --restore codexos-hostname-20250101.tar.gz  # Restore a snapshot
+codex-snapshot --upload https://example.com/backups/  # Upload to remote server
+codex-snapshot --prune 5                    # Keep only last 5 snapshots
+```
+
+#### Diagnostics & Benchmarks
+
+```bash
+# Hardware diagnostics
+codex-hw-check                              # Full diagnostics (RAM, disks, CPU, battery)
+codex-hw-check --quick                      # Quick summary only
+codex-hw-check --smart /dev/sda             # Detailed SMART data for a device
+codex-hw-check --json                       # JSON output
+
+# Quick benchmarks
+codex-benchmark                             # Run all (CPU + disk + network)
+codex-benchmark --cpu                       # CPU crypto only (AES, SHA, RSA)
+codex-benchmark --disk /persist             # Disk I/O on specific target
+codex-benchmark --network                   # Download speed + latency
+codex-benchmark --json                      # JSON output
+```
+
+#### Network Boot (PXE)
+
+```bash
+codex-pxe --start                           # Start PXE server on default interface
+codex-pxe --start eth1                      # Start on specific interface
+codex-pxe --start --iso /path/to/codexos.iso  # Extract from ISO and start
+codex-pxe --status                          # Show server status + connected clients
+codex-pxe --stop                            # Stop PXE server
+```
+
+> 💡 **PXE boot flow:** The host machine runs `codex-pxe --start --iso codexos.iso`. Any other PC on the same network boots via F12/Network Boot and loads CodexOS entirely over the network — no USB required. Perfect for remote assistance scenarios.
 
 ### Programmatic Disk Operations (JSON Output)
 
