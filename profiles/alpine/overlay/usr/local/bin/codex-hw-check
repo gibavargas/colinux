@@ -82,7 +82,7 @@ RAM_PCT="$(( (TOTAL_RAM_KB - AVAILABLE_RAM_KB) * 100 / TOTAL_RAM_KB ))"
 
 # CPU info
 CPU_MODEL="$(grep 'model name' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | xargs || echo 'unknown')"
-CPU_CORES="$(nproc 2>/dev/null || echo '?')"
+CPU_CORES="$(nproc 2>/dev/null || echo 1)"
 CPU_TEMP=""
 if [[ -f /sys/class/thermal/thermal_zone0/temp ]]; then
     RAW_TEMP="$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0)"
@@ -169,6 +169,8 @@ KERNEL_ERRORS="${KERNEL_ERRORS:-0}"
 [[ "$KERNEL_ERRORS" =~ ^[0-9]+$ ]] || KERNEL_ERRORS=0
 
 if [[ "$OUTPUT_FMT" == "json" ]]; then
+    # Ensure CPU_CORES is a valid integer for --argjson
+    [[ "$CPU_CORES" =~ ^[0-9]+$ ]] || CPU_CORES=1
     jq -n \
         --arg hostname "$(hostname -s 2>/dev/null || echo codex)" \
         --arg timestamp "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \

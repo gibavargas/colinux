@@ -14,7 +14,6 @@ PERSIST_DIR="/persist"
 SNAPSHOT_DIR="${PERSIST_DIR}/snapshots"
 LOG_DIR="${PERSIST_DIR}/logs"
 LOGFILE="${LOG_DIR}/backup.log"
-META_FILE="snapshot.json"
 
 mkdir -p "$SNAPSHOT_DIR" "$LOG_DIR"
 
@@ -149,7 +148,6 @@ if [[ "$MODE" == "create" ]]; then
         --exclude='.cache' \
         --exclude='snapshots/*.tar.gz' \
         --exclude='backups/*.tar.gz' \
-        --transform "s,^persist,${HOSTNAME}-${TIMESTAMP}," \
         -C /persist \
         . 2>&1
 
@@ -182,7 +180,7 @@ if [[ "$MODE" == "upload" ]]; then
     echo "Uploading ${SNAP_NAME} to ${TARGET_URL}..."
     log_action "upload_start snapshot=${SNAP_NAME} url=$TARGET_URL"
 
-    HTTP_CODE="$(curl -w '%{http_code}' -o /dev/null -T "$LATEST" "${TARGET_URL}${SNAP_NAME}" 2>&1)"
+    HTTP_CODE="$(curl -w '%{http_code}' -o /dev/null -T "$LATEST" "${TARGET_URL}${SNAP_NAME}" 2>/dev/null)"
 
     if [[ "$HTTP_CODE" -ge 200 ]] && [[ "$HTTP_CODE" -lt 300 ]]; then
         echo "Uploaded successfully (HTTP ${HTTP_CODE})"
@@ -262,10 +260,9 @@ if [[ "$MODE" == "restore" ]]; then
     RESTORE_TMP="$(mktemp -d /tmp/codexos-restore.XXXXXX)"
     tar xzf "$RESTORE_FILE" -C "$RESTORE_TMP" 2>&1
 
-    # Find extracted directory
-    EXTRACTED_DIR="$(ls -1d "$RESTORE_TMP"/*/ 2>/dev/null | head -1 || true)"
-    if [[ -n "$EXTRACTED_DIR" ]] && [[ -d "$EXTRACTED_DIR" ]]; then
-        cp -a "${EXTRACTED_DIR}"* "$PERSIST_DIR/" 2>&1
+    # Copy all restored files directly
+    if [[ -n "$(ls -A "$RESTORE_TMP" 2>/dev/null)" ]]; then
+        cp -a "$RESTORE_TMP"/. "$PERSIST_DIR/" 2>&1
         rm -rf "$RESTORE_TMP"
     else
         rm -rf "$RESTORE_TMP"

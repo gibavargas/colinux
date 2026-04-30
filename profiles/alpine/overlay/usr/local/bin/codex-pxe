@@ -17,6 +17,7 @@ PXE_PID=""
 
 # ── Cleanup trap ─────────────────────────────────────────────────────────
 cleanup_pxe() {
+    [[ -z "${PXE_PIDFILE:-}" ]] && return 0
     if [[ -f "$PXE_PIDFILE" ]]; then
         local pid
         pid="$(cat "$PXE_PIDFILE" 2>/dev/null)"
@@ -234,6 +235,24 @@ pxe_start() {
     dhcp_range_start="${subnet%.*}.100"
     dhcp_range_end="${subnet%.*}.200"
 
+    # Detect netmask from interface (P0-2)
+    local cidr_prefix
+    cidr_prefix="$(ip -4 addr show "$iface" 2>/dev/null | grep -oP 'inet \K[0-9./]+' | head -1 | cut -d/ -f2)"
+    if [[ -z "$cidr_prefix" || "$cidr_prefix" -le 0 || "$cidr_prefix" -gt 30 ]]; then
+        cidr_prefix=24
+    fi
+    # Convert CIDR prefix to dotted notation
+    cidr2mask() {
+        local i mask="" prefix="$1"
+        for ((i=0;i<4;i++)); do
+            local n=$((8 - (prefix > 8 ? 8 : prefix)))
+            mask+=$((256 - 2**n)).
+            prefix=$((prefix > 8 ? prefix - 8 : 0))
+        done
+        echo "${mask%.}"
+    }
+    DHCP_NETMASK="$(cidr2mask "$cidr_prefix")"
+
     # Write dnsmasq config
     local dnsmasq_conf="${PXE_DIR}/dnsmasq.conf"
     cat > "$dnsmasq_conf" <<DNSCONF
@@ -264,24 +283,6 @@ dhcp-leasefile=${PXE_LEASES}
 # Don't override existing DNS
 DNSCONF
 
-    # Detect netmask from interface (P0-2)
-    local cidr_prefix
-    cidr_prefix="$(ip -4 addr show "$iface" 2>/dev/null | grep -oP 'inet \K[0-9./]+' | head -1 | cut -d/ -f2)"
-    if [[ -z "$cidr_prefix" || "$cidr_prefix" -le 0 || "$cidr_prefix" -gt 30 ]]; then
-        cidr_prefix=24
-    fi
-    # Convert CIDR prefix to dotted notation
-    cidr2mask() {
-        local i mask="" prefix="$1"
-        for ((i=0;i<4;i++)); do
-            local n=$((8 - (prefix > 8 ? 8 : prefix)))
-            mask+=$((256 - 2**n)).
-            prefix=$((prefix > 8 ? prefix - 8 : 0))
-        done
-        echo "${mask%.}"
-    }
-    DHCP_NETMASK="$(cidr2mask "$cidr_prefix")"
-
     echo "Starting CodexOS PXE Server..."
     echo "  Interface:   $iface"
     echo "  Server IP:   $subnet"
@@ -293,7 +294,7 @@ DNSCONF
     # Warn about DHCP conflict (P0-3)
     if [[ "$SKIP_CONFIRM" != true ]]; then
         echo "WARNING: Starting a DHCP server will conflict with any existing DHCP on this network."
-        echo "  This may temporarily disrupt other devices on: ${subnet%.*}.0/24"
+        echo "  This may temporarily disrupt other devices on: ${subnet}/${cidr_prefix}"
         read -rp "Continue? (yes/no): " dhcp_confirm
         if [[ "$dhcp_confirm" != "yes" ]]; then
             echo "Aborted."
