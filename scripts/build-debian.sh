@@ -199,12 +199,16 @@ configure_lb() {
     export LB_MIRROR_CHROOT_SECURITY="http://security.debian.org/debian-security"
     export LB_MIRROR_BINARY_SECURITY="http://security.debian.org/debian-security"
 
-    # Exclude ubuntu-* packages that debootstrap pulls from the Ubuntu host.
-    # Write to config file BEFORE lb config (lb config reads existing config/ files).
-    mkdir -p config
-    cat > config/debootstrap.options <<'EOF'
---exclude=ubuntu-keyring,ubuntu-minimal,ubuntu-advantage-tools
-EOF
+    # Ubuntu's debootstrap hard-codes ubuntu-keyring as a base dependency
+    # even when building a Debian target.  Strip it from the debootstrap scripts
+    # so lb_chroot_dpkg doesn't fail trying to install a non-existent package.
+    if [ -f /usr/share/debootstrap/scripts/bookworm ]; then
+        sudo sed -i '/ubuntu-keyring/d' /usr/share/debootstrap/scripts/bookworm
+    fi
+    # Also the base script if it exists
+    if [ -f /usr/share/debootstrap/scripts/debian-common ]; then
+        sudo sed -i '/ubuntu-keyring/d' /usr/share/debootstrap/scripts/debian-common
+    fi
 
     lb config \
         --distribution bookworm \

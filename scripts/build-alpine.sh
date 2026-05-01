@@ -224,9 +224,9 @@ run_mkimage() {
 
     # The aports mkimage.sh calls git status to detect a -dirty suffix.
     # Inside the Docker container, git discovers the mounted /src/.git
-    # (colinux repo) instead of the aports repo and fails.  Remove git
-    # after cloning; mkimage.sh falls back to git=true.
-    apk del git 2>/dev/null || true
+    # (colinux repo) instead of the aports repo and fails.
+    # alpine-sdk depends on git so `apk del` fails; move the binary instead.
+    command -v git >/dev/null 2>&1 && mv "$(command -v git)" /tmp/git.disabled || true
 
     "$mkimage_script" \
         --profile "colinux-lite" \
