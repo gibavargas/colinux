@@ -270,13 +270,16 @@ inject_codex() {
         exit 1
     }
 
-    # Find the binary
+    # Find the binary — Codex releases name it codex-$ARCH-unknown-linux-musl
     local codex_bin
-    codex_bin="$(find "$tmpdir" -name 'codex' -type f -executable | head -1)"
+    codex_bin="$(find "$tmpdir" -name "codex-${codex_arch}" -type f | head -1)"
+    if [ -z "$codex_bin" ]; then
+        codex_bin="$(find "$tmpdir" -name 'codex' -type f | head -1)"
+    fi
     if [ -z "$codex_bin" ]; then
         log_error "Could not find codex binary in archive."
         log_error "Contents of archive:"
-        find "$tmpdir" -type f | head -20
+        find "$tmpdir" -maxdepth 2 -type f | head -20
         exit 1
     fi
 

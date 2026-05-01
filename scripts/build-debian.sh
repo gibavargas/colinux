@@ -220,15 +220,25 @@ configure_lb() {
         2>&1
 
     # Override security mirror to use Debian's (not Ubuntu's)
-    # live-build may inherit the runner's sources.list; fix via chroot hooks
-    # Remove any Ubuntu sources that debootstrap may have copied in
+    # live-build inherits the runner's security mirror (security.ubuntu.com) which
+    # does not serve Debian packages. Force Debian's security mirror in all stages.
     for cfg in bootstrap chroot binary; do
         cat > "$BUILD_DIR/config/archives/security.${cfg}.list" <<EOF
 deb http://security.debian.org/debian-security bookworm-security main
 EOF
     done
 
-    # Hook to clean up any inherited Ubuntu apt sources inside the chroot
+    # Also override chroot_sources if lb config generated them pointing to Ubuntu
+    for cfg in chroot binary; do
+        if [ -f "$BUILD_DIR/config/chroot_sources/security.${cfg}" ]; then
+            sed -i 's|security.ubuntu.com/ubuntu|security.debian.org/debian-security|g' \
+                "$BUILD_DIR/config/chroot_sources/security.${cfg}"
+            sed -i 's|jammy|bookworm-security|g' \
+                "$BUILD_DIR/config/chroot_sources/security.${cfg}"
+        fi
+    done
+
+    # Hook: clean up any inherited Ubuntu apt sources inside the chroot early
     cat > "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot" <<'HOOK'
 #!/bin/bash
 set -e
@@ -238,6 +248,11 @@ deb http://deb.debian.org/debian bookworm main
 deb http://security.debian.org/debian-security bookworm-security main
 deb http://deb.debian.org/debian bookworm-updates main
 EOF
+# Also fix any Ubuntu entries in sources.list.d
+if [ -d /etc/apt/sources.list.d ]; then
+    sed -i 's|security.ubuntu.com|security.debian.org/debian-security|g' \
+        /etc/apt/sources.list.d/*.list 2>/dev/null || true
+fi
 HOOK
     chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot"
 

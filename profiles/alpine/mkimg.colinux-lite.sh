@@ -10,7 +10,7 @@
 #       --outdir ./out --repository http://dl-cdn.alpinelinux.org/alpine/v3.21/main
 # =============================================================================
 
-profile_colinux_lite() {
+profile_colinux-lite() {
     profile_base
 
     # ── Identity ──────────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ profile_colinux_lite() {
 
 # Phase: create_image()
 #   Sets up the disk image with partition table.
-profile_colinux_lite_create_image() {
+profile_colinux-lite_create_image() {
     local img_size_mb="${COLINUX_IMG_SIZE:-800}"
     local img_size_sectors=$((img_size_mb * 2048))
 
@@ -98,14 +98,14 @@ EOF
 
 # Phase: build_kernel()
 #   Installs the kernel and generates initramfs.
-profile_colinux_lite_build_kernel() {
+profile_colinux-lite_build_kernel() {
     # Called automatically by mkimage — packages list drives kernel install
     return 0
 }
 
 # Phase: install_bootloader()
 #   Installs GRUB EFI onto the ESP.
-profile_colinux_lite_install_bootloader() {
+profile_colinux-lite_install_bootloader() {
     local mnt="$WORKDIR/esp"
     local boot_mnt="$WORKDIR/boot"
 
@@ -139,14 +139,14 @@ profile_colinux_lite_install_bootloader() {
 }
 
 # Phase: install_extlinux()  (fallback for BIOS boot on x86_64)
-profile_colinux_lite_install_extlinux() {
+profile_colinux-lite_install_extlinux() {
     # Only needed for legacy BIOS; EFI is primary
     return 0
 }
 
 # Phase: create_image_ext()
 #   Finalizes the ISO / raw image with squashfs root.
-profile_colinux_lite_create_image_ext() {
+profile_colinux-lite_create_image_ext() {
     # The mkimage framework handles ISO creation for us.
     # We add extra files via overlay.
     return 0
@@ -155,7 +155,7 @@ profile_colinux_lite_create_image_ext() {
 # =============================================================================
 # Overlay setup — files in overlay/ are copied into the rootfs
 # =============================================================================
-profile_colinux_lite_overlay() {
+profile_colinux-lite_overlay() {
     # Ensure overlay directories exist
     mkdir -p "$WORKDIR"/etc
     mkdir -p "$WORKDIR"/home/codex
