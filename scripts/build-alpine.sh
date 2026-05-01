@@ -230,7 +230,6 @@ run_mkimage() {
         --repository "${ALPINE_MIRROR}/edge/main" \
         --outdir "$OUTDIR" \
         --tag "v${ALPINE_RELEASE}" \
-        --yaml "$APORTS_DIR/scripts/mkimg.colinux-lite.sh" \
         || {
             log_error "mkimage.sh failed!"
             exit 1

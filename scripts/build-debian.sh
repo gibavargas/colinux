@@ -204,6 +204,7 @@ configure_lb() {
         --debian-installer none \
         --architectures amd64 \
         --archive-areas main \
+        --debootstrap-options "--exclude=ubuntu-keyring,ubuntu-minimal,ubuntu-advantage-tools" \
         --mirror-bootstrap http://deb.debian.org/debian \
         --mirror-chroot http://deb.debian.org/debian \
         --mirror-binary http://deb.debian.org/debian \
