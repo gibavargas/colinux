@@ -1,5 +1,5 @@
 # /etc/polkit-1/localauthority/50-local.d/codex-disk.pkla
-# CodexOS Desktop — Polkit rules for disk operations
+# CoLinux Desktop — Polkit rules for disk operations
 # Allows the 'codex' user to manage disks through udisks2 (GUI disk manager)
 # while maintaining the disk safety model through codex-* wrappers.
 

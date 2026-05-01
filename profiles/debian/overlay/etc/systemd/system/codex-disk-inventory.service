@@ -1,6 +1,6 @@
 [Unit]
-Description=CodexOS Desktop Disk Inventory Scanner
-Documentation=https://github.com/colinux/codexos
+Description=CoLinux Desktop Disk Inventory Scanner
+Documentation=https://github.com/gibavargas/colinux
 After=local-fs.target
 Before=codex-update.service codex-firstboot.service
 ConditionPathExists=/usr/local/bin/codex-disk-inventory

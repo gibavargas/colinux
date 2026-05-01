@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Lite — Alpine ISO Build Script
+# CoLinux Lite — Alpine ISO Build Script
 # =============================================================================
 # Builds a bootable Alpine Linux ISO with Codex CLI integrated.
 #
@@ -33,7 +33,7 @@ ALPINE_RELEASE="${ALPINE_RELEASE:-3.21}"
 ALPINE_MIRROR="${ALPINE_MIRROR:-http://dl-cdn.alpinelinux.org/alpine}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/dist}"
 APORTS_BRANCH="v${ALPINE_RELEASE}.0"
-APORTS_DIR="/tmp/aports-codexos"
+APORTS_DIR="/tmp/aports-colinux"
 CODEX_VERSION="${CODEX_VERSION:-latest}"
 
 # ── Colors (for TTY) ─────────────────────────────────────────────────────────
@@ -162,22 +162,22 @@ clone_aports() {
 
 # ── Step 3: Install custom profile into aports ──────────────────────────────
 install_profile() {
-    log_step "Installing codexos-lite profile into aports"
+    log_step "Installing colinux-lite profile into aports"
 
-    local profile_dest="$APORTS_DIR/scripts/mkimg.codexos-lite.sh"
+    local profile_dest="$APORTS_DIR/scripts/mkimg.colinux-lite.sh"
 
     # Copy the profile script
-    cp "$PROFILE_DIR/mkimg.codexos-lite.sh" "$profile_dest"
+    cp "$PROFILE_DIR/mkimg.colinux-lite.sh" "$profile_dest"
     chmod +x "$profile_dest"
 
     # Copy package lists
-    cp "$PROFILE_DIR/packages.$ARCH" "$APORTS_DIR/scripts/packages.codexos-lite.$ARCH"
+    cp "$PROFILE_DIR/packages.$ARCH" "$APORTS_DIR/scripts/packages.colinux-lite.$ARCH"
     # Also copy as the generic name for mkimage compatibility
-    cp "$PROFILE_DIR/packages.$ARCH" "$APORTS_DIR/scripts/packages.codexos-lite"
+    cp "$PROFILE_DIR/packages.$ARCH" "$APORTS_DIR/scripts/packages.colinux-lite"
 
     # Copy overlay directory
     if [ -d "$PROFILE_DIR/overlay" ]; then
-        local overlay_dest="$APORTS_DIR/scripts/codexos-lite/overlay"
+        local overlay_dest="$APORTS_DIR/scripts/colinux-lite/overlay"
         rm -rf "$overlay_dest"
         cp -a "$PROFILE_DIR/overlay" "$overlay_dest"
     fi
@@ -204,14 +204,14 @@ run_mkimage() {
     # --arch:        Target architecture
     # --outdir:      Where to put the result
     "$mkimage_script" \
-        --profile "codexos-lite" \
+        --profile "colinux-lite" \
         --arch "$ARCH" \
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/main" \
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/community" \
         --outdir "$OUTDIR" \
         --extra-repository "${ALPINE_MIRROR}/alpine/edge/main" \
         --tag "v${ALPINE_RELEASE}" \
-        --yaml "$APORTS_DIR/scripts/mkimg.codexos-lite.sh" \
+        --yaml "$APORTS_DIR/scripts/mkimg.colinux-lite.sh" \
         || {
             log_error "mkimage.sh failed!"
             exit 1
@@ -276,7 +276,7 @@ inject_codex() {
 
     # Find the ISO and mount it to inject the binary
     local iso_file
-    iso_file="$(find "$OUTDIR" -name 'codexos-lite-*.iso' | head -1)"
+    iso_file="$(find "$OUTDIR" -name 'colinux-lite-*.iso' | head -1)"
     if [ -z "$iso_file" ]; then
         log_error "Could not find built ISO in $OUTDIR"
         exit 1
@@ -369,12 +369,12 @@ inject_codex() {
                 -e boot/grub/efi.img \
                 -no-emul-boot \
                 -isohybrid-gpt-basdat \
-                -V "CODEXOS" \
+                -V "COLINUX" \
                 "$iso_staging" 2>/dev/null || {
                 log_warn "xorriso repack failed. Trying genisoimage..."
                 if command -v genisoimage &>/dev/null; then
                     genisoimage -o "$repacked_iso" \
-                        -R -J -V "CODEXOS" \
+                        -R -J -V "COLINUX" \
                         -b boot/isolinux/isolinux.bin \
                         -c boot/boot.cat \
                         -no-emul-boot \
@@ -396,7 +396,7 @@ inject_codex() {
                 -eltorito-alt-boot \
                 -e boot/grub/efi.img \
                 -no-emul-boot \
-                -V "CODEXOS" \
+                -V "COLINUX" \
                 "$iso_staging" 2>/dev/null || {
                 log_warn "xorriso repack failed for $ARCH."
                 repacked_iso=""
@@ -404,7 +404,7 @@ inject_codex() {
         fi
     elif command -v genisoimage &>/dev/null; then
         genisoimage -o "$repacked_iso" \
-            -R -J -V "CODEXOS" \
+            -R -J -V "COLINUX" \
             "$iso_staging" 2>/dev/null || {
             log_warn "genisoimage failed."
             repacked_iso=""
@@ -429,7 +429,7 @@ create_raw_image() {
     log_step "Creating raw disk image"
 
     local iso_file
-    iso_file="$(find "$OUTDIR" -name 'codexos-lite-*.iso' | head -1)"
+    iso_file="$(find "$OUTDIR" -name 'colinux-lite-*.iso' | head -1)"
     if [ -z "$iso_file" ]; then
         log_warn "No ISO found, skipping raw image creation."
         return 0
@@ -529,7 +529,7 @@ print_summary() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
-    log_step "CodexOS Lite Build — $ARCH / Alpine $ALPINE_RELEASE"
+    log_step "CoLinux Lite Build — $ARCH / Alpine $ALPINE_RELEASE"
 
     check_root
     check_arch

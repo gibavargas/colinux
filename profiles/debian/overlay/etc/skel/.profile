@@ -1,7 +1,7 @@
-# /etc/skel/.profile — CodexOS Desktop user skeleton
+# /etc/skel/.profile — CoLinux Desktop user skeleton
 # Copied to /home/codex on first user creation
 
-# CodexOS additions
+# CoLinux additions
 export PATH="$PATH:/usr/local/bin"
 export EDITOR="${EDITOR:-vim}"
 export VISUAL="${VISUAL:-vim}"

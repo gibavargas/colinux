@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Setup Codex Desktop (Electron) App
+# CoLinux Desktop — Setup Codex Desktop (Electron) App
 # =============================================================================
 # Downloads the latest Codex Desktop release from OpenAI, wraps it in an
 # Electron shell for Linux, and installs it to /opt/codex-desktop/.
@@ -366,7 +366,7 @@ create_launcher_script() {
 
     cat > "$launcher" <<'LAUNCHER_EOF'
 #!/usr/bin/env bash
-# CodexOS Desktop — Codex Desktop Launcher
+# CoLinux Desktop — Codex Desktop Launcher
 # Launches the Codex Desktop Electron application.
 set -euo pipefail
 
@@ -478,7 +478,7 @@ verify_installation() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
-    log_step "CodexOS Desktop — Codex Desktop Setup"
+    log_step "CoLinux Desktop — Codex Desktop Setup"
 
     if $BUILD_DEPS_ONLY; then
         install_build_deps

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Disk Backup Tool
+# CoLinux Desktop — Disk Backup Tool
 # =============================================================================
 # Creates a backup image of a block device. Safety feature: warns about write
 # operations and creates verified backups.
@@ -87,7 +87,7 @@ DEV_SIZE_GB=$((DEV_SIZE_BYTES / 1073741824))
 AVAIL_GB=$(df -BG --output=avail "$(dirname "$OUTPUT")" 2>/dev/null | tail -1 | tr -d 'G ')
 
 echo "╔══════════════════════════════════════╗"
-echo "║     CodexOS Disk Backup              ║"
+echo "║     CoLinux Disk Backup              ║"
 echo "╠══════════════════════════════════════╣"
 echo "║ Device:  $(printf '%-27s' "$DEV")║"
 echo "║ Size:    $(printf '%-6s' "${DEV_SIZE_GB}G")                      ║"

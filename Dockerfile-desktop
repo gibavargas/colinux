@@ -1,12 +1,12 @@
-# CodexOS Desktop — Development & Testing Container
-# Simulates the Alpine-based CodexOS Desktop environment (GNOME + Electron)
+# CoLinux Desktop — Development & Testing Container
+# Simulates the Alpine-based CoLinux Desktop environment (GNOME + Electron)
 # Note: Cannot run GNOME in Docker, but validates scripts and package install.
-# Usage: docker build -t codexos-desktop -f Dockerfile-desktop . && docker run -it codexos-desktop
+# Usage: docker build -t colinux-desktop -f Dockerfile-desktop . && docker run -it colinux-desktop
 
 FROM alpine:3.21
 
 LABEL maintainer="CoLinux Project"
-LABEL description="CodexOS Desktop (Alpine + GNOME + Electron) test environment"
+LABEL description="CoLinux Desktop (Alpine + GNOME + Electron) test environment"
 LABEL version="0.1.0"
 
 # Install all packages from the desktop edition (minus GNOME-specific display deps)
@@ -86,8 +86,8 @@ RUN mkdir -p /run/codex \
     /mnt/disks/by-uuid \
     /mnt/disks/by-device \
     /var/cache/apk \
-    /var/lib/codexos \
-    /usr/local/lib/codexos \
+    /var/lib/colinux \
+    /usr/local/lib/colinux \
     /opt/codex-desktop/config \
     /etc/gdm \
     /etc/dconf/profile \
@@ -135,7 +135,7 @@ COPY profiles/alpine/overlay-desktop/etc/init.d/ /etc/init.d/
 RUN chmod +x /etc/init.d/codex-* 2>/dev/null || true
 
 # Install system configs
-COPY profiles/alpine/overlay/etc/profile /etc/profile.d/codexos.sh
+COPY profiles/alpine/overlay/etc/profile /etc/profile.d/colinux.sh
 COPY profiles/alpine/overlay/etc/motd /etc/motd
 COPY profiles/alpine/overlay/etc/config/auto-update.conf /persist/config/auto-update.conf
 
@@ -148,11 +148,11 @@ RUN chown -R codex:codex /home/codex
 # Create mock codex binary for testing
 RUN printf '%s\n' \
     '#!/bin/bash' \
-    '# CodexOS — Codex CLI placeholder (desktop edition)' \
+    '# CoLinux — Codex CLI placeholder (desktop edition)' \
     'VERSION="${CODEX_VERSION:-0.1.0-placeholder}"' \
-    'if [ "$1" = "--version" ]; then echo "codex $VERSION (CodexOS Desktop placeholder)"; exit 0; fi' \
-    'if [ "$1" = "--help" ]; then echo "CodexOS Desktop - OpenAI Codex CLI placeholder"; echo "Run: setup-codex --install"; exit 0; fi' \
-    'echo "CodexOS Desktop - Codex CLI Placeholder"' \
+    'if [ "$1" = "--version" ]; then echo "codex $VERSION (CoLinux Desktop placeholder)"; exit 0; fi' \
+    'if [ "$1" = "--help" ]; then echo "CoLinux Desktop - OpenAI Codex CLI placeholder"; echo "Run: setup-codex --install"; exit 0; fi' \
+    'echo "CoLinux Desktop - Codex CLI Placeholder"' \
     'echo "To install real Codex binary: setup-codex --install"' \
     'exec bash' \
     > /usr/local/bin/codex && chmod +x /usr/local/bin/codex

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Read-Only Mount Wrapper
+# CoLinux Desktop — Read-Only Mount Wrapper
 # =============================================================================
 # Safely mounts a block device read-only for inspection. Part of the disk-safety
 # model — all user-facing disk operations should go through this or codexctl.

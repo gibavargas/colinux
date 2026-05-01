@@ -1,5 +1,5 @@
 [Unit]
-Description=CodexOS Compat First-Boot Setup
+Description=CoLinux Compat First-Boot Setup
 After=network.target network-online.target
 Wants=network-online.target
 Before=codex-disk-inventory.service codex-auto-update.service
@@ -11,7 +11,7 @@ RemainAfterExit=yes
 TimeoutStartSec=300
 StandardOutput=journal
 StandardError=journal
-ConditionPathExists=!/var/lib/codexos/.first-boot-done
+ConditionPathExists=!/var/lib/colinux/.first-boot-done
 
 [Install]
 WantedBy=multi-user.target

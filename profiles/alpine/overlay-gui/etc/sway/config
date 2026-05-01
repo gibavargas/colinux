@@ -1,4 +1,4 @@
-# CodexOS Lite GUI — Sway Configuration
+# CoLinux Lite GUI — Sway Configuration
 # Minimal sway config: borderless fullscreen terminal running codex-shell-gui
 # This is used as a fallback compositor if cage is not available.
 
@@ -23,7 +23,7 @@ output * {
 # =============================================================================
 set $mod Mod4
 
-bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit CodexOS GUI?' -b 'Yes' 'swaymsg exit'
+bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit CoLinux GUI?' -b 'Yes' 'swaymsg exit'
 bindsym $mod+Shift+Escape exec killall foot || killall sway
 bindsym Print exec "mkdir -p /persist/logs && grim /persist/logs/screenshot-$(date +%Y%m%d-%H%M%S).png"
 

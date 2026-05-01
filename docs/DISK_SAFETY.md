@@ -1,6 +1,6 @@
 # Disk Safety
 
-This document provides the complete specification of CodexOS Lite's disk safety model — the most critical security feature of the appliance.
+This document provides the complete specification of CoLinux Lite's disk safety model — the most critical security feature of the appliance.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ This document provides the complete specification of CodexOS Lite's disk safety 
 
 ## Philosophy
 
-CodexOS Lite's primary use case involves connecting to machines with unknown disks — potentially containing valuable data, evidence, or critical system configurations. The disk safety model is built on a single principle:
+CoLinux Lite's primary use case involves connecting to machines with unknown disks — potentially containing valuable data, evidence, or critical system configurations. The disk safety model is built on a single principle:
 
 > **Data is irreplaceable. Operations are not.**
 
@@ -138,7 +138,7 @@ The safety phrase prevents accidental confirmation — it requires the operator 
 
 ### Phrase bank
 
-Phrases are randomly selected from `/usr/share/codexos/safety-phrases`:
+Phrases are randomly selected from `/usr/share/colinux/safety-phrases`:
 
 ```
 # 3-word phrases (standard operations)
@@ -236,14 +236,14 @@ Deactivation requires a 5-word safety phrase and logs the event.
 
 ## Boot Device Protection
 
-The boot device (the USB drive or medium from which CodexOS Lite booted) receives special, non-bypassable protection:
+The boot device (the USB drive or medium from which CoLinux Lite booted) receives special, non-bypassable protection:
 
-1. **Identification**: At boot, the device containing `/boot/` or the ISO label is recorded in `/run/codexos/boot-device`.
+1. **Identification**: At boot, the device containing `/boot/` or the ISO label is recorded in `/run/colinux/boot-device`.
 2. **Hard exclusion**: The boot device is **always excluded** from disk inventory, mount operations, and write operations.
 3. **Immutable flag**: The boot device node is set to `immutable` via `chattr +i` (where supported by the filesystem).
 4. **No override**: There is no flag, argument, or configuration that can disable boot device protection.
 
-This is the one absolute, non-negotiable safety rule in CodexOS Lite.
+This is the one absolute, non-negotiable safety rule in CoLinux Lite.
 
 ---
 
@@ -317,7 +317,7 @@ YYYY-MM-DD HH:MM:SS [LEVEL] component: message
 1. There is **no recovery mechanism** for a lost LUKS passphrase.
 2. You can reset persistence by booting with the `nopersist` kernel parameter:
    ```
-   boot: codexos nopersist
+   boot: colinux nopersist
    ```
 3. Then create a new persistence partition with `codexctl persistence setup`.
 

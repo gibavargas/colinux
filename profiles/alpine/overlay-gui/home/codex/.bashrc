@@ -1,5 +1,5 @@
 #!/bin/bash
-# /home/codex/.bashrc — CodexOS Lite GUI Edition
+# /home/codex/.bashrc — CoLinux Lite GUI Edition
 # Sources workspace context (AGENTS.md), sets up environment for GUI sessions.
 
 # ── Prevent re-sourcing in non-interactive shells ────────────────────────────

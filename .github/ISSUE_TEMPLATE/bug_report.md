@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug or unexpected behavior in CodexOS
+about: Report a bug or unexpected behavior in CoLinux
 title: "[BUG] "
 labels: bug, triage
 assignees: ""
@@ -14,7 +14,7 @@ assignees: ""
 
 | Field | Value |
 |-------|-------|
-| **Edition** | `codexos-lite` / `codexos-lite-gui` / `codexos-compat` / `codexos-desktop` |
+| **Edition** | `colinux-lite` / `colinux-lite-gui` / `colinux-compat` / `colinux-desktop` |
 | **Version / Commit** | e.g. `v0.1.0` or full SHA |
 | **Architecture** | `x86_64` / `aarch64` |
 | **Boot mode** | UEFI / Legacy BIOS |

@@ -53,7 +53,7 @@ jobs:
       - name: Generate checksums
         working-directory: dist
         run: |
-          sha256sum codexos-desktop-* > SHA256SUMS-debian.txt 2>/dev/null || true
+          sha256sum colinux-desktop-* > SHA256SUMS-debian.txt 2>/dev/null || true
           cat SHA256SUMS-debian.txt 2>/dev/null || echo "No desktop artifacts to checksum"
 
       - name: Upload ISO artifact
@@ -61,8 +61,8 @@ jobs:
         with:
           name: debian-desktop-iso
           path: |
-            dist/codexos-desktop-*.iso
-            dist/codexos-desktop-*.img.gz
+            dist/colinux-desktop-*.iso
+            dist/colinux-desktop-*.img.gz
             dist/SHA256SUMS-debian.txt
           retention-days: 14
           if-no-files-found: warn
@@ -72,8 +72,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/codexos-desktop-*.iso
-            dist/codexos-desktop-*.img.gz
+            dist/colinux-desktop-*.iso
+            dist/colinux-desktop-*.img.gz
             dist/SHA256SUMS-debian.txt
           draft: false
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}

@@ -1,5 +1,5 @@
 # =============================================================================
-# CodexOS Lite GUI — x86_64 Package List
+# CoLinux Lite GUI — x86_64 Package List
 # =============================================================================
 # Includes ALL packages from the lite edition plus Wayland/GUI stack.
 # Boots directly into cage (Wayland kiosk) running foot terminal + Codex CLI.

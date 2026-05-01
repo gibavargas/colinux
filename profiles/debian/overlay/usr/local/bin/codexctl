@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Master Control Tool (codexctl)
+# CoLinux Desktop — Master Control Tool (codexctl)
 # =============================================================================
-# Central CLI for managing CodexOS Desktop. Mirrors the lite edition's codexctl
+# Central CLI for managing CoLinux Desktop. Mirrors the lite edition's codexctl
 # with additions for desktop-specific operations.
 #
 # Usage:
@@ -40,7 +40,7 @@ info() { echo -e "${BLUE}→${NC} $*"; }
 
 # ── Status ───────────────────────────────────────────────────────────────────
 cmd_status() {
-    echo "═══ CodexOS Desktop Status ═══"
+    echo "═══ CoLinux Desktop Status ═══"
     echo ""
 
     # System info
@@ -161,11 +161,11 @@ cmd_rollback() {
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 cmd_setup() {
-    if [ -x /opt/codexos-setup/setup-codex-desktop.sh ]; then
+    if [ -x /opt/colinux-setup/setup-codex-desktop.sh ]; then
         info "Running Codex Desktop setup..."
-        sudo /opt/codexos-setup/setup-codex-desktop.sh
+        sudo /opt/colinux-setup/setup-codex-desktop.sh
     else
-        err "Setup script not found at /opt/codexos-setup/setup-codex-desktop.sh"
+        err "Setup script not found at /opt/colinux-setup/setup-codex-desktop.sh"
         exit 1
     fi
 }
@@ -330,7 +330,7 @@ cmd_logs() {
 
 # ── Version ──────────────────────────────────────────────────────────────────
 cmd_version() {
-    echo "CodexOS Desktop v$VERSION"
+    echo "CoLinux Desktop v$VERSION"
     echo ""
 
     info "Codex Desktop"
@@ -345,7 +345,7 @@ cmd_version() {
     echo ""
 
     info "System"
-    echo "  CodexOS:     codexos-desktop"
+    echo "  CoLinux:     colinux-desktop"
     echo "  Base:        Debian $(cat /etc/debian_version 2>/dev/null || echo 'unknown')"
     echo "  Kernel:      $(uname -r)"
 }
@@ -353,7 +353,7 @@ cmd_version() {
 # ── Help ─────────────────────────────────────────────────────────────────────
 cmd_help() {
     cat <<'HELP'
-CodexOS Desktop — Control Tool v1.0.0
+CoLinux Desktop — Control Tool v1.0.0
 
 Usage: codexctl <command> [options]
 

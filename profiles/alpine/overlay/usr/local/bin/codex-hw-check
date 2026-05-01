@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-hw-check — Hardware diagnostics for CodexOS
-# Part of CodexOS Lite
+# codex-hw-check — Hardware diagnostics for CoLinux
+# Part of CoLinux Lite
 #
 # Usage:
 #   codex-hw-check              Run full diagnostics
@@ -201,7 +201,7 @@ if [[ "$OUTPUT_FMT" == "json" ]]; then
 fi
 
 echo "======================================"
-echo "  CodexOS Hardware Diagnostics"
+echo "  CoLinux Hardware Diagnostics"
 echo "======================================"
 echo ""
 

@@ -1,6 +1,6 @@
 # Security
 
-This document describes the security architecture, threat model, and guarantees of CodexOS Lite.
+This document describes the security architecture, threat model, and guarantees of CoLinux Lite.
 
 ## Table of Contents
 
@@ -17,7 +17,7 @@ This document describes the security architecture, threat model, and guarantees 
 
 ## Threat Model
 
-### What CodexOS Lite protects against
+### What CoLinux Lite protects against
 
 | Threat | Protection |
 |---|---|
@@ -29,7 +29,7 @@ This document describes the security architecture, threat model, and guarantees 
 | **Silent operations** on disks | All disk operations are logged with timestamps and SHA-256 verification |
 | **Compromised Codex CLI version** | Auto-update from verified channels; optional pinned versions |
 
-### What CodexOS Lite does NOT protect against
+### What CoLinux Lite does NOT protect against
 
 | Threat | Notes |
 |---|---|
@@ -43,7 +43,7 @@ This document describes the security architecture, threat model, and guarantees 
 
 ## Disk Safety Guarantees
 
-CodexOS Lite provides the following *safety invariants*:
+CoLinux Lite provides the following *safety invariants*:
 
 1. **No disk is ever written to without explicit human confirmation.** This is enforced at the `safe-mount` and `safe-write` wrapper level, not just by convention.
 
@@ -74,7 +74,7 @@ The `codex` user's `doas.conf` restricts privilege escalation to a strict whitel
 
 ```
 # /etc/doas.conf
-# CodexOS Lite — doas rules for the codex user
+# CoLinux Lite — doas rules for the codex user
 
 # Allow codex to run disk safety wrappers
 permit nopass codex as root cmd /usr/local/bin/safe-mount
@@ -191,7 +191,7 @@ When forensic mode is activated (`codexctl forensic on`):
 
 ## Reporting Vulnerabilities
 
-If you discover a security vulnerability in CodexOS Lite, please report it responsibly:
+If you discover a security vulnerability in CoLinux Lite, please report it responsibly:
 
 1. **Email**: security@colinux.dev (PGP key available on request)
 2. **GitHub**: Open a **draft** security advisory (recommended for code-level issues)
@@ -212,7 +212,7 @@ We will acknowledge your report within 48 hours and aim to provide a fix or miti
 
 ## Signed Releases Plan
 
-CodexOS Lite plans to implement release signing in a future version:
+CoLinux Lite plans to implement release signing in a future version:
 
 - **ISO images** will be signed with an Ed25519 key.
 - **Verification** will be available via `sha256sum` + `.sig` files and an `openssl` one-liner.

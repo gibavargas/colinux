@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-install-pc — Install CodexOS to an internal disk (NVMe or SATA)
-# Part of CodexOS Lite
+# codex-install-pc — Install CoLinux to an internal disk (NVMe or SATA)
+# Part of CoLinux Lite
 #
 # Usage: codex-install-pc [OPTIONS] /dev/nvmeXnX | /dev/sdX
 #
@@ -19,7 +19,7 @@ set -euo pipefail
 
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/disk-actions.log"
-CODEXOS_IMAGE_DIR="${CODEXOS_IMAGE_DIR:-/opt/codexos}"
+COLINUX_IMAGE_DIR="${COLINUX_IMAGE_DIR:-/opt/colinux}"
 
 mkdir -p "$LOG_DIR"
 
@@ -40,12 +40,12 @@ usage() {
     cat <<EOF
 Usage: codex-install-pc [OPTIONS] /dev/nvmeXnX | /dev/sdX
 
-Install CodexOS to an internal disk (NVMe or SATA SSD/HDD).
+Install CoLinux to an internal disk (NVMe or SATA SSD/HDD).
 
 Options:
-  --replace         Wipe entire disk and install CodexOS (default)
+  --replace         Wipe entire disk and install CoLinux (default)
   --external        Install to an external SSD via USB adapter
-  --dual-boot       Preserve existing OS — only add CodexOS partitions
+  --dual-boot       Preserve existing OS — only add CoLinux partitions
   --efi-size N      Size in MB for EFI partition (default: 512)
   --system-size N   Size in MB for system partition (default: 4096)
   --no-confirm      Skip interactive confirmation (DANGEROUS)
@@ -67,7 +67,7 @@ MODE="replace"
 DEVICE=""
 EFI_SIZE=512
 SYSTEM_SIZE=4096
-VOLUME_LABEL="CODEXOS"
+VOLUME_LABEL="COLINUX"
 DUAL_BOOT=false
 EXTERNAL=false
 NO_CONFIRM=false
@@ -181,7 +181,7 @@ fi
 
 # ── Display device info and confirm ──────────────────────────────────────
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║          CODEXOS PC INSTALLER                        ║"
+echo "║          COLINUX PC INSTALLER                        ║"
 echo "╠══════════════════════════════════════════════════════╣"
 echo "║  Device:    $DEVICE"
 echo "║  Model:     $MODEL"
@@ -278,10 +278,10 @@ fi
 
 # System partition
 sfdisk_part_end="+${SYSTEM_SIZE}M"
-sgdisk -n ${P2_NUM}:0:+"${SYSTEM_SIZE}M" -t ${P2_NUM}:8300 -c ${P2_NUM}:"CodexOS System" "$DEVICE" >/dev/null 2>&1
+sgdisk -n ${P2_NUM}:0:+"${SYSTEM_SIZE}M" -t ${P2_NUM}:8300 -c ${P2_NUM}:"CoLinux System" "$DEVICE" >/dev/null 2>&1
 
 # Persistence partition (LUKS)
-sgdisk -n ${P3_NUM}:0:0 -t ${P3_NUM}:8300 -c ${P3_NUM}:"CodexOS Persistence" "$DEVICE" >/dev/null 2>&1
+sgdisk -n ${P3_NUM}:0:0 -t ${P3_NUM}:8300 -c ${P3_NUM}:"CoLinux Persistence" "$DEVICE" >/dev/null 2>&1
 
 # Wait for kernel to re-read partition table
 sleep 2
@@ -346,14 +346,14 @@ TEMP_MOUNT="$(mktemp -d)"
 
 # Copy system image
 mount "$PART2" "$TEMP_MOUNT"
-if [[ -f "${CODEXOS_IMAGE_DIR}/system.squashfs" ]]; then
-    cp "${CODEXOS_IMAGE_DIR}/system.squashfs" "$TEMP_MOUNT/"
+if [[ -f "${COLINUX_IMAGE_DIR}/system.squashfs" ]]; then
+    cp "${COLINUX_IMAGE_DIR}/system.squashfs" "$TEMP_MOUNT/"
     echo "  → Copied system.squashfs"
-elif [[ -d "${CODEXOS_IMAGE_DIR}/rootfs" ]]; then
-    cp -a "${CODEXOS_IMAGE_DIR}/rootfs/"* "$TEMP_MOUNT/"
+elif [[ -d "${COLINUX_IMAGE_DIR}/rootfs" ]]; then
+    cp -a "${COLINUX_IMAGE_DIR}/rootfs/"* "$TEMP_MOUNT/"
     echo "  → Copied root filesystem"
 else
-    echo "  WARNING: No system image found at ${CODEXOS_IMAGE_DIR}/"
+    echo "  WARNING: No system image found at ${COLINUX_IMAGE_DIR}/"
     echo "  System partition is prepared but empty."
 fi
 umount "$TEMP_MOUNT"
@@ -365,25 +365,25 @@ mount "$PART1" "$TEMP_MOUNT"
 
 # Create EFI directory structure
 mkdir -p "$TEMP_MOUNT/EFI/BOOT"
-mkdir -p "$TEMP_MOUNT/EFI/codexos"
+mkdir -p "$TEMP_MOUNT/EFI/colinux"
 
 # Copy kernel and initramfs
-if [[ -f "${CODEXOS_IMAGE_DIR}/boot/vmlinuz-lts" ]]; then
-    cp "${CODEXOS_IMAGE_DIR}/boot/vmlinuz-lts" "$TEMP_MOUNT/"
+if [[ -f "${COLINUX_IMAGE_DIR}/boot/vmlinuz-lts" ]]; then
+    cp "${COLINUX_IMAGE_DIR}/boot/vmlinuz-lts" "$TEMP_MOUNT/"
     echo "  → Copied kernel"
 fi
-if [[ -f "${CODEXOS_IMAGE_DIR}/boot/initramfs-lts" ]]; then
-    cp "${CODEXOS_IMAGE_DIR}/boot/initramfs-lts" "$TEMP_MOUNT/"
+if [[ -f "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" ]]; then
+    cp "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" "$TEMP_MOUNT/"
     echo "  → Copied initramfs"
 fi
 
 # Copy EFI bootloader
-if [[ -f "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
-    cp -a "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/BOOT/"
+if [[ -f "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
+    cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/BOOT/"
 elif command -v grub-install &>/dev/null; then
     grub-install --target=x86_64-efi --efi-directory="$TEMP_MOUNT" \
                  --boot-directory="$TEMP_MOUNT" \
-                 --bootloader-id="CodexOS" \
+                 --bootloader-id="CoLinux" \
                  --recheck "$DEVICE" >/dev/null 2>&1 || {
         echo "  WARNING: grub-install failed, trying --removable fallback..."
         grub-install --target=x86_64-efi --efi-directory="$TEMP_MOUNT" \
@@ -396,8 +396,8 @@ fi
 PARTUUID_SYSTEM="$(blkid -s PARTUUID -o value "$PART2" 2>/dev/null || echo "unknown")"
 PARTUUID_PERSIST="$(blkid -s PARTUUID -o value "$PART3" 2>/dev/null || echo "unknown")"
 
-cat > "$TEMP_MOUNT/EFI/codexos/codexos.conf" <<BOOTCFG
-title CodexOS Lite
+cat > "$TEMP_MOUNT/EFI/colinux/colinux.conf" <<BOOTCFG
+title CoLinux Lite
 linux /vmlinuz-lts
 initrd /initramfs-lts
 options quiet splash root=PARTUUID=${PARTUUID_SYSTEM} ro cryptroot=PARTUUID=${PARTUUID_PERSIST}
@@ -410,8 +410,8 @@ rmdir "$TEMP_MOUNT"
 # ── Install EFI boot entry (NVRAM) ────────────────────────────────────────
 if command -v efibootmgr &>/dev/null && [[ "$DUAL_BOOT" != true ]]; then
     efibootmgr --create --disk "$DEVICE" --part ${P1_NUM} \
-               --loader "/EFI/codexos/BOOTX64.EFI" \
-               --label "CodexOS" \
+               --loader "/EFI/colinux/BOOTX64.EFI" \
+               --label "CoLinux" \
                --unicode 2>/dev/null || true
     echo "  → Added EFI boot entry"
 fi
@@ -430,7 +430,7 @@ codex_install_external=$EXTERNAL
 META
 
 echo ""
-echo "✓ CodexOS PC installation complete!"
+echo "✓ CoLinux PC installation complete!"
 echo "  Device:  $DEVICE ($MODEL, $SERIAL)"
 echo "  Mode:    $MODE"
 if [[ "$EXTERNAL" == true ]]; then
@@ -440,6 +440,6 @@ echo ""
 echo "  Partitions:"
 sgdisk -p "$DEVICE" 2>/dev/null || lsblk "$DEVICE"
 echo ""
-echo "Reboot to start CodexOS from this disk."
+echo "Reboot to start CoLinux from this disk."
 
 log_action "COMPLETE mode=$MODE device=$DEVICE serial=$SERIAL external=$EXTERNAL"

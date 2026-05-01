@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-shell-compat — Default login shell for the codex user on Debian compat
-# Part of CodexOS Compat
+# Part of CoLinux Compat
 #
 # Sets up the tmux workspace with:
 #   Pane 0: Codex CLI session
@@ -79,7 +79,7 @@ tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 tmux new-session -d -s "$SESSION_NAME" -x "$(tput cols 2>/dev/null || echo 80)" -y "$(tput lines 2>/dev/null || echo 24)"
 
 # ── Pane 0: Codex CLI ─────────────────────────────────────────────────────
-tmux send-keys -t "$SESSION_NAME:0" 'echo "Welcome to CodexOS Compat (Debian)"; echo ""; if command -v codex &>/dev/null; then codex; else echo "Codex CLI not found. Run: codex-update"; fi' C-m
+tmux send-keys -t "$SESSION_NAME:0" 'echo "Welcome to CoLinux Compat (Debian)"; echo ""; if command -v codex &>/dev/null; then codex; else echo "Codex CLI not found. Run: codex-update"; fi' C-m
 tmux rename-window -t "$SESSION_NAME:0" "codex"
 
 # ── Pane 1: System monitor / logs ─────────────────────────────────────────
@@ -94,9 +94,9 @@ tmux send-keys -t "$SESSION_NAME:0.2" 'export PS1="\[\e[1;34m\]shell\[\e[0m\]:\w
 tmux select-pane -t "$SESSION_NAME:0.0"
 
 # ── Attach ────────────────────────────────────────────────────────────────
-echo "Starting CodexOS Compat environment..."
+echo "Starting CoLinux Compat environment..."
 echo ""
-echo "  Edition: CodexOS Compat (Debian GNU/Linux)"
+echo "  Edition: CoLinux Compat (Debian GNU/Linux)"
 echo "  Pane layout:"
 echo "    [codex]      — Codex CLI interface"
 echo "    [monitor]    — System monitor (auto-refreshing)"

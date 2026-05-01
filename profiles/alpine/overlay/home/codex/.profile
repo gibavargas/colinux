@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# CodexOS Lite — codex user profile (~/.profile)
+# CoLinux Lite — codex user profile (~/.profile)
 # =============================================================================
 # This file is sourced on login.  It prepares the environment and optionally
 # launches the Codex shell (codex-shell) for a seamless CLI-first experience.

@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-shell — Default login shell for the codex user
-# Part of CodexOS Lite
+# Part of CoLinux Lite
 #
 # Sets up the tmux workspace with:
 #   Pane 0: Codex CLI session
@@ -100,7 +100,7 @@ fi
 
 # Reattach existing session or create new one
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-    echo "Attaching to existing CodexOS session..."
+    echo "Attaching to existing CoLinux session..."
     exec tmux attach-session -t "$SESSION_NAME"
 fi
 
@@ -108,7 +108,7 @@ fi
 tmux new-session -d -s "$SESSION_NAME" -x "$(tput cols 2>/dev/null || echo 80)" -y "$(tput lines 2>/dev/null || echo 24)"
 
 # ── Pane 0: Codex CLI ─────────────────────────────────────────────────────
-tmux send-keys -t "$SESSION_NAME:0" 'echo "Welcome to CodexOS Lite"; echo ""; if command -v codex &>/dev/null; then codex; else echo "Codex CLI not found. Run: codex-update"; fi' C-m
+tmux send-keys -t "$SESSION_NAME:0" 'echo "Welcome to CoLinux Lite"; echo ""; if command -v codex &>/dev/null; then codex; else echo "Codex CLI not found. Run: codex-update"; fi' C-m
 tmux rename-window -t "$SESSION_NAME:0" "codex"
 
 # ── Pane 1: System monitor / logs ─────────────────────────────────────────
@@ -123,7 +123,7 @@ tmux send-keys -t "$SESSION_NAME:0.2" 'export PS1="\[\e[1;34m\]shell\[\e[0m\]:\w
 tmux select-pane -t "$SESSION_NAME:0.0"
 
 # ── Attach ────────────────────────────────────────────────────────────────
-echo "Starting CodexOS environment..."
+echo "Starting CoLinux environment..."
 echo ""
 echo "  Pane layout:"
 echo "    [codex]      — Codex CLI interface"

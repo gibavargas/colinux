@@ -1,4 +1,4 @@
-# CodexOS Shared Packages — Debian Camoufox Dependencies
+# CoLinux Shared Packages — Debian Camoufox Dependencies
 # Python toolchain + system libraries needed for camoufox browser integration
 
 python3

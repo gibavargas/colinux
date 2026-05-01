@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-update — Update CodexOS system and Codex CLI binary
-# Part of CodexOS Lite
+# codex-update — Update CoLinux system and Codex CLI binary
+# Part of CoLinux Lite
 #
 # Updates:
 #   1. Codex CLI binary (downloads from GitHub releases with checksum verification)
@@ -314,7 +314,7 @@ update_system() {
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────
-echo "CodexOS Update"
+echo "CoLinux Update"
 echo "=============="
 echo ""
 

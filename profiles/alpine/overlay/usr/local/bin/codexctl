@@ -1,8 +1,8 @@
 #!/bin/bash
-# codexctl — CodexOS control surface / dispatcher
-# Part of CodexOS Lite
+# codexctl — CoLinux control surface / dispatcher
+# Part of CoLinux Lite
 #
-# Central command that dispatches to all CodexOS tools.
+# Central command that dispatches to all CoLinux tools.
 #
 # Usage: codexctl <COMMAND> [OPTIONS]
 #
@@ -15,15 +15,15 @@
 #   persist         Show persistence partition status
 #   update          Update Codex CLI and Alpine packages
 #   update --check  Check for updates only
-#   install-usb     Install CodexOS to USB drive
-#   install-pc      Install CodexOS to internal disk
+#   install-usb     Install CoLinux to USB drive
+#   install-pc      Install CoLinux to internal disk
 #   network         Network setup / status
 #   logs            View system logs
 #   logs --follow   Follow log output
 #   backup          Create a backup snapshot
 #   backup --list   List existing backups
 #   restore FILE    Safely restore a backup
-#   version         Show CodexOS and Codex CLI versions
+#   version         Show CoLinux and Codex CLI versions
 set -euo pipefail
 
 PERSIST_DIR="/persist"
@@ -31,7 +31,7 @@ LOG_DIR="${PERSIST_DIR}/logs"
 STATE_DIR="${PERSIST_DIR}/state"
 LOGFILE="${LOG_DIR}/codexctl.log"
 CODEX_BIN="/usr/local/bin/codex"
-CODEXOS_VERSION="${CODEXOS_VERSION:-0.1.0}"
+COLINUX_VERSION="${COLINUX_VERSION:-0.1.0}"
 
 mkdir -p "$LOG_DIR" "$STATE_DIR"
 
@@ -65,8 +65,8 @@ try_root() {
 
 # ── Command: version ──────────────────────────────────────────────────────
 cmd_version() {
-    echo "codexctl ${CODEXOS_VERSION}"
-    echo "CodexOS Lite — Alpine Linux + Codex CLI appliance"
+    echo "codexctl ${COLINUX_VERSION}"
+    echo "CoLinux Lite — Alpine Linux + Codex CLI appliance"
     echo ""
 
     if cmd_exists codex; then
@@ -94,7 +94,7 @@ cmd_status() {
         fi
 
         jq -n \
-            --arg codexos_ver "$CODEXOS_VERSION" \
+            --arg colinux_ver "$COLINUX_VERSION" \
             --arg codex_ver "$codex_ver" \
             --arg kernel "$(uname -r)" \
             --arg arch "$(uname -m)" \
@@ -102,7 +102,7 @@ cmd_status() {
             --arg uptime "$(uptime -p 2>/dev/null || uptime)" \
             --arg date "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
             '{
-                codexos_version: $codexos_ver,
+                colinux_version: $colinux_ver,
                 codex_cli: $codex_ver,
                 kernel: $kernel,
                 arch: $arch,
@@ -114,9 +114,9 @@ cmd_status() {
     fi
 
     echo "╔══════════════════════════════════════════╗"
-    echo "║         CODEXOS STATUS                   ║"
+    echo "║         COLINUX STATUS                   ║"
     echo "╠══════════════════════════════════════════╣"
-    echo "║  CodexOS:  v${CODEXOS_VERSION}"
+    echo "║  CoLinux:  v${COLINUX_VERSION}"
 
     if cmd_exists codex; then
         echo "║  Codex:    $($CODEX_BIN --version 2>/dev/null | head -1 | cut -c1-30 || echo 'unknown')"
@@ -376,7 +376,7 @@ case "$COMMAND" in
         ;;
     help|--help|-h)
         cat <<EOF
-CodexOS Control (codexctl) v${CODEXOS_VERSION}
+CoLinux Control (codexctl) v${COLINUX_VERSION}
 
 Usage: codexctl <COMMAND> [OPTIONS]
 

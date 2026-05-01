@@ -1,4 +1,4 @@
-# CodexOS Desktop — Sudoers configuration for codex user
+# CoLinux Desktop — Sudoers configuration for codex user
 # Provides passwordless access to specific, audited operations only.
 # Installed to: /etc/sudoers.d/codex-desktop
 #

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Electron Codex Desktop Installer (standalone)
+# CoLinux Desktop — Electron Codex Desktop Installer (standalone)
 # =============================================================================
 # Installs the Electron Codex Desktop app on Alpine Linux.
 # This is the standalone version that can be run on any Alpine system.
@@ -173,7 +173,7 @@ install_app() {
     # Create launcher
     cat > "$INSTALL_DIR/codex-desktop" <<'WRAPPER'
 #!/bin/bash
-# CodexOS Desktop — Electron Codex Desktop launcher
+# CoLinux Desktop — Electron Codex Desktop launcher
 set -euo pipefail
 
 CODEX_DESKTOP_DIR="/opt/codex-desktop"

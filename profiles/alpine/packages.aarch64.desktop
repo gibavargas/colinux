@@ -1,5 +1,5 @@
 # =============================================================================
-# CodexOS Desktop — Alpine aarch64 Package List
+# CoLinux Desktop — Alpine aarch64 Package List
 # =============================================================================
 # Full GNOME desktop experience with Electron Codex Desktop app (aarch64).
 # Based on Alpine Linux. Identical to x86_64 desktop minus arch-specific deps.

@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-logs — View/tail system logs, disk action logs, and Codex logs
-# Part of CodexOS Lite
+# Part of CoLinux Lite
 #
 # Usage: codex-logs [SOURCE] [OPTIONS]
 #   codex-logs              — Show last 30 lines of all logs
@@ -178,7 +178,7 @@ show_backup() {
 
 # ── Default: summary ──────────────────────────────────────────────────────
 show_summary() {
-    echo "=== CodexOS Log Summary ==="
+    echo "=== CoLinux Log Summary ==="
     echo "Timestamp: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     echo ""
 

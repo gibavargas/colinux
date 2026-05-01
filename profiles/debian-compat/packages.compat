@@ -1,5 +1,5 @@
 # =============================================================================
-# CodexOS Compat — Debian Package List (TTY Only)
+# CoLinux Compat — Debian Package List (TTY Only)
 # =============================================================================
 # Debian-based edition for hardware incompatible with Alpine.
 # TTY-only interface, no GUI. Built on Debian 12 (bookworm).

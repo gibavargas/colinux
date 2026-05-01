@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Compat — Debian ISO Build Script
+# CoLinux Compat — Debian ISO Build Script
 # =============================================================================
 # Builds a bootable Debian minimal (bookworm) ISO with Codex CLI, TTY only.
 # Uses debootstrap for rootfs creation and live-build for ISO generation.
@@ -14,7 +14,7 @@
 # Environment variables:
 #   CODEX_VERSION   — Override Codex CLI version (default: latest)
 #   DEBIAN_MIRROR   — Debian package mirror URL
-#   CODEXOS_IMG_SIZE— Image size in MB (default: 1200)
+#   COLINUX_IMG_SIZE— Image size in MB (default: 1200)
 # =============================================================================
 set -euo pipefail
 
@@ -25,10 +25,10 @@ _cleanup() {
         rm -rf "$d" 2>/dev/null || true
     done
     # Unmount any leftover mounts
-    umount /tmp/codexos-compat-build/chroot/proc 2>/dev/null || true
-    umount /tmp/codexos-compat-build/chroot/sys 2>/dev/null || true
-    umount /tmp/codexos-compat-build/chroot/dev 2>/dev/null || true
-    umount /tmp/codexos-compat-build/chroot/run 2>/dev/null || true
+    umount /tmp/colinux-compat-build/chroot/proc 2>/dev/null || true
+    umount /tmp/colinux-compat-build/chroot/sys 2>/dev/null || true
+    umount /tmp/colinux-compat-build/chroot/dev 2>/dev/null || true
+    umount /tmp/colinux-compat-build/chroot/run 2>/dev/null || true
 }
 trap _cleanup EXIT
 
@@ -46,8 +46,8 @@ DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://deb.debian.org/debian}"
 DEBIAN_SECURITY="${DEBIAN_SECURITY:-http://security.debian.org/debian-security}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/dist}"
 CODEX_VERSION="${CODEX_VERSION:-latest}"
-CODEXOS_IMG_SIZE="${CODEXOS_IMG_SIZE:-1200}"
-BUILD_DIR="/tmp/codexos-compat-build"
+COLINUX_IMG_SIZE="${COLINUX_IMG_SIZE:-1200}"
+BUILD_DIR="/tmp/colinux-compat-build"
 
 # ── Colors (for TTY) ─────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
         --suite)      SUITE="$2"; shift 2 ;;
         --outdir)     OUTDIR="$2"; shift 2 ;;
         --codex-ver)  CODEX_VERSION="$2"; shift 2 ;;
-        --img-size)   CODEXOS_IMG_SIZE="$2"; shift 2 ;;
+        --img-size)   COLINUX_IMG_SIZE="$2"; shift 2 ;;
         --help|-h)
             echo "Usage: $0 [--arch amd64] [--suite bookworm] [--outdir DIR] [--img-size MB]"
             exit 0
@@ -160,7 +160,7 @@ configure_chroot() {
     mount --bind /run "$chroot/run"
 
     # Set hostname
-    echo "codexos-compat" > "$chroot/etc/hostname"
+    echo "colinux-compat" > "$chroot/etc/hostname"
 
     # Set up apt sources
     cat > "$chroot/etc/apt/sources.list" <<EOF
@@ -411,7 +411,7 @@ generate_iso() {
 
     mkdir -p "$OUTDIR"
 
-    local iso_name="codexos-compat-${ARCH}-${SUITE}.iso"
+    local iso_name="colinux-compat-${ARCH}-${SUITE}.iso"
     local iso_path="$OUTDIR/$iso_name"
     local squashfs="$BUILD_DIR/rootfs.squashfs"
     local iso_staging
@@ -442,12 +442,12 @@ generate_iso() {
 set default=0
 set timeout=5
 
-menuentry "CodexOS Compat (Debian)" {
+menuentry "CoLinux Compat (Debian)" {
     linux /boot/vmlinuz boot=live quiet splash
     initrd /boot/initrd.img
 }
 
-menuentry "CodexOS Compat (Debian) — Safe Mode" {
+menuentry "CoLinux Compat (Debian) — Safe Mode" {
     linux /boot/vmlinuz boot=live nomodeset
     initrd /boot/initrd.img
 }
@@ -467,13 +467,13 @@ GRUBCFG
             -e boot/grub/efi.img \
             -no-emul-boot \
             -isohybrid-gpt-basdat \
-            -V "CODEXOS-COMPAT" \
+            -V "COLINUX-COMPAT" \
             -joliet -rational-rock \
             "$iso_staging" 2>/dev/null || {
             log_warn "xorriso EFI build failed, falling back to basic ISO..."
             xorriso -as mkisofs \
                 -o "$iso_path" \
-                -R -J -V "CODEXOS-COMPAT" \
+                -R -J -V "COLINUX-COMPAT" \
                 "$iso_staging" 2>/dev/null || {
                 log_error "ISO creation failed."
                 exit 1
@@ -495,14 +495,14 @@ create_usb_image() {
     log_step "Creating raw USB disk image"
 
     local iso_file
-    iso_file="$(find "$OUTDIR" -name 'codexos-compat-*.iso' | head -1)"
+    iso_file="$(find "$OUTDIR" -name 'colinux-compat-*.iso' | head -1)"
     if [[ -z "$iso_file" ]]; then
         log_warn "No ISO found, skipping raw image creation."
         return 0
     fi
 
     local raw_file="${iso_file%.iso}.raw.img"
-    local size_mb="$CODEXOS_IMG_SIZE"
+    local size_mb="$COLINUX_IMG_SIZE"
 
     log_info "Creating ${size_mb}MB raw disk image..."
 
@@ -577,10 +577,10 @@ EOF
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 print_summary() {
-    log_step "Build Complete — CodexOS Compat"
+    log_step "Build Complete — CoLinux Compat"
 
     echo ""
-    echo "  Edition:       CodexOS Compat (Debian GNU/Linux, TTY)"
+    echo "  Edition:       CoLinux Compat (Debian GNU/Linux, TTY)"
     echo "  Architecture:  $ARCH"
     echo "  Suite:         $SUITE"
     echo "  Output:        $OUTDIR"
@@ -594,7 +594,7 @@ print_summary() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
-    log_step "CodexOS Compat Build — $ARCH / Debian $SUITE"
+    log_step "CoLinux Compat Build — $ARCH / Debian $SUITE"
 
     check_root
     check_arch

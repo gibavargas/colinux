@@ -3,5 +3,5 @@
 # This will be replaced by the actual setup-codex-desktop.sh install
 
 echo "Codex Desktop is not yet installed."
-echo "Run 'codexctl setup' or 'sudo /opt/codexos-setup/setup-codex-desktop.sh' to install."
+echo "Run 'codexctl setup' or 'sudo /opt/colinux-setup/setup-codex-desktop.sh' to install."
 exit 1

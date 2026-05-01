@@ -1,4 +1,4 @@
-# CodexOS Shared Packages — Alpine Network/WiFi
+# CoLinux Shared Packages — Alpine Network/WiFi
 # Used by all editions for network connectivity and WiFi support
 
 iwd

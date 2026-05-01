@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-snapshot — Create portable state snapshots with metadata
-# Part of CodexOS Lite
+# Part of CoLinux Lite
 #
 # Usage:
 #   codex-snapshot                          Create a timestamped snapshot
@@ -109,7 +109,7 @@ gather_metadata() {
         --arg boot_device "$boot_dev" \
         --arg boot_size "$boot_size" \
         --arg persist_size "$persist_size" \
-        --arg codexos_version "lite-$(cat /etc/codexos-version 2>/dev/null || echo 'dev')" \
+        --arg colinux_version "lite-$(cat /etc/colinux-version 2>/dev/null || echo 'dev')" \
         '{
             hostname: $hostname,
             kernel: $kernel,
@@ -119,7 +119,7 @@ gather_metadata() {
             boot_device: $boot_device,
             boot_size: $boot_size,
             persist_size: $persist_size,
-            codexos_version: $codexos_version
+            colinux_version: $colinux_version
         }'
 }
 
@@ -127,10 +127,10 @@ gather_metadata() {
 if [[ "$MODE" == "create" ]]; then
     TIMESTAMP="$(date -u '+%Y%m%d-%H%M%S')"
     HOSTNAME="$(hostname -s 2>/dev/null || echo 'codex')"
-    SNAP_NAME="codexos-${HOSTNAME}-${TIMESTAMP}.tar.gz"
+    SNAP_NAME="colinux-${HOSTNAME}-${TIMESTAMP}.tar.gz"
     SNAP_PATH="${SNAPSHOT_DIR}/${SNAP_NAME}"
 
-    echo "Creating CodexOS state snapshot..."
+    echo "Creating CoLinux state snapshot..."
     echo "  Output: ${SNAP_NAME}"
 
     # Generate metadata
@@ -192,7 +192,7 @@ fi
 
 # ── List snapshots ────────────────────────────────────────────────────────
 if [[ "$MODE" == "list" ]]; then
-    echo "=== CodexOS Snapshots ==="
+    echo "=== CoLinux Snapshots ==="
     echo "Location: $SNAPSHOT_DIR"
     echo ""
 
@@ -257,7 +257,7 @@ if [[ "$MODE" == "restore" ]]; then
     log_action "restore_start source=$RESTORE_FILE"
 
     # Extract snapshot
-    RESTORE_TMP="$(mktemp -d /tmp/codexos-restore.XXXXXX)"
+    RESTORE_TMP="$(mktemp -d /tmp/colinux-restore.XXXXXX)"
     tar xzf "$RESTORE_FILE" -C "$RESTORE_TMP" 2>&1
 
     # Copy all restored files directly

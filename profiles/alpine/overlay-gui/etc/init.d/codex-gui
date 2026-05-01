@@ -1,13 +1,13 @@
-# CodexOS — codex-gui OpenRC init service
+# CoLinux — codex-gui OpenRC init service
 # Starts the GUI session (cage + foot + codex) after boot.
 # Depends on: localmount, seatd, dbus
 
 #!/sbin/openrc-run
 # /etc/init.d/codex-gui
-# CodexOS Lite GUI — Wayland kiosk session service
+# CoLinux Lite GUI — Wayland kiosk session service
 
 name="codex-gui"
-description="CodexOS Lite GUI — Wayland kiosk (cage + foot + codex)"
+description="CoLinux Lite GUI — Wayland kiosk (cage + foot + codex)"
 
 depend() {
     need localmount
@@ -45,7 +45,7 @@ start_pre() {
 }
 
 start() {
-    ebegin "Starting CodexOS GUI session"
+    ebegin "Starting CoLinux GUI session"
 
     # Only start on tty1 (the main console)
     if [ "$(tty)" != "/dev/tty1" ]; then
@@ -75,7 +75,7 @@ start() {
 }
 
 stop() {
-    ebegin "Stopping CodexOS GUI session"
+    ebegin "Stopping CoLinux GUI session"
 
     # Kill cage/sway gracefully
     start-stop-daemon --stop --pidfile /run/codex-gui.pid --retry 10 2>/dev/null || true
@@ -90,8 +90,8 @@ stop() {
 
 status() {
     if [ -f /run/codex-gui.pid ]; then
-        einfo "CodexOS GUI is running (PID: $(cat /run/codex-gui.pid))"
+        einfo "CoLinux GUI is running (PID: $(cat /run/codex-gui.pid))"
     else
-        einfo "CodexOS GUI is not running"
+        einfo "CoLinux GUI is not running"
     fi
 }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop Edition — Full Build Script
+# CoLinux Desktop Edition — Full Build Script
 # =============================================================================
-# Builds the codexos-desktop Debian live ISO with XFCE4, Codex Desktop (Electron),
+# Builds the colinux-desktop Debian live ISO with XFCE4, Codex Desktop (Electron),
 # and all overlay configurations.
 #
 # Usage:
@@ -18,8 +18,8 @@
 #   - live-build, debootstrap
 #
 # Output:
-#   work/debian-build/codexos-desktop-<date>.iso
-#   work/debian-build/codexos-desktop-<date>.img (raw USB image)
+#   work/debian-build/colinux-desktop-<date>.iso
+#   work/debian-build/colinux-desktop-<date>.img (raw USB image)
 # =============================================================================
 set -euo pipefail
 
@@ -204,9 +204,9 @@ configure_lb() {
         --memtest none \
         --source false \
         --binary-images iso-hybrid \
-        --iso-application "CodexOS Desktop" \
-        --iso-publisher "CodexOS Project" \
-        --iso-volume "codexos-desktop" \
+        --iso-application "CoLinux Desktop" \
+        --iso-publisher "CoLinux Project" \
+        --iso-volume "colinux-desktop" \
         --linux-flavours "amd64" \
         --firmware-binary true \
         --firmware-chroot true \
@@ -231,12 +231,12 @@ configure_lb() {
 
     # Copy overlay to chroot overlay directory
     if [ -d "$overlay_src" ]; then
-        mkdir -p "$BUILD_DIR/config/overlays/codexos/chroot"
-        cp -a "$overlay_src"/. "$BUILD_DIR/config/overlays/codexos/chroot"/
+        mkdir -p "$BUILD_DIR/config/overlays/colinux/chroot"
+        cp -a "$overlay_src"/. "$BUILD_DIR/config/overlays/colinux/chroot"/
 
         # Fix permissions
-        find "$BUILD_DIR/config/overlays/codexos/chroot" -type d -exec chmod 755 {} \;
-        find "$BUILD_DIR/config/overlays/codexos/chroot/usr/local/bin" -type f -exec chmod 755 {} \;
+        find "$BUILD_DIR/config/overlays/colinux/chroot" -type d -exec chmod 755 {} \;
+        find "$BUILD_DIR/config/overlays/colinux/chroot/usr/local/bin" -type f -exec chmod 755 {} \;
 
         ok "Overlay installed ($(find "$overlay_src" -type f | wc -l) files)"
     else
@@ -251,11 +251,11 @@ configure_lb() {
 #!/bin/bash
 set -e
 
-echo "=== CodexOS: Installing Codex Desktop ==="
+echo "=== CoLinux: Installing Codex Desktop ==="
 
 # Copy setup script
-if [ -f "/opt/codexos-setup/setup-codex-desktop.sh" ]; then
-    chmod +x /opt/codexos-setup/setup-codex-desktop.sh
+if [ -f "/opt/colinux-setup/setup-codex-desktop.sh" ]; then
+    chmod +x /opt/colinux-setup/setup-codex-desktop.sh
     # Don't run during build — let first-boot handle it
     # (network may not be available in chroot)
     echo "Setup script staged for first boot"
@@ -277,7 +277,7 @@ systemctl enable codex-disk-inventory.service 2>/dev/null || true
 systemctl enable NetworkManager 2>/dev/null || true
 systemctl enable lightdm 2>/dev/null || true
 
-echo "=== CodexOS: Desktop setup complete ==="
+echo "=== CoLinux: Desktop setup complete ==="
 HOOK
     chmod 755 "$BUILD_DIR/config/hooks/9999-setup-codex-desktop.chroot"
 
@@ -311,7 +311,7 @@ do_build() {
 
     # Copy to output directory with versioned name
     local versioned_name
-    versioned_name="codexos-desktop-$(date +%Y%m%d-%H%M%S).iso"
+    versioned_name="colinux-desktop-$(date +%Y%m%d-%H%M%S).iso"
 
     cp "$iso" "$OUTPUT_DIR/$versioned_name"
     ok "ISO: $OUTPUT_DIR/$versioned_name ($(du -h "$OUTPUT_DIR/$versioned_name" | cut -f1))"
@@ -441,7 +441,7 @@ do_test() {
 print_summary() {
     echo ""
     echo "╔══════════════════════════════════════════════╗"
-    echo "║       CodexOS Desktop — Build Summary        ║"
+    echo "║       CoLinux Desktop — Build Summary        ║"
     echo "╠══════════════════════════════════════════════╣"
     echo "║                                              ║"
 
@@ -471,7 +471,7 @@ print_summary() {
 main() {
     echo ""
     echo "╔══════════════════════════════════════════════╗"
-    echo "║       CodexOS Desktop — Build System         ║"
+    echo "║       CoLinux Desktop — Build System         ║"
     echo "║       Debian + XFCE4 + Electron Codex        ║"
     echo "╚══════════════════════════════════════════════╝"
     echo ""

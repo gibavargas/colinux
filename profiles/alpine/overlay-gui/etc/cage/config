@@ -1,4 +1,4 @@
-# CodexOS — cage configuration (optional)
+# CoLinux — cage configuration (optional)
 # cage reads this file if present.  In most cases cage is launched
 # with command-line flags from codex-shell-gui, but this file provides
 # default overrides.

@@ -31,8 +31,8 @@ Related to #
 
 ## Testing
 
-- [ ] Tested on `codexos-lite` (Alpine x86_64)
-- [ ] Tested on `codexos-lite` (Alpine aarch64)
+- [ ] Tested on `colinux-lite` (Alpine x86_64)
+- [ ] Tested on `colinux-lite` (Alpine aarch64)
 - [ ] Tested in Docker container
 - [ ] Tested in QEMU
 - [ ] Added / updated test cases

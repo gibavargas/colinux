@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-shell-desktop — Desktop shell for CodexOS Desktop edition
-# Part of CodexOS Desktop (Alpine + GNOME)
+# codex-shell-desktop — Desktop shell for CoLinux Desktop edition
+# Part of CoLinux Desktop (Alpine + GNOME)
 #
 # On first login, sets up the GNOME desktop environment and launches
 # the Electron Codex Desktop app. Falls back to a terminal if needed.

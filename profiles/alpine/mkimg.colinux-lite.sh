@@ -1,28 +1,28 @@
 #!/bin/sh
 # =============================================================================
-# CodexOS Desktop — Alpine mkimage Profile Script
+# CoLinux Lite — Alpine mkimage Profile Script
 # =============================================================================
-# This profile builds a bootable Alpine Linux ISO with GNOME desktop and
-# the Electron Codex Desktop app.
+# This profile builds a bootable, diskless Alpine Linux ISO optimized for
+# running OpenAI Codex CLI as the primary interface.
 #
-# Usage (via build-alpine-desktop.sh):
-#   sudo ./mkimage.sh --profile codexos-desktop --arch x86_64 \
+# Usage (via build-alpine.sh):
+#   sudo ./mkimage.sh --profile colinux-lite --arch x86_64 \
 #       --outdir ./out --repository http://dl-cdn.alpinelinux.org/alpine/v3.21/main
 # =============================================================================
 
-profile_codexos_desktop() {
+profile_colinux_lite() {
     profile_base
 
     # ── Identity ──────────────────────────────────────────────────────────────
-    title="CodexOS Desktop"
-    desc="Alpine Linux with GNOME Desktop and Electron Codex Desktop App"
-    profile_name="codexos-desktop"
-    image_name="codexos-desktop-$ARCH-$RELEASE"
+    title="CoLinux Lite"
+    desc="Bootable Alpine Linux appliance for OpenAI Codex CLI"
+    profile_name="colinux-lite"
+    image_name="colinux-lite-$ARCH-$RELEASE"
 
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
     kernel_cmdline="
         quiet
-        modules=loop,squashfs,sd-mod,usb-storage,i915,drm,efi_pstore
+        modules=loop,squashfs,sd-mod,usb-storage
         overlaytmpfs
         init=/sbin/init
     "
@@ -49,14 +49,28 @@ profile_codexos_desktop() {
     esac
 
     # ── Boot loader configuration ─────────────────────────────────────────────
+    # We build an EFI-capable ISO with GRUB
     if [ "$ARCH" = "x86_64" ]; then
         grub_mod="biosdisk part_gpt fat normal configfile linux chain boot"
     else
         grub_mod="part_gpt fat normal configfile linux chain boot"
     fi
 
+    # ── Image layout ──────────────────────────────────────────────────────────
+    # Partition 1: EFI System Partition (ESP) — FAT32, ~32 MB
+    # Partition 2: Boot partition with kernel + initramfs + squashfs
+    #
+    # For diskless mode the entire root filesystem lives in a squashfs image
+    # on the ISO, extracted to tmpfs at boot.  Persistent data lives on an
+    # optional "codex-persist" partition on the target USB/disk.
+
+    # Packages come from packages.$ARCH (handled by mkimage framework)
+    # apkbuild_flags="--no-scripts"  # keep scripts for service setup
+
     # ── Build stages ──────────────────────────────────────────────────────────
-    # Packages come from packages.$ARCH.desktop (handled by mkimage framework)
+    # The mkimage framework calls these hooks in order.
+
+    # Trace: mkimg.colinux-lite.sh loaded for $ARCH
 }
 
 # =============================================================================
@@ -64,11 +78,12 @@ profile_codexos_desktop() {
 # =============================================================================
 
 # Phase: create_image()
-profile_codexos_desktop_create_image() {
-    local img_size_mb="${CODEXOS_IMG_SIZE:-2200}"
+#   Sets up the disk image with partition table.
+profile_colinux_lite_create_image() {
+    local img_size_mb="${COLINUX_IMG_SIZE:-800}"
     local img_size_sectors=$((img_size_mb * 2048))
 
-    # Create blank image (larger for GNOME + Electron)
+    # Create blank image
     truncate -s "${img_size_mb}M" "$IMG"
 
     # Write a protective MBR + GPT
@@ -82,17 +97,21 @@ EOF
 }
 
 # Phase: build_kernel()
-profile_codexos_desktop_build_kernel() {
+#   Installs the kernel and generates initramfs.
+profile_colinux_lite_build_kernel() {
+    # Called automatically by mkimage — packages list drives kernel install
     return 0
 }
 
 # Phase: install_bootloader()
-profile_codexos_desktop_install_bootloader() {
+#   Installs GRUB EFI onto the ESP.
+profile_colinux_lite_install_bootloader() {
     local mnt="$WORKDIR/esp"
     local boot_mnt="$WORKDIR/boot"
 
     mkdir -p "$mnt" "$boot_mnt"
 
+    # Mount ESP
     local esp_offset=$((2048 * 512))
     local esp_size=$((65536 * 512))
     setup_loop "$IMG" "$esp_offset" "$esp_size" 2>/dev/null
@@ -119,123 +138,55 @@ profile_codexos_desktop_install_bootloader() {
     unset_loop "$esp_dev" 2>/dev/null || true
 }
 
-# Phase: install_extlinux()
-profile_codexos_desktop_install_extlinux() {
+# Phase: install_extlinux()  (fallback for BIOS boot on x86_64)
+profile_colinux_lite_install_extlinux() {
+    # Only needed for legacy BIOS; EFI is primary
     return 0
 }
 
 # Phase: create_image_ext()
-profile_codexos_desktop_create_image_ext() {
+#   Finalizes the ISO / raw image with squashfs root.
+profile_colinux_lite_create_image_ext() {
+    # The mkimage framework handles ISO creation for us.
+    # We add extra files via overlay.
     return 0
 }
 
 # =============================================================================
-# Overlay setup — files in overlay-desktop/ are copied into the rootfs
+# Overlay setup — files in overlay/ are copied into the rootfs
 # =============================================================================
-profile_codexos_desktop_overlay() {
+profile_colinux_lite_overlay() {
     # Ensure overlay directories exist
     mkdir -p "$WORKDIR"/etc
-    mkdir -p "$WORKDIR"/etc/gdm
-    mkdir -p "$WORKDIR"/etc/NetworkManager
-    mkdir -p "$WORKDIR"/etc/dconf/profile
-    mkdir -p "$WORKDIR"/etc/dconf/db
-    mkdir -p "$WORKDIR"/etc/xdg/autostart
-    mkdir -p "$WORKDIR"/etc/polkit-1/localauthority/50-local.d
-    mkdir -p "$WORKDIR"/etc/init.d
-    mkdir -p "$WORKDIR"/etc/runlevels/boot
-    mkdir -p "$WORKDIR"/etc/runlevels/default
-    mkdir -p "$WORKDIR"/home/codex/.config
-    mkdir -p "$WORKDIR"/home/codex/.local/share/gnome-shell/extensions
+    mkdir -p "$WORKDIR"/home/codex
     mkdir -p "$WORKDIR"/usr/local/bin
     mkdir -p "$WORKDIR"/usr/local/sbin
-    mkdir -p "$WORKDIR"/usr/local/lib/codexos
     mkdir -p "$WORKDIR"/var/log/codex
-    mkdir -p "$WORKDIR"/var/lib/codexos
-    mkdir -p "$WORKDIR"/run/codex
-    mkdir -p "$WORKDIR"/run/seatd
-    mkdir -p "$WORKDIR"/opt/codex-desktop/config
-    mkdir -p "$WORKDIR"/persist/config/wifi
-    mkdir -p "$WORKDIR"/persist/logs
-    mkdir -p "$WORKDIR"/workspace
+    mkdir -p "$WORKDIR"/var/lib/colinux
 
     # Create codex user with consistent uid/gid
     if ! grep -q '^codex:' "$WORKDIR"/etc/passwd 2>/dev/null; then
-        echo "codex:x:1000:1000:CodexOS Desktop User:/home/codex:/bin/bash" >> "$WORKDIR"/etc/passwd
+        echo "codex:x:1000:1000:CoLinux User:/home/codex:/bin/bash" >> "$WORKDIR"/etc/passwd
         echo "codex:x:1000:" >> "$WORKDIR"/etc/group
         echo "codex:!:$(date +%s):0:99999:7:::" >> "$WORKDIR"/etc/shadow
     fi
 
-    # Add codex to required groups for GNOME desktop
-    for grp in video input audio seatd wheel plugdev netdev; do
-        if grep -q "^${grp}:" "$WORKDIR"/etc/group 2>/dev/null; then
-            if ! grep -q "^${grp}:.*codex" "$WORKDIR"/etc/group 2>/dev/null; then
-                sed -i "s/^${grp}:\(.*\)/${grp}:\1,codex/" "$WORKDIR"/etc/group
-            fi
-        else
-            echo "${grp}:x:300:codex" >> "$WORKDIR"/etc/group
-        fi
-    done
-
-    # Set up autologin for GDM
+    # Set up autologin for tty1 (getty)
     mkdir -p "$WORKDIR"/etc/conf.d
     cat > "$WORKDIR"/etc/conf.d/agetty <<'AGETTYCFG'
 # Autologin codex user on tty1
 agetty_options="--autologin codex --noclear"
 AGETTYCFG
 
-    # Create codex-shell.conf with MODE=desktop
-    cat > "$WORKDIR"/etc/codex-shell.conf <<'CONF'
-# CodexOS Shell Configuration
-# Mode: tty | gui | desktop
-MODE=desktop
-
-# Desktop environment: gnome
-DESKTOP=gnome
-
-# Electron Codex app path
-CODEX_ELECTRON=/opt/codex-desktop/codex-desktop
-
-# Whether to fallback to TTY if GNOME fails
-DESKTOP_FALLBACK_TTY=true
-
-# Log file for desktop session
-DESKTOP_LOG=/persist/logs/desktop-session.log
-CONF
-
     # Copy overlay files from profile directory
-    local overlay_dir="${mkimg_profiles_dir:-.}/codexos-desktop/overlay-desktop"
+    local overlay_dir="${mkimg_profiles_dir:-.}/colinux-lite/overlay"
     if [ -d "$overlay_dir" ]; then
         cp -a "$overlay_dir"/* "$WORKDIR"/ 2>/dev/null || true
     fi
-
-    # Compile dconf database
-    if [ -f "$WORKDIR"/etc/dconf/db/local-defaults ]; then
-        dconf update "$WORKDIR"/etc/dconf/db 2>/dev/null || true
-    fi
-
-    # Enable GDM service
-    if [ -d "$WORKDIR"/etc/runlevels/default ]; then
-        ln -sf /etc/init.d/gdm "$WORKDIR"/etc/runlevels/default/gdm 2>/dev/null || true
-    fi
-
-    # Enable NetworkManager service
-    if [ -d "$WORKDIR"/etc/runlevels/default ]; then
-        ln -sf /etc/init.d/NetworkManager "$WORKDIR"/etc/runlevels/default/NetworkManager 2>/dev/null || true
-        ln -sf /etc/init.d/NetworkManager "$WORKDIR"/etc/runlevels/boot/NetworkManager 2>/dev/null || true
-    fi
-
-    # Enable codex-network service
-    ln -sf /etc/init.d/codex-network "$WORKDIR"/etc/runlevels/boot/codex-network 2>/dev/null || true
-
-    # Enable auto-update service
-    ln -sf /etc/init.d/codex-auto-update "$WORKDIR"/etc/runlevels/default/codex-auto-update 2>/dev/null || true
 
     # Ensure proper permissions
     chown -R root:root "$WORKDIR"
     chmod 755 "$WORKDIR"/home/codex
     chown 1000:1000 "$WORKDIR"/home/codex
-    chown -R 1000:1000 "$WORKDIR"/home/codex/.config 2>/dev/null || true
-    chown -R 1000:1000 "$WORKDIR"/home/codex/.local 2>/dev/null || true
-    chmod 700 "$WORKDIR"/var/lib/codexos
-    chmod 2755 "$WORKDIR"/run/seatd 2>/dev/null || true
+    chmod 755 "$WORKDIR"/var/lib/colinux
 }

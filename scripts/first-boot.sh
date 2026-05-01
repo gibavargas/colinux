@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Lite — First Boot Initialization Script
+# CoLinux Lite — First Boot Initialization Script
 # =============================================================================
-# Runs on first boot to set up the CodexOS environment:
+# Runs on first boot to set up the CoLinux environment:
 #   1. Creates runtime directories
 #   2. Generates disk inventory
 #   3. Sets up encrypted persistence (if new)
@@ -24,7 +24,7 @@ CODEX_RUNTIME="/run/codex"
 CODEX_CONFIG="$CODEX_PERSIST/config"
 CODEX_LOGS="$CODEX_PERSIST/logs"
 CODEX_DATA="$CODEX_PERSIST/data"
-FIRST_BOOT_FLAG="/var/lib/codexos/.first-boot-done"
+FIRST_BOOT_FLAG="/var/lib/colinux/.first-boot-done"
 MOTD_FILE="/etc/motd"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -242,7 +242,7 @@ setup_codex_auth() {
 
     if [ -n "$existing_key" ]; then
         cat > "$auth_file" <<EOF
-# CodexOS authentication configuration
+# CoLinux authentication configuration
 # Created: $(date -Iseconds)
 export OPENAI_API_KEY="$existing_key"
 EOF
@@ -255,7 +255,7 @@ EOF
     if [ -t 0 ]; then
         echo ""
         echo "╔═══════════════════════════════════════════════════════╗"
-        echo "║            CodexOS — Authentication Setup           ║"
+        echo "║            CoLinux — Authentication Setup           ║"
         echo "╠═══════════════════════════════════════════════════════╣"
         echo "║                                                       ║"
         echo "║  Codex CLI requires authentication to work.           ║"
@@ -274,7 +274,7 @@ EOF
                 read -rp "  Enter OpenAI API key: " api_key
                 if [ -n "$api_key" ]; then
                     cat > "$auth_file" <<EOF
-# CodexOS authentication configuration
+# CoLinux authentication configuration
 # Created: $(date -Iseconds)
 export OPENAI_API_KEY="$api_key"
 EOF
@@ -307,9 +307,9 @@ setup_agents_md() {
     # Check for bundled AGENTS.md (in the image)
     local bundled_agents=""
     for candidate in \
-        "/usr/share/codexos/AGENTS.md" \
-        "/etc/codexos/AGENTS.md" \
-        "/opt/codexos/AGENTS.md"; do
+        "/usr/share/colinux/AGENTS.md" \
+        "/etc/colinux/AGENTS.md" \
+        "/opt/colinux/AGENTS.md"; do
         if [ -f "$candidate" ]; then
             bundled_agents="$candidate"
             break
@@ -327,7 +327,7 @@ setup_agents_md() {
     else
         # Generate a basic one
         cat > "$agents_dest" <<'EOF'
-# CodexOS — Operating Rules
+# CoLinux — Operating Rules
 
 1. **Disk Safety**: Always run `codex-disk-inventory` before accessing foreign disks.
 2. **Read-First**: Mount unknown filesystems read-only before any writes.
@@ -336,7 +336,7 @@ setup_agents_md() {
 5. **Security**: Only use whitelisted `codex-*` commands for privileged operations.
 6. **Workspace**: Default working directory is `/workspace`.
 
-See the full CodexOS documentation for detailed guidelines.
+See the full CoLinux documentation for detailed guidelines.
 EOF
         log_info "Basic AGENTS.md generated."
     fi
@@ -368,7 +368,7 @@ mark_complete() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
-    log_info "=== CodexOS Lite — First Boot Initialization ==="
+    log_info "=== CoLinux Lite — First Boot Initialization ==="
     log_info "Kernel: $(uname -r)"
     log_info "Arch:   $(uname -m)"
     log_info "Date:   $(date)"

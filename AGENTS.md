@@ -1,6 +1,6 @@
-# CodexOS — Operating Rules
+# CoLinux — Operating Rules
 
-> **CodexOS Lite** is a bootable Alpine Linux appliance whose primary interface
+> **CoLinux Lite** is a bootable Alpine Linux appliance whose primary interface
 > is OpenAI Codex CLI.  These rules govern how Codex should interact with the
 > system.  They are placed in `/workspace/AGENTS.md` on first boot and should
 > be consulted before performing any privileged or destructive operation.
@@ -92,7 +92,7 @@ Core commands (whitelisted in `doas.conf`):
 | `codex-network` | Configure network interfaces |
 | `codex-update` | Update Codex CLI binary |
 | `codex-shell` | Safe shell escalation |
-| `codex-install-usb` / `codex-install-pc` | Install CodexOS to media |
+| `codex-install-usb` / `codex-install-pc` | Install CoLinux to media |
 | `codex-usb-persist` | Set up USB persistence |
 | `codex-logs` | View system logs |
 | `codex-recover` | Recover deleted files (testdisk/photorec) |
@@ -108,4 +108,4 @@ structured output where applicable.
 ---
 
 *Last updated: 2026-04-30T22:40:00+00:00*
-*CodexOS Lite — Alpine Linux + OpenAI Codex CLI*
+*CoLinux Lite — Alpine Linux + OpenAI Codex CLI*

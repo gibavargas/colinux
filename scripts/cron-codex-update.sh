@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Lite — Automatic Codex Update Script (cron)
+# CoLinux Lite — Automatic Codex Update Script (cron)
 # =============================================================================
 # Checks for new Codex CLI releases and updates if available.
 #

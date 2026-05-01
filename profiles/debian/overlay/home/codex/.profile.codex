@@ -1,7 +1,7 @@
-# CodexOS Desktop — Shell profile for codex user
+# CoLinux Desktop — Shell profile for codex user
 # Installed to: /home/codex/.profile
 
-# CodexOS additions
+# CoLinux additions
 export PATH="$PATH:/usr/local/bin"
 export EDITOR="${EDITOR:-vim}"
 export VISUAL="${VISUAL:-vim}"

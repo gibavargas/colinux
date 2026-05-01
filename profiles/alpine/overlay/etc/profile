@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# CodexOS Lite — System-wide /etc/profile
+# CoLinux Lite — System-wide /etc/profile
 # =============================================================================
 
 # ── PATH ─────────────────────────────────────────────────────────────────────
@@ -17,7 +17,7 @@ alias cn='codex-network'             # Network manager
 alias cu='codex-update'              # Update Codex CLI
 alias cb='codex-backup'              # Backup workspace
 alias cl='codex-logs'                # View logs
-alias ct='codexctl'                  # CodexOS control
+alias ct='codexctl'                  # CoLinux control
 
 # ── Shell helpers ─────────────────────────────────────────────────────────────
 # Colored prompt (respects TERM capabilities)
@@ -44,7 +44,7 @@ export HISTSIZE=5000
 export HISTFILE="${HOME:-/root}/.codex_history"
 export HISTCONTROL="ignoredups:ignorespace"
 
-# ── CodexOS environment ──────────────────────────────────────────────────────
+# ── CoLinux environment ──────────────────────────────────────────────────────
 export CODEX_HOME="/home/codex"
 export CODEX_WORKSPACE="/workspace"
 export CODEX_PERSIST="/persist"

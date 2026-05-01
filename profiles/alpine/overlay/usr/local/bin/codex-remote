@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-remote — Set up remote access to CodexOS via SSH or tunnel
-# Part of CodexOS Lite
+# codex-remote — Set up remote access to CoLinux via SSH or tunnel
+# Part of CoLinux Lite
 #
 # Usage:
 #   codex-remote --ssh              Show SSH connection info
@@ -33,7 +33,7 @@ usage() {
     cat <<'EOF'
 Usage: codex-remote [OPTIONS]
 
-Set up remote access to CodexOS.
+Set up remote access to CoLinux.
 
 Options:
   --ssh          Show SSH connection info (IP, port, keys)
@@ -102,7 +102,7 @@ case "$MODE" in
         fi
 
         if command -v ssh-keygen &>/dev/null; then
-            ssh-keygen -t "$KEY_TYPE" -f "$KEY_PATH" -N "" -C "codexos@$(hostname -s 2>/dev/null || echo localhost)"
+            ssh-keygen -t "$KEY_TYPE" -f "$KEY_PATH" -N "" -C "colinux@$(hostname -s 2>/dev/null || echo localhost)"
             echo ""
             echo "Keys generated:"
             echo "  Private: $KEY_PATH"
@@ -161,7 +161,7 @@ case "$MODE" in
             echo "SSH Connection QR Code:"
             echo "  ssh codex@${PRIMARY_IP}"
             echo ""
-            echo "codexos://${PRIMARY_IP}:22" | qrencode -t ANSIUTF8
+            echo "colinux://${PRIMARY_IP}:22" | qrencode -t ANSIUTF8
         else
             echo "Install qrencode for QR codes: apk add qrencode"
             echo ""

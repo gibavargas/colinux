@@ -1,4 +1,4 @@
-# CodexOS Desktop — Codex user home directory configuration
+# CoLinux Desktop — Codex user home directory configuration
 
 # .profile additions (sourced by login shells)
 export PATH="$PATH:/usr/local/bin"
@@ -38,7 +38,7 @@ alias cls='clear'
 alias ..='cd ..'
 alias ...='cd ../..'
 
-# CodexOS aliases
+# CoLinux aliases
 alias disks='codexctl disks'
 alias status='codexctl status'
 alias update='codexctl update'

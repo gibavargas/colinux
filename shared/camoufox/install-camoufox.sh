@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ============================================================================
-# CodexOS — Camoufox Browser Integration Installer
+# CoLinux — Camoufox Browser Integration Installer
 # ============================================================================
 # Installs Camoufox (anti-fingerprinting Firefox browser) for web search
-# and browsing capabilities across all CodexOS editions.
+# and browsing capabilities across all CoLinux editions.
 #
 # Usage: install-camoufox.sh [--prefix /opt/camoufox] [--force]
 #
@@ -249,7 +249,7 @@ create_wrappers() {
 
     # --- /usr/local/bin/camoufox (GUI launcher) ---
     create_wrapper "/usr/local/bin/camoufox" "#!/usr/bin/env bash
-# CodexOS — Camoufox GUI Launcher
+# CoLinux — Camoufox GUI Launcher
 # Launches the Camoufox anti-fingerprinting browser with a GUI.
 # Source: https://github.com/AntiBrowser/camoufox
 set -euo pipefail
@@ -275,7 +275,7 @@ exec camoufox \"\$@\"
 
     # --- /usr/local/bin/camoufox-headless ---
     create_wrapper "/usr/local/bin/camoufox-headless" "#!/usr/bin/env bash
-# CodexOS — Camoufox Headless Launcher
+# CoLinux — Camoufox Headless Launcher
 # Launches Camoufox in headless mode for TTY / server editions.
 # Accepts the same arguments as the regular camoufox command.
 set -euo pipefail
@@ -306,7 +306,7 @@ fi
     # --- /usr/local/bin/codex-web-search ---
     create_wrapper "/usr/local/bin/codex-web-search" '#!/usr/bin/env bash
 # ============================================================================
-# CodexOS — Web Search Tool (Camoufox Headless)
+# CoLinux — Web Search Tool (Camoufox Headless)
 # ============================================================================
 # Performs web searches using Camoufox in headless mode and returns
 # results as formatted text or JSON.
@@ -490,7 +490,7 @@ exec python3 -c "$PYTHON_SCRIPT" "$ARGS_JSON"
     # --- /usr/local/bin/codex-web-browse ---
     if has_gui "$edition"; then
         create_wrapper "/usr/local/bin/codex-web-browse" "#!/usr/bin/env bash
-# CodexOS — Web Browse Launcher (GUI Edition)
+# CoLinux — Web Browse Launcher (GUI Edition)
 # Opens Camoufox browser for interactive web browsing.
 # Falls back to headless mode if no display is available.
 set -euo pipefail
@@ -514,7 +514,7 @@ fi
 "
     else
         create_wrapper "/usr/local/bin/codex-web-browse" "#!/usr/bin/env bash
-# CodexOS — Web Browse Launcher (TTY Edition)
+# CoLinux — Web Browse Launcher (TTY Edition)
 # Opens Camoufox in headless mode. Use codex-web-search for queries.
 set -euo pipefail
 
@@ -611,7 +611,7 @@ main() {
     distro="$(detect_distro)"
     edition="$(detect_edition)"
 
-    log "CodexOS Camoufox Installer"
+    log "CoLinux Camoufox Installer"
     log "  Architecture : $arch"
     log "  Distribution : $distro"
     log "  Edition      : $edition"

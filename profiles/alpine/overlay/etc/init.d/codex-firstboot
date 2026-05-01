@@ -1,13 +1,13 @@
 #!/sbin/openrc-run
 # /etc/init.d/codex-firstboot
-# CodexOS Lite — First-boot setup service
+# CoLinux Lite — First-boot setup service
 #
 # Runs on boot to initialize the appliance if this is the first time.
 # Creates persistence structure, configures Codex CLI, and sets up cron jobs.
 # Marks completion with /persist/.first-boot-done to skip on subsequent boots.
 
 name="codex-firstboot"
-description="CodexOS Lite first-boot initialization"
+description="CoLinux Lite first-boot initialization"
 
 depend() {
     need localmount
@@ -16,7 +16,7 @@ depend() {
     before codex-auto-update
 }
 
-FIRSTBOOT_DONE="/var/lib/codexos/.first-boot-done"
+FIRSTBOOT_DONE="/var/lib/colinux/.first-boot-done"
 FIRSTBOOT_SCRIPT="/usr/local/bin/first-boot"
 FIRSTBOOT_LOG="/persist/logs/first-boot.log"
 

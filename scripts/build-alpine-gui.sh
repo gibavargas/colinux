@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Lite GUI — Alpine ISO Build Script
+# CoLinux Lite GUI — Alpine ISO Build Script
 # =============================================================================
 # Builds a bootable Alpine Linux ISO with Codex CLI + Wayland GUI (cage+foot).
 #
@@ -13,7 +13,7 @@
 # Environment variables:
 #   CODEX_VERSION   — Override Codex CLI version (default: latest)
 #   ALPINE_MIRROR   — Alpine package mirror (default: dl-cdn.alpinelinux.org)
-#   CODEXOS_IMG_SIZE— Image size in MB (default: 900 for GUI edition)
+#   COLINUX_IMG_SIZE— Image size in MB (default: 900 for GUI edition)
 #   GPG_KEY         — GPG key ID for signing release artifacts
 # =============================================================================
 set -euo pipefail
@@ -37,10 +37,10 @@ ALPINE_RELEASE="${ALPINE_RELEASE:-3.21}"
 ALPINE_MIRROR="${ALPINE_MIRROR:-http://dl-cdn.alpinelinux.org/alpine}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/dist}"
 APORTS_BRANCH="v${ALPINE_RELEASE}.0"
-APORTS_DIR="/tmp/aports-codexos-gui"
+APORTS_DIR="/tmp/aports-colinux-gui"
 _CLEANUP_DIRS=("${_CLEANUP_DIRS[@]}" "$APORTS_DIR")
 CODEX_VERSION="${CODEX_VERSION:-latest}"
-CODEXOS_IMG_SIZE="${CODEXOS_IMG_SIZE:-900}"
+COLINUX_IMG_SIZE="${COLINUX_IMG_SIZE:-900}"
 
 # ── Colors (for TTY) ─────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -62,7 +62,7 @@ while [[ $# -gt 0 ]]; do
         --release)     ALPINE_RELEASE="$2"; shift 2 ;;
         --outdir)      OUTDIR="$2"; shift 2 ;;
         --codex-ver)   CODEX_VERSION="$2"; shift 2 ;;
-        --img-size)    CODEXOS_IMG_SIZE="$2"; shift 2 ;;
+        --img-size)    COLINUX_IMG_SIZE="$2"; shift 2 ;;
         --help|-h)
             echo "Usage: $0 [--arch x86_64|aarch64] [--release 3.21] [--outdir DIR] [--img-size MB]"
             exit 0
@@ -168,12 +168,12 @@ clone_aports() {
 
 # ── Step 3: Install custom profile into aports ──────────────────────────────
 install_profile() {
-    log_step "Installing codexos-lite-gui profile into aports"
+    log_step "Installing colinux-lite-gui profile into aports"
 
-    local profile_dest="$APORTS_DIR/scripts/mkimg.codexos-lite-gui.sh"
+    local profile_dest="$APORTS_DIR/scripts/mkimg.colinux-lite-gui.sh"
 
     # Copy the profile script
-    cp "$PROFILE_DIR/mkimg.codexos-lite-gui.sh" "$profile_dest"
+    cp "$PROFILE_DIR/mkimg.colinux-lite-gui.sh" "$profile_dest"
     chmod +x "$profile_dest"
 
     # Copy GUI package lists
@@ -183,12 +183,12 @@ install_profile() {
         exit 1
     fi
 
-    cp "$gui_pkg" "$APORTS_DIR/scripts/packages.codexos-lite-gui.${ARCH}"
-    cp "$gui_pkg" "$APORTS_DIR/scripts/packages.codexos-lite-gui"
+    cp "$gui_pkg" "$APORTS_DIR/scripts/packages.colinux-lite-gui.${ARCH}"
+    cp "$gui_pkg" "$APORTS_DIR/scripts/packages.colinux-lite-gui"
 
     # Copy overlay directory
     if [ -d "$PROFILE_DIR/overlay-gui" ]; then
-        local overlay_dest="$APORTS_DIR/scripts/codexos-lite-gui/overlay-gui"
+        local overlay_dest="$APORTS_DIR/scripts/colinux-lite-gui/overlay-gui"
         rm -rf "$overlay_dest"
         cp -a "$PROFILE_DIR/overlay-gui" "$overlay_dest"
     else
@@ -208,7 +208,7 @@ install_shared() {
         return 0
     fi
 
-    local overlay_dest="$APORTS_DIR/scripts/codexos-lite-gui/overlay-gui"
+    local overlay_dest="$APORTS_DIR/scripts/colinux-lite-gui/overlay-gui"
 
     "$SHARED_DIR/install-shared.sh" \
         --edition lite-gui \
@@ -232,16 +232,16 @@ run_mkimage() {
     fi
     chmod +x "$mkimage_script"
 
-    export CODEXOS_IMG_SIZE
+    export COLINUX_IMG_SIZE
 
     "$mkimage_script" \
-        --profile "codexos-lite-gui" \
+        --profile "colinux-lite-gui" \
         --arch "$ARCH" \
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/main" \
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/community" \
         --outdir "$OUTDIR" \
         --tag "v${ALPINE_RELEASE}" \
-        --yaml "$APORTS_DIR/scripts/mkimg.codexos-lite-gui.sh" \
+        --yaml "$APORTS_DIR/scripts/mkimg.colinux-lite-gui.sh" \
         || {
             log_error "mkimage.sh failed!"
             exit 1
@@ -299,7 +299,7 @@ inject_codex() {
 
     # Find the ISO
     local iso_file
-    iso_file="$(find "$OUTDIR" -name 'codexos-lite-gui-*.iso' | head -1)"
+    iso_file="$(find "$OUTDIR" -name 'colinux-lite-gui-*.iso' | head -1)"
     if [ -z "$iso_file" ]; then
         log_error "Could not find built ISO in $OUTDIR"
         exit 1
@@ -375,7 +375,7 @@ inject_codex() {
             -e boot/grub/efi.img \
             -no-emul-boot \
             -isohybrid-gpt-basdat \
-            -V "CODEXOS-GUI" \
+            -V "COLINUX-GUI" \
             "$iso_staging" 2>/dev/null || {
             log_warn "xorriso repack failed."
             repacked_iso=""
@@ -395,14 +395,14 @@ create_raw_image() {
     log_step "Creating raw disk image"
 
     local iso_file
-    iso_file="$(find "$OUTDIR" -name 'codexos-lite-gui-*.iso' | head -1)"
+    iso_file="$(find "$OUTDIR" -name 'colinux-lite-gui-*.iso' | head -1)"
     if [ -z "$iso_file" ]; then
         log_warn "No ISO found, skipping raw image creation."
         return 0
     fi
 
     local raw_file="${iso_file%.iso}.raw.img"
-    local size_mb="${CODEXOS_IMG_SIZE}"
+    local size_mb="${COLINUX_IMG_SIZE}"
 
     log_info "Creating ${size_mb}MB raw disk image..."
 
@@ -475,10 +475,10 @@ EOF
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 print_summary() {
-    log_step "Build Complete — CodexOS Lite GUI"
+    log_step "Build Complete — CoLinux Lite GUI"
 
     echo ""
-    echo "  Edition:       CodexOS Lite GUI (cage + sway + foot)"
+    echo "  Edition:       CoLinux Lite GUI (cage + sway + foot)"
     echo "  Architecture:  $ARCH"
     echo "  Alpine:        $ALPINE_RELEASE"
     echo "  Output:        $OUTDIR"
@@ -492,7 +492,7 @@ print_summary() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
-    log_step "CodexOS Lite GUI Build — $ARCH / Alpine $ALPINE_RELEASE"
+    log_step "CoLinux Lite GUI Build — $ARCH / Alpine $ALPINE_RELEASE"
 
     check_root
     check_arch

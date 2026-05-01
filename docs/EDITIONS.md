@@ -1,10 +1,10 @@
 # Editions
 
-CodexOS Lite ships in multiple editions to suit different hardware and use cases. All editions share the same disk safety model, Codex CLI integration, and persistence system.
+CoLinux Lite ships in multiple editions to suit different hardware and use cases. All editions share the same disk safety model, Codex CLI integration, and persistence system.
 
 ## Edition Comparison
 
-| Feature | codexos-lite | codexos-lite-gui | codexos-compat | codexos-desktop |
+| Feature | colinux-lite | colinux-lite-gui | colinux-compat | colinux-desktop |
 |---|---|---|---|---|
 | **Status** | ✅ Stable | 🧪 Experimental | 🧪 Experimental | 📋 Planned |
 | **Base distro** | Alpine Linux 3.19+ | Alpine Linux 3.19+ | Debian 12 (bookworm) | Alpine Linux 3.19+ |
@@ -22,7 +22,7 @@ CodexOS Lite ships in multiple editions to suit different hardware and use cases
 
 ---
 
-## codexos-lite
+## colinux-lite
 
 The default and recommended edition. A headless TTY appliance that boots directly into a Codex CLI session.
 
@@ -51,14 +51,14 @@ The default and recommended edition. A headless TTY appliance that boots directl
 ```bash
 sudo ./build.sh
 # or explicitly:
-sudo ./build.sh --edition codexos-lite
+sudo ./build.sh --edition colinux-lite
 ```
 
 ### First boot
 
 ```
 [    0.000000] Linux version 6.6.x ...
-[    4.123456] CodexOS Lite v0.1.0
+[    4.123456] CoLinux Lite v0.1.0
 [    5.000000] Starting OpenRC ...
 [    6.500000] Network: eth0 connected (DHCP)
 [    7.000000] Codex CLI v1.0.0 ready.
@@ -68,13 +68,13 @@ codex> _
 
 ---
 
-## codexos-lite-gui
+## colinux-lite-gui
 
 An experimental edition that adds a minimal graphical interface on top of the TTY edition. Uses [cage](https://github.com/Hjdskes/cage) (a Wayland kiosk compositor) running [sway](https://swaywm.org/) with a fullscreen [foot](https://codeberg.org/dnkl/foot) terminal.
 
 ### What it includes
 
-- Everything in `codexos-lite`
+- Everything in `colinux-lite`
 - cage (kiosk Wayland compositor)
 - sway (tiling Wayland compositor)
 - foot (terminal emulator)
@@ -99,7 +99,7 @@ An experimental edition that adds a minimal graphical interface on top of the TT
 ### Build
 
 ```bash
-sudo ./build.sh --edition codexos-lite-gui
+sudo ./build.sh --edition colinux-lite-gui
 ```
 
 ### Known issues
@@ -111,7 +111,7 @@ sudo ./build.sh --edition codexos-lite-gui
 
 ---
 
-## codexos-compat
+## colinux-compat
 
 A Debian-based edition for hardware that is incompatible with Alpine Linux (primarily due to kernel module or firmware issues).
 
@@ -120,14 +120,14 @@ A Debian-based edition for hardware that is incompatible with Alpine Linux (prim
 - Debian 12 (bookworm) minimal base
 - Linux kernel from Debian (6.1 LTS)
 - Codex CLI (Node.js from NodeSource)
-- Disk tools: same set as `codexos-lite` (Debian package equivalents)
+- Disk tools: same set as `colinux-lite` (Debian package equivalents)
 - Network: `networkd`, `wpa_supplicant`, `openssh`, `curl`
 - `systemd` (replaces OpenRC)
 - `codexctl` and all disk safety wrappers (adapted for systemd)
 
-### What's different from codexos-lite
+### What's different from colinux-lite
 
-| Aspect | codexos-lite | codexos-compat |
+| Aspect | colinux-lite | colinux-compat |
 |---|---|---|
 | Init system | OpenRC | systemd |
 | Package manager | `apk` | `apt` |
@@ -149,7 +149,7 @@ Some hardware — particularly certain Wi-Fi adapters, Thunderbolt controllers, 
 ### Build
 
 ```bash
-sudo ./build.sh --edition codexos-compat
+sudo ./build.sh --edition colinux-compat
 ```
 
 ### Notes
@@ -161,7 +161,7 @@ sudo ./build.sh --edition codexos-compat
 
 ---
 
-## codexos-desktop
+## colinux-desktop
 
 A planned edition that provides a full desktop environment with an Electron-based Codex Desktop application.
 
@@ -199,18 +199,18 @@ A planned edition that provides a full desktop environment with an Electron-base
 
 ```
 Need a bootable USB for system administration?
-└─► codexos-lite ✅
+└─► colinux-lite ✅
 
 Have a display and want a terminal but no desktop?
-└─► codexos-lite-gui 🧪
+└─► colinux-lite-gui 🧪
 
 Alpine doesn't support your hardware?
-└─► codexos-compat 🧪
+└─► colinux-compat 🧪
 
 Want a full desktop with Codex integration?
-└─► codexos-desktop 📋 (not yet available)
+└─► colinux-desktop 📋 (not yet available)
 ```
 
 ### Recommendation
 
-Start with **codexos-lite**. It's the smallest, fastest, and most tested edition. If you encounter hardware issues, try **codexos-compat**.
+Start with **colinux-lite**. It's the smallest, fastest, and most tested edition. If you encounter hardware issues, try **colinux-compat**.

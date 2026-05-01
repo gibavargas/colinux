@@ -1,5 +1,5 @@
 [Unit]
-Description=CodexOS Disk Inventory Scanner
+Description=CoLinux Disk Inventory Scanner
 After=local-fs.target codex-firstboot.service
 Before=network.target
 

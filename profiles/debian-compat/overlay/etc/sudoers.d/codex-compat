@@ -1,5 +1,5 @@
 # =============================================================================
-# CodexOS Compat — sudoers rules for the codex user
+# CoLinux Compat — sudoers rules for the codex user
 # =============================================================================
 # Mirrors the Alpine doas.conf whitelist. The codex user can run these
 # specific commands as root without a password. All other sudo commands

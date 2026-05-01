@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-pxe — Network boot server for CodexOS (PXE/iPXE)
-# Part of CodexOS Lite
+# codex-pxe — Network boot server for CoLinux (PXE/iPXE)
+# Part of CoLinux Lite
 #
 # Usage:
 #   codex-pxe --start [IFACE]       Start PXE server on interface (default: eth0)
@@ -53,7 +53,7 @@ usage() {
     cat <<'EOF'
 Usage: codex-pxe [OPTIONS]
 
-Set up a PXE network boot server to boot CodexOS on other machines.
+Set up a PXE network boot server to boot CoLinux on other machines.
 
 Options:
   --start [IFACE]        Start PXE server (default interface: eth0)
@@ -67,7 +67,7 @@ Options:
 How it works:
   1. Starts dnsmasq with DHCP + TFTP + HTTP on the given interface
   2. Serves the Alpine kernel and initramfs to any PXE-capable machine
-  3. The client boots into CodexOS over the network — no USB needed
+  3. The client boots into CoLinux over the network — no USB needed
 
 Requirements: dnsmasq, syslinux (~1MB total)
 Install:      apk add dnsmasq syslinux
@@ -75,7 +75,7 @@ Install:      apk add dnsmasq syslinux
 Examples:
   codex-pxe --start                 Start on default interface
   codex-pxe --start eth1            Start on specific interface
-  codex-pxe --start --iso /path/to/codexos.iso
+  codex-pxe --start --iso /path/to/colinux.iso
   codex-pxe --status
   codex-pxe --stop
 EOF
@@ -191,14 +191,14 @@ setup_bootloader() {
         done
     done
 
-    # Default config — auto-boot CodexOS
+    # Default config — auto-boot CoLinux
     cat > "${PXE_BOOT}/pxelinux.cfg/default" <<'PXECFG'
-DEFAULT codexos
+DEFAULT colinux
 TIMEOUT 30
 PROMPT 0
 
-LABEL codexos
-    MENU LABEL CodexOS Lite (Network Boot)
+LABEL colinux
+    MENU LABEL CoLinux Lite (Network Boot)
     KERNEL vmlinuz
     APPEND initrd=initramfs modules=loop,squashfs,sd-mod,usb-storage nomodeset
 PXECFG
@@ -224,7 +224,7 @@ pxe_start() {
 
     # Check for boot files
     if [[ ! -f "${PXE_BOOT}/vmlinuz" ]] || [[ ! -f "${PXE_BOOT}/initramfs" ]]; then
-        die "No boot files found in ${PXE_BOOT}/. Use --iso to extract from a CodexOS image."
+        die "No boot files found in ${PXE_BOOT}/. Use --iso to extract from a CoLinux image."
     fi
 
     check_deps
@@ -256,7 +256,7 @@ pxe_start() {
     # Write dnsmasq config
     local dnsmasq_conf="${PXE_DIR}/dnsmasq.conf"
     cat > "$dnsmasq_conf" <<DNSCONF
-# CodexOS PXE Server
+# CoLinux PXE Server
 # Interface
 interface=${iface}
 bind-interfaces
@@ -283,7 +283,7 @@ dhcp-leasefile=${PXE_LEASES}
 # Don't override existing DNS
 DNSCONF
 
-    echo "Starting CodexOS PXE Server..."
+    echo "Starting CoLinux PXE Server..."
     echo "  Interface:   $iface"
     echo "  Server IP:   $subnet"
     echo "  DHCP range:  ${dhcp_range_start} - ${dhcp_range_end}"
@@ -320,7 +320,7 @@ DNSCONF
     echo "  1. Connect to the same network"
     echo "  2. Boot and press the network boot key (F12, Esc, or F8)"
     echo "  3. Select 'PXE' or 'Network' from boot menu"
-    echo "  4. CodexOS will load over the network"
+    echo "  4. CoLinux will load over the network"
     echo ""
     echo "Press Ctrl+C to stop the server."
 
@@ -370,7 +370,7 @@ pxe_stop() {
 
 # ── Status ────────────────────────────────────────────────────────────────
 pxe_status() {
-    echo "=== CodexOS PXE Server Status ==="
+    echo "=== CoLinux PXE Server Status ==="
     echo ""
 
     if [[ -f "$PXE_PIDFILE" ]] && kill -0 "$(cat "$PXE_PIDFILE")" 2>/dev/null; then

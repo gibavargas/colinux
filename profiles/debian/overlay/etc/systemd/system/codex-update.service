@@ -1,6 +1,6 @@
 [Unit]
-Description=CodexOS Desktop Auto-Update Service
-Documentation=https://github.com/colinux/codexos
+Description=CoLinux Desktop Auto-Update Service
+Documentation=https://github.com/gibavargas/colinux
 After=network-online.target NetworkManager-wait-online.service
 Wants=network-online.target
 ConditionPathExists=/etc/codex-auto-update.conf

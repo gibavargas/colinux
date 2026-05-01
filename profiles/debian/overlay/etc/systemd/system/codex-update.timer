@@ -1,6 +1,6 @@
 [Unit]
-Description=CodexOS Desktop Auto-Update Timer
-Documentation=https://github.com/colinux/codexos
+Description=CoLinux Desktop Auto-Update Timer
+Documentation=https://github.com/gibavargas/colinux
 After=network-online.target
 
 [Timer]

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Disk Inventory Scanner
+# CoLinux Desktop — Disk Inventory Scanner
 # =============================================================================
 # Scans all block devices and creates an inventory. Used for disk-safety model
 # and GUI display of available disks.
@@ -89,7 +89,7 @@ DEV
 
     # Build human-readable inventory
     {
-        echo "=== CodexOS Disk Inventory — $ts ==="
+        echo "=== CoLinux Disk Inventory — $ts ==="
         echo ""
         lsblk -f -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,SERIAL 2>/dev/null || \
             lsblk -f 2>/dev/null

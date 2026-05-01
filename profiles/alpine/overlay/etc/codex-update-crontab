@@ -1,5 +1,5 @@
 # /etc/codex-update-crontab
-# CodexOS Lite — Codex CLI auto-update schedule
+# CoLinux Lite — Codex CLI auto-update schedule
 #
 # This crontab is installed by the codex-auto-update OpenRC service.
 # The interval is dynamically adjusted based on /etc/config/auto-update.conf.

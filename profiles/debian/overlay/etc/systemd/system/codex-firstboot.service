@@ -1,6 +1,6 @@
 [Unit]
-Description=CodexOS Desktop First Boot Setup
-Documentation=https://github.com/colinux/codexos
+Description=CoLinux Desktop First Boot Setup
+Documentation=https://github.com/gibavargas/colinux
 After=local-fs.target network.target NetworkManager.service
 Wants=network-online.target
 ConditionPathExists=!/persist/.first-boot-done

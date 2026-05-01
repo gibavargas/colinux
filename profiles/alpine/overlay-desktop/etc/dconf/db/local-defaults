@@ -1,4 +1,4 @@
-# dconf database — CodexOS Desktop defaults
+# dconf database — CoLinux Desktop defaults
 # Dark theme, no animations, Codex-focused GNOME settings
 
 [org/gnome/desktop/interface]

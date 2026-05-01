@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Lite — QEMU Test Image Builder
+# CoLinux Lite — QEMU Test Image Builder
 # =============================================================================
 # Creates a QEMU-compatible qcow2 image from the built ISO or raw image.
 # Optionally boots it in QEMU for interactive testing.
@@ -10,8 +10,8 @@
 #   ./build-qemu.sh --boot               # Auto-find ISO and boot
 #
 # Options:
-#   --iso <path>   Path to the CodexOS ISO file
-#   --raw <path>   Path to the CodexOS raw disk image
+#   --iso <path>   Path to the CoLinux ISO file
+#   --raw <path>   Path to the CoLinux raw disk image
 #   --size <size>  QCOW2 virtual size (default: 4G)
 #   --boot         Boot the image in QEMU after creation
 #   --arch <arch>  Target architecture (default: auto-detect or x86_64)
@@ -54,10 +54,10 @@ done
 # ── Auto-detect files ───────────────────────────────────────────────────────
 if [ -z "$ISO_PATH" ] && [ -z "$RAW_PATH" ]; then
     # Try to find an ISO in the dist directory
-    ISO_PATH="$(find "$DIST_DIR" -name 'codexos-lite-*.iso' 2>/dev/null | head -1)"
+    ISO_PATH="$(find "$DIST_DIR" -name 'colinux-lite-*.iso' 2>/dev/null | head -1)"
     if [ -z "$ISO_PATH" ]; then
         # Try raw image
-        RAW_PATH="$(find "$DIST_DIR" -name 'codexos-lite-*.raw.img' 2>/dev/null | head -1)"
+        RAW_PATH="$(find "$DIST_DIR" -name 'colinux-lite-*.raw.img' 2>/dev/null | head -1)"
     fi
 fi
 
@@ -98,7 +98,7 @@ build_from_raw() {
 # ── Build QCOW2 from ISO (install to disk) ──────────────────────────────────
 build_from_iso() {
     local iso="$1"
-    local qcow2="$DIST_DIR/codexos-lite-${ARCH}.qcow2"
+    local qcow2="$DIST_DIR/colinux-lite-${ARCH}.qcow2"
 
     echo "==> Creating QCOW2 disk from ISO..."
 

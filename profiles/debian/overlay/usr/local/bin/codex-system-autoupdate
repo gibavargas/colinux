@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — System Auto-Update Script
+# CoLinux Desktop — System Auto-Update Script
 # =============================================================================
 # Handles Debian package updates (security + optionally full) and coordinates
 # with the Codex Desktop updater.
@@ -176,10 +176,10 @@ update_debian_packages() {
 # ── Configure unattended-upgrades ────────────────────────────────────────────
 configure_unattended_upgrades() {
     local ua_dir="/etc/apt/apt.conf.d"
-    local ua_file="$ua_dir/50codexos-auto-upgrades"
+    local ua_file="$ua_dir/50colinux-auto-upgrades"
 
     cat > "$ua_file" <<'UACONF'
-// CodexOS Desktop — Unattended Upgrades Configuration
+// CoLinux Desktop — Unattended Upgrades Configuration
 // Automatically install security updates
 
 Unattended-Upgrade::Allowed-Origins {
@@ -234,7 +234,7 @@ rotate_logs() {
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
     rotate_logs
-    log_info "=== CodexOS System Auto-Update ==="
+    log_info "=== CoLinux System Auto-Update ==="
 
     load_config
 

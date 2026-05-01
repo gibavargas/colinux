@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-restore — Safely restore a CodexOS backup with path validation
-# Part of CodexOS Lite
+# codex-restore — Safely restore a CoLinux backup with path validation
+# Part of CoLinux Lite
 #
 # Usage: codex-restore [OPTIONS] FILE
 #
@@ -33,7 +33,7 @@ die() {
 usage() {
     echo "Usage: codex-restore [OPTIONS] FILE"
     echo ""
-    echo "Safely restore a CodexOS backup to /persist and /workspace only."
+    echo "Safely restore a CoLinux backup to /persist and /workspace only."
     echo ""
     echo "Options:"
     echo "  --persist-only   Only restore /persist files"

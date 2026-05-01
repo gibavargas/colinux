@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-network — Network setup tool for CodexOS Lite
-# Part of CodexOS Lite
+# codex-network — Network setup tool for CoLinux Lite
+# Part of CoLinux Lite
 #
 # Detects available interfaces, configures Ethernet (DHCP),
 # and offers Wi-Fi setup via wpa_supplicant or iwd.
@@ -366,7 +366,7 @@ cmd_wifi_list() {
 # ── Interactive wizard ────────────────────────────────────────────────────
 wizard() {
     echo "╔══════════════════════════════╗"
-    echo "║    CODEXOS NETWORK SETUP    ║"
+    echo "║    COLINUX NETWORK SETUP    ║"
     echo "╚══════════════════════════════╝"
     echo ""
 

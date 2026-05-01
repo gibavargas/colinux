@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Lite — Codex CLI Setup Script
+# CoLinux Lite — Codex CLI Setup Script
 # =============================================================================
 # Downloads and installs the OpenAI Codex CLI musl binary.
 # Supports x86_64 and aarch64 architectures.
@@ -228,7 +228,7 @@ verify_install() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
-    log_info "=== CodexOS — Codex CLI Setup ==="
+    log_info "=== CoLinux — Codex CLI Setup ==="
     log_info "Architecture: $(uname -m)"
     log_info "Install path: $INSTALL_PATH"
     log_info "Channel:      $CHANNEL"

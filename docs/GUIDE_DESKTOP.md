@@ -1,6 +1,6 @@
-# CodexOS Desktop Edition — User Guide
+# CoLinux Desktop Edition — User Guide
 
-> **CodexOS Desktop** is the full graphical edition of CodexOS, featuring an XFCE4 desktop environment with the Codex Desktop (Electron) app pre-installed. It boots from USB, runs entirely in RAM for safety, and provides automatic updates for both the Debian system and the OpenAI Codex application.
+> **CoLinux Desktop** is the full graphical edition of CoLinux, featuring an XFCE4 desktop environment with the Codex Desktop (Electron) app pre-installed. It boots from USB, runs entirely in RAM for safety, and provides automatic updates for both the Debian system and the OpenAI Codex application.
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## Overview
 
-CodexOS Desktop provides a complete Linux desktop experience tailored for OpenAI Codex:
+CoLinux Desktop provides a complete Linux desktop experience tailored for OpenAI Codex:
 
 | Feature | Details |
 |---|---|
@@ -65,7 +65,7 @@ CodexOS Desktop provides a complete Linux desktop experience tailored for OpenAI
 
 ```bash
 # On Linux/macOS
-sudo dd if=codexos-desktop-YYYYMMDD.iso of=/dev/sdX bs=4M status=progress && sync
+sudo dd if=colinux-desktop-YYYYMMDD.iso of=/dev/sdX bs=4M status=progress && sync
 ```
 
 Replace `/dev/sdX` with your USB device (find it with `lsblk`).
@@ -79,7 +79,7 @@ Replace `/dev/sdX` with your USB device (find it with `lsblk`).
 qemu-system-x86_64 \
     -m 4096 \
     -smp 2 \
-    -cdrom codexos-desktop-YYYYMMDD.iso \
+    -cdrom colinux-desktop-YYYYMMDD.iso \
     -boot d \
     -enable-kvm \
     -net nic -net user
@@ -102,7 +102,7 @@ qemu-system-x86_64 \
 
 Flash to internal drive using the raw USB image:
 ```bash
-sudo dd if=codexos-desktop-YYYYMMDD.img.gz of=/dev/nvme0n1 bs=4M status=progress && sync
+sudo dd if=colinux-desktop-YYYYMMDD.img.gz of=/dev/nvme0n1 bs=4M status=progress && sync
 ```
 
 ---
@@ -112,7 +112,7 @@ sudo dd if=codexos-desktop-YYYYMMDD.img.gz of=/dev/nvme0n1 bs=4M status=progress
 ### Boot Sequence
 
 1. **BIOS/UEFI** → Select USB drive or set as boot device
-2. **GRUB** → Choose "CodexOS Desktop (Live)" (or "Safe Graphics" if display issues)
+2. **GRUB** → Choose "CoLinux Desktop (Live)" (or "Safe Graphics" if display issues)
 3. **System loads** into RAM (may take 30-60 seconds)
 4. **LightDM** auto-logs in as the `codex` user
 5. **XFCE4 desktop** appears
@@ -301,7 +301,7 @@ codexctl backup --verify /persist/backups/mydisk.img
 
 ### How It Works
 
-CodexOS Desktop has a two-tier update system:
+CoLinux Desktop has a two-tier update system:
 
 ```
 ┌─────────────────────────────────────┐
@@ -418,7 +418,7 @@ Desktop notifications appear for:
 After writing the ISO to USB, create a persistence partition:
 
 ```bash
-# In a running CodexOS session or any Linux system:
+# In a running CoLinux session or any Linux system:
 # 1. Find the USB drive
 lsblk
 
@@ -456,12 +456,12 @@ du -sh /persist/*
 ```
 
 **Secure Boot issues:**
-- CodexOS supports Secure Boot via shim-signed
+- CoLinux supports Secure Boot via shim-signed
 - If you get a signature error, disable Secure Boot in BIOS/UEFI
 - Report the issue: the shim signature may need updating
 
 **USB not booting:**
-- Verify the ISO was written correctly: `dd if=codexos-desktop.iso | md5sum`
+- Verify the ISO was written correctly: `dd if=colinux-desktop.iso | md5sum`
 - Try a different USB port (USB 2.0 is most compatible)
 - Check BIOS boot order — some systems require "USB HDD" vs "USB FDD"
 
@@ -602,4 +602,4 @@ sudo systemctl restart codex-firstboot.service
 
 ---
 
-*CodexOS Desktop Edition v1.0.0 — Built with Debian Bookworm, XFCE4, and Electron*
+*CoLinux Desktop Edition v1.0.0 — Built with Debian Bookworm, XFCE4, and Electron*

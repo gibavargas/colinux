@@ -1,4 +1,4 @@
-# CodexOS Compat — codex user bashrc
+# CoLinux Compat — codex user bashrc
 
 # ── Aliases (same as Alpine edition) ──────────────────────────────────────────
 alias ci='codex-disk-inventory'

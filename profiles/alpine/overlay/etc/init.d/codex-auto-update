@@ -1,13 +1,13 @@
 #!/sbin/openrc-run
 # /etc/init.d/codex-auto-update
-# CodexOS Lite — Codex CLI auto-update service
+# CoLinux Lite — Codex CLI auto-update service
 #
 # Sets up a cron job that periodically checks for Codex CLI updates.
 # The cron schedule and behavior are controlled by /etc/config/auto-update.conf.
 # This service does NOT perform updates itself — it only installs the cron job.
 
 name="codex-auto-update"
-description="CodexOS Lite Codex CLI auto-update cron setup"
+description="CoLinux Lite Codex CLI auto-update cron setup"
 
 depend() {
     need localmount

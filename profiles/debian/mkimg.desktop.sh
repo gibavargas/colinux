@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Live-Build Configuration
+# CoLinux Desktop — Live-Build Configuration
 # =============================================================================
-# Configures the Debian live-build (lb) environment for codexos-desktop.
+# Configures the Debian live-build (lb) environment for colinux-desktop.
 # This is sourced or called by build-debian.sh.
 #
 # Sets up: distribution, packages, kernel, boot, overlays, hooks
@@ -15,7 +15,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # ── Build metadata ──
 CODENAME="bookworm"
 DISTRIBUTION="debian"
-EDITION="codexos-desktop"
+EDITION="colinux-desktop"
 ARCH="amd64"
 VERSION="${VERSION:-1.0.0}"
 BUILD_DATE="$(date +%Y%m%d)"
@@ -42,9 +42,9 @@ lb_config() {
         --bootloader "syslinux,grub-efi" \
         --uefi-secure-boot enable \
         --binary-images "iso-hybrid" \
-        --iso-application "CodexOS Desktop" \
-        --iso-publisher "CodexOS Project (https://github.com/codexos)" \
-        --iso-volume "codexos-desktop" \
+        --iso-application "CoLinux Desktop" \
+        --iso-publisher "CoLinux Project (https://github.com/colinux)" \
+        --iso-volume "colinux-desktop" \
         --iso-level 3 \
         --linux-packages "linux-image-amd64" \
         --linux-flavours "amd64" \
@@ -88,7 +88,7 @@ install_overlay() {
         return
     fi
 
-    local target="$BUILD_DIR/config/overlays/codexos/chroot"
+    local target="$BUILD_DIR/config/overlays/colinux/chroot"
     mkdir -p "$target"
 
     # Copy entire overlay
@@ -129,15 +129,15 @@ fi
 HOOK
 
     # ── Post-chroot hook: System customization ──
-    cat > "$BUILD_DIR/config/hooks/5000-codexos-customize.chroot" <<'HOOK'
+    cat > "$BUILD_DIR/config/hooks/5000-colinux-customize.chroot" <<'HOOK'
 #!/bin/bash
 set -e
-echo "Customizing CodexOS..."
+echo "Customizing CoLinux..."
 
 # ── Copy setup script to chroot ──
-mkdir -p /opt/codexos-setup
-if [ -f /opt/codexos-setup/setup-codex-desktop.sh ]; then
-    chmod +x /opt/codexos-setup/setup-codex-desktop.sh
+mkdir -p /opt/colinux-setup
+if [ -f /opt/colinux-setup/setup-codex-desktop.sh ]; then
+    chmod +x /opt/colinux-setup/setup-codex-desktop.sh
 fi
 
 # ── Create codex user ──
@@ -176,10 +176,10 @@ fi
 chmod 755 /usr/local/bin/codex-* 2>/dev/null || true
 
 # ── Set hostname ──
-echo "codexos-desktop" > /etc/hostname
+echo "colinux-desktop" > /etc/hostname
 cat > /etc/hosts <<HOSTS
 127.0.0.1	localhost
-127.0.1.1	codexos-desktop
+127.0.1.1	colinux-desktop
 ::1		localhost ip6-localhost ip6-loopback
 ff02::1		ip6-allnodes
 ff02::2		ip6-allrouters
@@ -207,7 +207,7 @@ systemctl enable lightdm 2>/dev/null || true
 apt-get autoremove -y --purge 2>/dev/null || true
 apt-get clean
 
-echo "CodexOS customization complete."
+echo "CoLinux customization complete."
 HOOK
 
     # ── Late chroot hook: Final cleanup ──
@@ -245,18 +245,18 @@ install_bootloader() {
     # Syslinux splash text
     mkdir -p "$BUILD_DIR/config/bootloaders/isolinux"
     cat > "$BUILD_DIR/config/bootloaders/isolinux/isolinux.cfg" <<'SYSLINUX'
-DEFAULT codexos
+DEFAULT colinux
 TIMEOUT 30
 PROMPT 0
 
-LABEL codexos
-    MENU LABEL CodexOS Desktop (Live)
+LABEL colinux
+    MENU LABEL CoLinux Desktop (Live)
     KERNEL /vmlinuz
     APPEND initrd=/initrd.img boot=live persistence quiet splash
     MENU DEFAULT
 
-LABEL codexos-nomodeset
-    MENU LABEL CodexOS Desktop (Safe Graphics)
+LABEL colinux-nomodeset
+    MENU LABEL CoLinux Desktop (Safe Graphics)
     KERNEL /vmlinuz
     APPEND initrd=/initrd.img boot=live persistence quiet splash nomodeset
 
@@ -271,12 +271,12 @@ SYSLINUX
 set default=0
 set timeout=5
 
-menuentry "CodexOS Desktop (Live)" {
+menuentry "CoLinux Desktop (Live)" {
     linux /vmlinuz boot=live persistence quiet splash
     initrd /initrd.img
 }
 
-menuentry "CodexOS Desktop (Safe Graphics)" {
+menuentry "CoLinux Desktop (Safe Graphics)" {
     linux /vmlinuz boot=live persistence quiet splash nomodeset
     initrd /initrd.img
 }

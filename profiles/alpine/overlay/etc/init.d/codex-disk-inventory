@@ -1,14 +1,14 @@
 #!/sbin/openrc-run
 # /etc/init.d/codex-disk-inventory
-# CodexOS Lite — Disk inventory service
+# CoLinux Lite — Disk inventory service
 #
 # Scans all attached block devices at boot and writes a manifest to
-# /run/codexos/disk-inventory.json. This manifest is used by disk
+# /run/colinux/disk-inventory.json. This manifest is used by disk
 # safety wrappers to identify devices and enforce the boot device
 # protection policy.
 
 name="codex-disk-inventory"
-description="CodexOS Lite disk inventory scanner"
+description="CoLinux Lite disk inventory scanner"
 
 depend() {
     need localmount

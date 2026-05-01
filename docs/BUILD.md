@@ -1,6 +1,6 @@
-# Building CodexOS Lite
+# Building CoLinux Lite
 
-This document describes how to build CodexOS Lite from source.
+This document describes how to build CoLinux Lite from source.
 
 ## Table of Contents
 
@@ -69,12 +69,12 @@ Builds may work on other distributions but are not officially supported. You wil
 ## Quick Build
 
 ```bash
-git clone https://github.com/colinux/codexos.git
-cd codexos
+git clone https://github.com/gibavargas/colinux.git
+cd colinux
 sudo ./build.sh
 ```
 
-Output: `dist/codexos-lite.iso` (~120 MB)
+Output: `dist/colinux-lite.iso` (~120 MB)
 
 ---
 
@@ -83,8 +83,8 @@ Output: `dist/codexos-lite.iso` (~120 MB)
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/colinux/codexos.git
-cd codexos
+git clone https://github.com/gibavargas/colinux.git
+cd colinux
 ```
 
 ### 2. Review the configuration
@@ -130,11 +130,11 @@ Build log: `.build/build.log`
 
 ```bash
 ls -lh dist/
-# codexos-lite.iso     120M
-# codexos-lite.iso.sha256  65B
+# colinux-lite.iso     120M
+# colinux-lite.iso.sha256  65B
 
 # Verify checksum
-sha256sum -c dist/codexos-lite.iso.sha256
+sha256sum -c dist/colinux-lite.iso.sha256
 ```
 
 ---
@@ -144,11 +144,11 @@ sha256sum -c dist/codexos-lite.iso.sha256
 Create a `build.conf` file in the project root to override defaults:
 
 ```bash
-# build.conf — CodexOS Lite build configuration
+# build.conf — CoLinux Lite build configuration
 
 # Edition to build
-EDITION="codexos-lite"
-# Options: codexos-lite, codexos-lite-gui, codexos-compat
+EDITION="colinux-lite"
+# Options: colinux-lite, colinux-lite-gui, colinux-compat
 
 # Output directory
 OUTPUT_DIR="dist"
@@ -176,7 +176,7 @@ EXCLUDE_PACKAGES=""
 KERNEL_VERSION="lts"
 
 # ISO volume label
-VOLUME_ID="CODEXOS"
+VOLUME_ID="COLINUX"
 
 # Build verbosity
 # Options: quiet, normal, verbose
@@ -187,7 +187,7 @@ VERBOSE="normal"
 
 ```bash
 # Override specific options from the command line
-sudo ./build.sh --edition codexos-lite-gui --verbose
+sudo ./build.sh --edition colinux-lite-gui --verbose
 sudo ./build.sh --compression gzip --output my-output/
 sudo ./build.sh --kernel-lts --extra-packages "vim tmux htop"
 ```
@@ -196,7 +196,7 @@ sudo ./build.sh --kernel-lts --extra-packages "vim tmux htop"
 
 ## Cross-Compilation for ARM64
 
-CodexOS Lite can be built for ARM64 (aarch64) devices such as Raspberry Pi 4/5 and other single-board computers.
+CoLinux Lite can be built for ARM64 (aarch64) devices such as Raspberry Pi 4/5 and other single-board computers.
 
 ### Prerequisites
 
@@ -211,7 +211,7 @@ sudo apk add aarch64-none-elf-gcc
 ### Build for ARM64
 
 ```bash
-sudo ./build.sh --arch aarch64 --edition codexos-lite
+sudo ./build.sh --arch aarch64 --edition colinux-lite
 ```
 
 ### ARM64-specific configuration
@@ -230,7 +230,7 @@ ARM64 builds produce a raw disk image (not an ISO):
 
 ```bash
 # For Raspberry Pi
-sudo dd if=dist/codexos-lite-aarch64.raw of=/dev/sdX bs=4M status=progress && sync
+sudo dd if=dist/colinux-lite-aarch64.raw of=/dev/sdX bs=4M status=progress && sync
 ```
 
 ### Current ARM64 status
@@ -249,19 +249,19 @@ Test your build without writing to physical media:
 
 ```bash
 # Basic test (TTY edition)
-./scripts/qemu-test.sh dist/codexos-lite.iso
+./scripts/qemu-test.sh dist/colinux-lite.iso
 
 # With more RAM
-./scripts/qemu-test.sh dist/codexos-lite.iso --ram 4096
+./scripts/qemu-test.sh dist/colinux-lite.iso --ram 4096
 
 # With a test disk attached (for disk safety testing)
-./scripts/qemu-test.sh dist/codexos-lite.iso --disk test-disk.qcow2
+./scripts/qemu-test.sh dist/colinux-lite.iso --disk test-disk.qcow2
 
 # With network access
-./scripts/qemu-test.sh dist/codexos-lite.iso --network
+./scripts/qemu-test.sh dist/colinux-lite.iso --network
 
 # Serial console (for headless testing)
-./scripts/qemu-test.sh dist/codexos-lite.iso --serial
+./scripts/qemu-test.sh dist/colinux-lite.iso --serial
 ```
 
 ### QEMU script details
@@ -460,6 +460,6 @@ EXCLUDE_PACKAGES="htop vim"
 
 | Edition | Target size | With persistence |
 |---|---|---|
-| `codexos-lite` | ~120 MB | +64 MB (LUKS headers + config) |
-| `codexos-lite-gui` | ~180 MB | +64 MB |
-| `codexos-compat` | ~350 MB | +64 MB |
+| `colinux-lite` | ~120 MB | +64 MB (LUKS headers + config) |
+| `colinux-lite-gui` | ~180 MB | +64 MB |
+| `colinux-compat` | ~350 MB | +64 MB |

@@ -1,11 +1,11 @@
-# CodexOS Compat — Development & Testing Container
-# Simulates the Debian-based CodexOS Compat environment (TTY only)
-# Usage: docker build -t codexos-compat -f Dockerfile-compat . && docker run -it codexos-compat
+# CoLinux Compat — Development & Testing Container
+# Simulates the Debian-based CoLinux Compat environment (TTY only)
+# Usage: docker build -t colinux-compat -f Dockerfile-compat . && docker run -it colinux-compat
 
 FROM debian:bookworm-slim
 
 LABEL maintainer="CoLinux Project"
-LABEL description="CodexOS Compat (Debian) development/test environment"
+LABEL description="CoLinux Compat (Debian) development/test environment"
 LABEL version="0.1.0"
 
 # Install all packages from the compat edition
@@ -81,8 +81,8 @@ RUN mkdir -p /run/codex \
     /mnt/disks/by-label \
     /mnt/disks/by-uuid \
     /mnt/disks/by-device \
-    /var/lib/codexos \
-    /usr/local/lib/codexos
+    /var/lib/colinux \
+    /usr/local/lib/colinux
 
 # Create codex user
 RUN groupadd -g 1000 codex && \
@@ -116,11 +116,11 @@ RUN chown codex:codex /home/codex/.profile /home/codex/.bashrc
 # Create mock codex binary for testing
 RUN printf '%s\n' \
     '#!/bin/bash' \
-    '# CodexOS — Codex CLI placeholder (compat edition)' \
+    '# CoLinux — Codex CLI placeholder (compat edition)' \
     'VERSION="${CODEX_VERSION:-0.1.0-placeholder}"' \
-    'if [ "$1" = "--version" ]; then echo "codex $VERSION (CodexOS Compat placeholder)"; exit 0; fi' \
-    'if [ "$1" = "--help" ]; then echo "CodexOS Compat - OpenAI Codex CLI placeholder"; echo "Run: setup-codex --install"; exit 0; fi' \
-    'echo "CodexOS Compat - Codex CLI Placeholder"' \
+    'if [ "$1" = "--version" ]; then echo "codex $VERSION (CoLinux Compat placeholder)"; exit 0; fi' \
+    'if [ "$1" = "--help" ]; then echo "CoLinux Compat - OpenAI Codex CLI placeholder"; echo "Run: setup-codex --install"; exit 0; fi' \
+    'echo "CoLinux Compat - Codex CLI Placeholder"' \
     'echo "To install real Codex binary: setup-codex --install"' \
     'exec bash' \
     > /usr/local/bin/codex && chmod +x /usr/local/bin/codex

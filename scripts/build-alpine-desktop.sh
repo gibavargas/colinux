@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Alpine ISO Build Script
+# CoLinux Desktop — Alpine ISO Build Script
 # =============================================================================
 # Builds a bootable Alpine Linux ISO with GNOME Desktop + Electron Codex.
 #
@@ -14,7 +14,7 @@
 # Environment variables:
 #   CODEX_VERSION        — Override Codex CLI version (default: latest)
 #   ALPINE_MIRROR        — Alpine package mirror
-#   CODEXOS_IMG_SIZE     — Image size in MB (default: 2200 for desktop)
+#   COLINUX_IMG_SIZE     — Image size in MB (default: 2200 for desktop)
 #   CODEX_DESKTOP_REPO   — GitHub repo for Electron Codex Desktop
 # =============================================================================
 set -euo pipefail
@@ -39,9 +39,9 @@ ALPINE_RELEASE="${ALPINE_RELEASE:-3.21}"
 ALPINE_MIRROR="${ALPINE_MIRROR:-http://dl-cdn.alpinelinux.org/alpine}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/dist}"
 APORTS_BRANCH="v${ALPINE_RELEASE}.0"
-APORTS_DIR="/tmp/aports-codexos-desktop"
+APORTS_DIR="/tmp/aports-colinux-desktop"
 CODEX_VERSION="${CODEX_VERSION:-latest}"
-CODEXOS_IMG_SIZE="${CODEXOS_IMG_SIZE:-2200}"
+COLINUX_IMG_SIZE="${COLINUX_IMG_SIZE:-2200}"
 
 # ── Colors (for TTY) ─────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -63,7 +63,7 @@ while [[ $# -gt 0 ]]; do
         --release)     ALPINE_RELEASE="$2"; shift 2 ;;
         --outdir)      OUTDIR="$2"; shift 2 ;;
         --codex-ver)   CODEX_VERSION="$2"; shift 2 ;;
-        --img-size)    CODEXOS_IMG_SIZE="$2"; shift 2 ;;
+        --img-size)    COLINUX_IMG_SIZE="$2"; shift 2 ;;
         --help|-h)
             echo "Usage: $0 [--arch x86_64|aarch64] [--release 3.21] [--outdir DIR] [--img-size MB]"
             exit 0
@@ -169,12 +169,12 @@ clone_aports() {
 
 # ── Step 3: Install custom profile into aports ──────────────────────────────
 install_profile() {
-    log_step "Installing codexos-desktop profile into aports"
+    log_step "Installing colinux-desktop profile into aports"
 
-    local profile_dest="$APORTS_DIR/scripts/mkimg.codexos-desktop.sh"
+    local profile_dest="$APORTS_DIR/scripts/mkimg.colinux-desktop.sh"
 
     # Copy the profile script
-    cp "$PROFILE_DIR/mkimg.codexos-desktop.sh" "$profile_dest"
+    cp "$PROFILE_DIR/mkimg.colinux-desktop.sh" "$profile_dest"
     chmod +x "$profile_dest"
 
     # Copy desktop package lists
@@ -184,12 +184,12 @@ install_profile() {
         exit 1
     fi
 
-    cp "$desktop_pkg" "$APORTS_DIR/scripts/packages.codexos-desktop.${ARCH}"
-    cp "$desktop_pkg" "$APORTS_DIR/scripts/packages.codexos-desktop"
+    cp "$desktop_pkg" "$APORTS_DIR/scripts/packages.colinux-desktop.${ARCH}"
+    cp "$desktop_pkg" "$APORTS_DIR/scripts/packages.colinux-desktop"
 
     # Copy overlay directory
     if [ -d "$PROFILE_DIR/overlay-desktop" ]; then
-        local overlay_dest="$APORTS_DIR/scripts/codexos-desktop/overlay-desktop"
+        local overlay_dest="$APORTS_DIR/scripts/colinux-desktop/overlay-desktop"
         rm -rf "$overlay_dest"
         cp -a "$PROFILE_DIR/overlay-desktop" "$overlay_dest"
     else
@@ -209,7 +209,7 @@ install_shared() {
         return 0
     fi
 
-    local overlay_dest="$APORTS_DIR/scripts/codexos-desktop/overlay-desktop"
+    local overlay_dest="$APORTS_DIR/scripts/colinux-desktop/overlay-desktop"
 
     "$SHARED_DIR/install-shared.sh" \
         --edition desktop \
@@ -224,7 +224,7 @@ install_shared() {
 setup_electron_overlay() {
     log_step "Setting up Electron Codex Desktop in overlay"
 
-    local overlay_dest="$APORTS_DIR/scripts/codexos-desktop/overlay-desktop"
+    local overlay_dest="$APORTS_DIR/scripts/colinux-desktop/overlay-desktop"
 
     # Create Electron app directory structure
     mkdir -p "$overlay_dest/opt/codex-desktop/app"
@@ -238,7 +238,7 @@ setup_electron_overlay() {
 
     cat > "$overlay_dest/persist/config/postinstall/60-setup-electron-codex.sh" <<'POSTINSTALL'
 #!/bin/sh
-# CodexOS postinstall — Install Electron Codex Desktop
+# CoLinux postinstall — Install Electron Codex Desktop
 # This runs during first boot if the Electron app is not yet installed.
 
 if [ ! -f /opt/codex-desktop/codex-desktop ]; then
@@ -266,17 +266,17 @@ run_mkimage() {
     fi
     chmod +x "$mkimage_script"
 
-    export CODEXOS_IMG_SIZE
+    export COLINUX_IMG_SIZE
 
     "$mkimage_script" \
-        --profile "codexos-desktop" \
+        --profile "colinux-desktop" \
         --arch "$ARCH" \
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/main" \
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/community" \
         --outdir "$OUTDIR" \
         --extra-repository "${ALPINE_MIRROR}/alpine/edge/main" \
         --tag "v${ALPINE_RELEASE}" \
-        --yaml "$APORTS_DIR/scripts/mkimg.codexos-desktop.sh" \
+        --yaml "$APORTS_DIR/scripts/mkimg.colinux-desktop.sh" \
         || {
             log_error "mkimage.sh failed!"
             exit 1
@@ -333,7 +333,7 @@ inject_codex() {
 
     # Find the ISO
     local iso_file
-    iso_file="$(find "$OUTDIR" -name 'codexos-desktop-*.iso' | head -1)"
+    iso_file="$(find "$OUTDIR" -name 'colinux-desktop-*.iso' | head -1)"
     if [ -z "$iso_file" ]; then
         log_error "Could not find built ISO in $OUTDIR"
         exit 1
@@ -408,7 +408,7 @@ inject_codex() {
             -e boot/grub/efi.img \
             -no-emul-boot \
             -isohybrid-gpt-basdat \
-            -V "CODEXOS-DESKTOP" \
+            -V "COLINUX-DESKTOP" \
             "$iso_staging" 2>/dev/null || {
             log_warn "xorriso repack failed."
             repacked_iso=""
@@ -428,14 +428,14 @@ create_raw_image() {
     log_step "Creating raw disk image"
 
     local iso_file
-    iso_file="$(find "$OUTDIR" -name 'codexos-desktop-*.iso' | head -1)"
+    iso_file="$(find "$OUTDIR" -name 'colinux-desktop-*.iso' | head -1)"
     if [ -z "$iso_file" ]; then
         log_warn "No ISO found, skipping raw image creation."
         return 0
     fi
 
     local raw_file="${iso_file%.iso}.raw.img"
-    local size_mb="$CODEXOS_IMG_SIZE"
+    local size_mb="$COLINUX_IMG_SIZE"
 
     log_info "Creating ${size_mb}MB raw disk image..."
 
@@ -508,10 +508,10 @@ EOF
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 print_summary() {
-    log_step "Build Complete — CodexOS Desktop"
+    log_step "Build Complete — CoLinux Desktop"
 
     echo ""
-    echo "  Edition:       CodexOS Desktop (Alpine + GNOME + Electron Codex)"
+    echo "  Edition:       CoLinux Desktop (Alpine + GNOME + Electron Codex)"
     echo "  Architecture:  $ARCH"
     echo "  Alpine:        $ALPINE_RELEASE"
     echo "  Output:        $OUTDIR"
@@ -525,7 +525,7 @@ print_summary() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
-    log_step "CodexOS Desktop Build — $ARCH / Alpine $ALPINE_RELEASE"
+    log_step "CoLinux Desktop Build — $ARCH / Alpine $ALPINE_RELEASE"
 
     check_root
     check_arch

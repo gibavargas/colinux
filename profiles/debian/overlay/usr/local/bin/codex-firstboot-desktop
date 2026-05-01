@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — First Boot Initialization
+# CoLinux Desktop — First Boot Initialization
 # =============================================================================
 # Runs once on first boot to set up the persistent environment for the desktop
 # edition. Sets up /persist, user environment, and triggers initial setup.
@@ -60,7 +60,7 @@ setup_user() {
     # Set up bash profile additions
     cat >> "$USER_HOME/.bashrc" <<'BASHEOF'
 
-# ── CodexOS Desktop additions ──
+# ── CoLinux Desktop additions ──
 export PATH="$PATH:/usr/local/bin"
 export EDITOR="${EDITOR:-vim}"
 export VISUAL="${VISUAL:-vim}"
@@ -90,13 +90,13 @@ setup_codex_desktop() {
     log "Setting up Codex Desktop app..."
 
     # Run the setup script if present
-    if [ -x /opt/codexos-setup/setup-codex-desktop.sh ]; then
+    if [ -x /opt/colinux-setup/setup-codex-desktop.sh ]; then
         log "Running Codex Desktop setup..."
-        /opt/codexos-setup/setup-codex-desktop.sh >> "$LOG_FILE" 2>&1 || {
+        /opt/colinux-setup/setup-codex-desktop.sh >> "$LOG_FILE" 2>&1 || {
             log "WARN: Codex Desktop setup failed — will retry on next update cycle"
         }
     else
-        log "WARN: /opt/codexos-setup/setup-codex-desktop.sh not found"
+        log "WARN: /opt/colinux-setup/setup-codex-desktop.sh not found"
     fi
 }
 
@@ -129,7 +129,7 @@ setup_ssh() {
     fi
 
     log "Generating SSH keys..."
-    su - "$USER" -c "ssh-keygen -t ed25519 -f $PERSIST_DIR/ssh/id_ed25519 -N '' -C 'codexos-desktop'" \
+    su - "$USER" -c "ssh-keygen -t ed25519 -f $PERSIST_DIR/ssh/id_ed25519 -N '' -C 'colinux-desktop'" \
         2>/dev/null || true
 
     # Fix permissions
@@ -145,12 +145,12 @@ finalize() {
     touch "$PERSIST_DIR/.first-boot-done"
     chown "$USER:$USER" "$PERSIST_DIR/.first-boot-done"
 
-    log "=== CodexOS Desktop first boot complete ==="
+    log "=== CoLinux Desktop first boot complete ==="
 
     # Show welcome notification
     if command -v notify-send >/dev/null 2>&1; then
         su - "$USER" -c "DISPLAY=:0 notify-send -u normal \
-            'Welcome to CodexOS Desktop' \
+            'Welcome to CoLinux Desktop' \
             'System initialized. Codex Desktop will start shortly.'" 2>/dev/null || true
     fi
 }
@@ -163,7 +163,7 @@ main() {
         exit 0
     fi
 
-    log "=== CodexOS Desktop First Boot ==="
+    log "=== CoLinux Desktop First Boot ==="
     log "System: $(uname -a)"
     log "Date: $(date)"
 

@@ -1,4 +1,4 @@
-# CodexOS — seatd udev rules
+# CoLinux — seatd udev rules
 # Allows non-root users in the 'seatd' group to access GPU, input, and DRM devices.
 # Required for cage/sway to work without root privileges.
 

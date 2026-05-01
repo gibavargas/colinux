@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest a new feature or enhancement for CodexOS
+about: Suggest a new feature or enhancement for CoLinux
 title: "[FEAT] "
 labels: enhancement, triage
 assignees: ""
@@ -24,10 +24,10 @@ Are there other approaches or workarounds?
 
 ## Scope
 
-- [ ] Alpine edition (`codexos-lite`)
-- [ ] GUI edition (`codexos-lite-gui`)
-- [ ] Debian compat (`codexos-compat`)
-- [ ] Desktop edition (`codexos-desktop`)
+- [ ] Alpine edition (`colinux-lite`)
+- [ ] GUI edition (`colinux-lite-gui`)
+- [ ] Debian compat (`colinux-compat`)
+- [ ] Desktop edition (`colinux-desktop`)
 - [ ] Docker container
 - [ ] Build system / CI
 - [ ] Documentation

@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# codex-clipboard — Wayland clipboard helper for CodexOS GUI
+# codex-clipboard — Wayland clipboard helper for CoLinux GUI
 # =============================================================================
 # Provides simple clipboard read/write via wl-copy/wl-paste equivalents.
 # Uses wl-clipboard if available, falls back to a file-based approach.

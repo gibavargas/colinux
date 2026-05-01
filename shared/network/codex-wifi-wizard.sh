@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================================
-# CodexOS — Unified WiFi Wizard
+# CoLinux — Unified WiFi Wizard
 # ============================================================================
-# Comprehensive WiFi setup wizard for ALL CodexOS editions (TTY + GUI).
+# Comprehensive WiFi setup wizard for ALL CoLinux editions (TTY + GUI).
 # Supports both iwd and wpa_supplicant backends with automatic fallback.
 #
 # Usage:
@@ -794,7 +794,7 @@ gui_password() {
 wizard_tty() {
     echo ""
     echo -e "${BOLD}╔══════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}║     CodexOS WiFi Setup Wizard         ║${NC}"
+    echo -e "${BOLD}║     CoLinux WiFi Setup Wizard         ║${NC}"
     echo -e "${BOLD}╚══════════════════════════════════════╝${NC}"
     echo ""
 

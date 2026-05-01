@@ -98,7 +98,7 @@ jobs:
       - name: Print summary to log
         run: |
           echo "========================================="
-          echo "  CodexOS Daily Review Summary"
+          echo "  CoLinux Daily Review Summary"
           echo "  $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo "========================================="
           echo ""

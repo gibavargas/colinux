@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-benchmark — Quick hardware benchmark for CodexOS
-# Part of CodexOS Lite
+# codex-benchmark — Quick hardware benchmark for CoLinux
+# Part of CoLinux Lite
 #
 # Usage:
 #   codex-benchmark              Run full benchmark (CPU, disk, network)

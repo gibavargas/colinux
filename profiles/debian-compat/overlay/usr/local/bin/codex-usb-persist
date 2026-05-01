@@ -1,8 +1,8 @@
 #!/bin/bash
 # codex-usb-persist — Manage USB persistence (LUS) partition
-# Part of CodexOS Lite
+# Part of CoLinux Lite
 #
-# Manages the LUKS-encrypted persistence partition on a CodexOS USB drive.
+# Manages the LUKS-encrypted persistence partition on a CoLinux USB drive.
 #
 # Usage: codex-usb-persist <COMMAND> [OPTIONS]
 #   status                  Show persistence partition status
@@ -301,7 +301,7 @@ cmd_resize() {
             sgdisk -d "$part_num" "$disk" 2>/dev/null
             sgdisk -N "$part_num" "$disk" 2>/dev/null
             sgdisk -t "$part_num":8300 "$disk" 2>/dev/null
-            sgdisk -c "$part_num":"CodexOS Persistence" "$disk" 2>/dev/null
+            sgdisk -c "$part_num":"CoLinux Persistence" "$disk" 2>/dev/null
         else
             echo "Note: Precise partition resizing with sgdisk requires careful calculation."
             echo "Consider using 'max' for automatic resize, or use a partitioning tool."

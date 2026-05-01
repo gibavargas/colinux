@@ -1,4 +1,4 @@
-# CodexOS Desktop — Persistent Storage Mount Configuration
+# CoLinux Desktop — Persistent Storage Mount Configuration
 # /persist is the encrypted overlay filesystem for user data, configs, and state.
 #
 # This is the default fstab for the live system. The actual encrypted persistence

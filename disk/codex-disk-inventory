@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-disk-inventory — Scan all block devices and produce JSON + Markdown reports
-# Part of CodexOS Lite
+# Part of CoLinux Lite
 #
 # Outputs:
 #   /run/codex/disks.json  — machine-readable inventory
@@ -280,7 +280,7 @@ echo "$FULL_JSON" | jq '.' > "${RUN_DIR}/disks.json"
 
 # ── Generate Markdown output ──────────────────────────────────────────────
 {
-    echo "# CodexOS Disk Inventory"
+    echo "# CoLinux Disk Inventory"
     echo ""
     echo "**Generated:** ${TIMESTAMP}  "
     echo "**Boot Device:** \`${BOOT_DEV}\`  "
@@ -323,7 +323,7 @@ echo "$FULL_JSON" | jq '.' > "${RUN_DIR}/disks.json"
 log_msg "inventory_complete devices=${#DISK_LIST[@]}"
 
 # Print summary to stdout
-echo "CodexOS Disk Inventory — ${#DISK_LIST[@]} device(s) scanned"
+echo "CoLinux Disk Inventory — ${#DISK_LIST[@]} device(s) scanned"
 echo "  JSON: ${RUN_DIR}/disks.json"
 echo "  Markdown: ${RUN_DIR}/disks.md"
 echo ""

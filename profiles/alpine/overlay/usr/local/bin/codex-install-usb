@@ -1,6 +1,6 @@
 #!/bin/bash
-# codex-install-usb — Install CodexOS to a USB drive
-# Part of CodexOS Lite
+# codex-install-usb — Install CoLinux to a USB drive
+# Part of CoLinux Lite
 #
 # Usage: codex-install-usb [OPTIONS] /dev/sdX
 #
@@ -19,7 +19,7 @@ set -euo pipefail
 
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/disk-actions.log"
-CODEXOS_IMAGE_DIR="${CODEXOS_IMAGE_DIR:-/opt/codexos}"
+COLINUX_IMAGE_DIR="${COLINUX_IMAGE_DIR:-/opt/colinux}"
 
 mkdir -p "$LOG_DIR"
 
@@ -40,14 +40,14 @@ usage() {
     cat <<EOF
 Usage: codex-install-usb [OPTIONS] /dev/sdX
 
-Install CodexOS to a USB drive.
+Install CoLinux to a USB drive.
 
 Options:
   --mode MODE       Installation mode (default: portable-safe)
                       portable-safe   — Read-only squashfs + LUKS persistence
                       portable-admin  — Writable ext4 + LUKS persistence
                       forensic        — Read-only, no persistence
-  --label LABEL     Volume label for EFI partition (default: CODEXOS)
+  --label LABEL     Volume label for EFI partition (default: COLINUX)
   --persist-size N  Size in MB for persistence partition (default: remaining)
   --system-size N   Size in MB for system partition (default: 2048)
   --efi-size N      Size in MB for EFI partition (default: 512)
@@ -68,7 +68,7 @@ DEVICE=""
 EFI_SIZE=512
 SYSTEM_SIZE=2048
 PERSIST_SIZE=0  # 0 = use remaining space
-VOLUME_LABEL="CODEXOS"
+VOLUME_LABEL="COLINUX"
 NO_CONFIRM=false
 
 # ── Parse arguments ───────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ fi
 
 # ── Display device info and confirm ──────────────────────────────────────
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║          CODEXOS USB INSTALLER                       ║"
+echo "║          COLINUX USB INSTALLER                       ║"
 echo "╠══════════════════════════════════════════════════════╣"
 echo "║  Device:    $DEVICE"
 echo "║  Model:     $MODEL"
@@ -231,19 +231,19 @@ fi
 # Partition 2: System
 if [[ "$MODE" == "portable-safe" || "$MODE" == "forensic" ]]; then
     # Use remaining - persist for system, or just system_size
-    sgdisk -n 2:0:+"${SYSTEM_SIZE}M" -t 2:8300 -c 2:"CodexOS System" "$DEVICE" >/dev/null 2>&1
+    sgdisk -n 2:0:+"${SYSTEM_SIZE}M" -t 2:8300 -c 2:"CoLinux System" "$DEVICE" >/dev/null 2>&1
 else
     # portable-admin: ext4 writable system
-    sgdisk -n 2:0:+"${SYSTEM_SIZE}M" -t 2:8300 -c 2:"CodexOS System" "$DEVICE" >/dev/null 2>&1
+    sgdisk -n 2:0:+"${SYSTEM_SIZE}M" -t 2:8300 -c 2:"CoLinux System" "$DEVICE" >/dev/null 2>&1
 fi
 
 # Partition 3: Persistence (LUKS)
 if [[ "$MODE" != "forensic" ]]; then
     if [[ "$PERSIST_SIZE" -gt 0 ]]; then
-        sgdisk -n 3:0:+"${PERSIST_SIZE}M" -t 3:8300 -c 3:"CodexOS Persistence" "$DEVICE" >/dev/null 2>&1
+        sgdisk -n 3:0:+"${PERSIST_SIZE}M" -t 3:8300 -c 3:"CoLinux Persistence" "$DEVICE" >/dev/null 2>&1
     else
         # Use all remaining space
-        sgdisk -n 3:0:0 -t 3:8300 -c 3:"CodexOS Persistence" "$DEVICE" >/dev/null 2>&1
+        sgdisk -n 3:0:0 -t 3:8300 -c 3:"CoLinux Persistence" "$DEVICE" >/dev/null 2>&1
     fi
 fi
 
@@ -321,22 +321,22 @@ if [[ -b "$PART2" ]]; then
     if [[ "$MODE" == "portable-safe" || "$MODE" == "forensic" ]]; then
         # Mount and copy squashfs image
         mount "$PART2" "$TEMP_MOUNT"
-        if [[ -f "${CODEXOS_IMAGE_DIR}/system.squashfs" ]]; then
-            cp "${CODEXOS_IMAGE_DIR}/system.squashfs" "$TEMP_MOUNT/"
+        if [[ -f "${COLINUX_IMAGE_DIR}/system.squashfs" ]]; then
+            cp "${COLINUX_IMAGE_DIR}/system.squashfs" "$TEMP_MOUNT/"
             echo "  → Copied system.squashfs"
         else
-            echo "  WARNING: system.squashfs not found at ${CODEXOS_IMAGE_DIR}/"
+            echo "  WARNING: system.squashfs not found at ${COLINUX_IMAGE_DIR}/"
             echo "  The system partition is prepared but empty. Copy the image manually."
         fi
         umount "$TEMP_MOUNT"
     else
         # portable-admin: mount and copy full root filesystem
         mount "$PART2" "$TEMP_MOUNT"
-        if [[ -d "${CODEXOS_IMAGE_DIR}/rootfs" ]]; then
-            cp -a "${CODEXOS_IMAGE_DIR}/rootfs/"* "$TEMP_MOUNT/"
+        if [[ -d "${COLINUX_IMAGE_DIR}/rootfs" ]]; then
+            cp -a "${COLINUX_IMAGE_DIR}/rootfs/"* "$TEMP_MOUNT/"
             echo "  → Copied root filesystem"
         else
-            echo "  WARNING: rootfs not found at ${CODEXOS_IMAGE_DIR}/rootfs/"
+            echo "  WARNING: rootfs not found at ${COLINUX_IMAGE_DIR}/rootfs/"
             echo "  The system partition is prepared but empty."
         fi
         umount "$TEMP_MOUNT"
@@ -354,21 +354,21 @@ if [[ -b "$PART1" ]]; then
 
     # Copy EFI boot files
     mkdir -p "$TEMP_EFI/EFI/BOOT"
-    mkdir -p "$TEMP_EFI/EFI/codexos"
+    mkdir -p "$TEMP_EFI/EFI/colinux"
 
-    if [[ -f "${CODEXOS_IMAGE_DIR}/boot/vmlinuz-lts" ]]; then
-        cp "${CODEXOS_IMAGE_DIR}/boot/vmlinuz-lts" "$TEMP_EFI/"
+    if [[ -f "${COLINUX_IMAGE_DIR}/boot/vmlinuz-lts" ]]; then
+        cp "${COLINUX_IMAGE_DIR}/boot/vmlinuz-lts" "$TEMP_EFI/"
         echo "  → Copied kernel"
     fi
 
-    if [[ -f "${CODEXOS_IMAGE_DIR}/boot/initramfs-lts" ]]; then
-        cp "${CODEXOS_IMAGE_DIR}/boot/initramfs-lts" "$TEMP_EFI/"
+    if [[ -f "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" ]]; then
+        cp "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" "$TEMP_EFI/"
         echo "  → Copied initramfs"
     fi
 
     # Copy EFI stub or systemd-boot / GRUB
-    if [[ -f "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
-        cp -a "${CODEXOS_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_EFI/EFI/BOOT/"
+    if [[ -f "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
+        cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_EFI/EFI/BOOT/"
     elif command -v grub-install &>/dev/null; then
         grub-install --target=x86_64-efi --efi-directory="$TEMP_EFI" \
                      --boot-directory="$TEMP_EFI" --removable \
@@ -376,8 +376,8 @@ if [[ -b "$PART1" ]]; then
     fi
 
     # Generate boot config based on mode
-    cat > "$TEMP_EFI/EFI/codexos/codexos.conf" <<BOOTCFG
-title CodexOS Lite ($MODE)
+    cat > "$TEMP_EFI/EFI/colinux/colinux.conf" <<BOOTCFG
+title CoLinux Lite ($MODE)
 linux /vmlinuz-lts
 initrd /initramfs-lts
 options quiet splash
@@ -385,10 +385,10 @@ BOOTCFG
 
     if [[ "$MODE" == "portable-safe" ]]; then
         echo "options quiet splash root=PARTUUID=$(blkid -s PARTUUID -o value "$PART2" 2>/dev/null) ro" \
-            >> "$TEMP_EFI/EFI/codexos/codexos.conf"
+            >> "$TEMP_EFI/EFI/colinux/colinux.conf"
     elif [[ "$MODE" == "portable-admin" ]]; then
         echo "options quiet splash root=PARTUUID=$(blkid -s PARTUUID -o value "$PART2" 2>/dev/null) rw" \
-            >> "$TEMP_EFI/EFI/codexos/codexos.conf"
+            >> "$TEMP_EFI/EFI/colinux/colinux.conf"
     fi
 
     umount "$TEMP_EFI"
@@ -398,7 +398,7 @@ fi
 # ── Sync and finalize ────────────────────────────────────────────────────
 sync
 echo ""
-echo "✓ CodexOS USB installation complete!"
+echo "✓ CoLinux USB installation complete!"
 echo "  Device:  $DEVICE ($MODEL, $SERIAL)"
 echo "  Mode:    $MODE"
 echo ""

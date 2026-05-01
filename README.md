@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="CodexOS Lite" width="320"/>
+  <img src="docs/assets/logo.svg" alt="CoLinux Lite" width="320"/>
 </p>
 
-<h1 align="center">CodexOS Lite</h1>
+<h1 align="center">CoLinux Lite</h1>
 
 <p align="center">
   <strong>A bootable Linux appliance whose main interface is Codex CLI.</strong><br/>
@@ -24,9 +24,9 @@
 
 ---
 
-## What is CodexOS Lite?
+## What is CoLinux Lite?
 
-CodexOS Lite is a minimal, bootable Linux distribution built on Alpine Linux that boots directly into [OpenAI Codex CLI](https://github.com/openai/codex-cli). There's no desktop environment to configure, no package manager to wrestle with — just a terminal with an AI coding agent that has the tools to inspect disks, recover files, diagnose systems, and automate infrastructure, all through natural language.
+CoLinux Lite is a minimal, bootable Linux distribution built on Alpine Linux that boots directly into [OpenAI Codex CLI](https://github.com/openai/codex-cli). There's no desktop environment to configure, no package manager to wrestle with — just a terminal with an AI coding agent that has the tools to inspect disks, recover files, diagnose systems, and automate infrastructure, all through natural language.
 
 Think of it as a *rescue USB for the AI age*.
 
@@ -36,7 +36,7 @@ Think of it as a *rescue USB for the AI age*.
 - **Encrypted persistence** via LUKS — your Codex sessions, logs, and configuration survive reboots.
 - **~120 MB base image** — fits on any USB drive, boots in seconds.
 
-CodexOS Lite is not a general-purpose Linux distribution. It's a purpose-built appliance for AI-assisted system administration, data recovery, and infrastructure automation.
+CoLinux Lite is not a general-purpose Linux distribution. It's a purpose-built appliance for AI-assisted system administration, data recovery, and infrastructure automation.
 
 ---
 
@@ -59,7 +59,7 @@ CodexOS Lite is not a general-purpose Linux distribution. It's a purpose-built a
 - 📸 **State snapshots** — portable snapshots with metadata for easy transfer and restore (`codex-snapshot`).
 - 🩺 **Hardware diagnostics** — RAM, SMART disk health, CPU temperature, battery info (`codex-hw-check`).
 - ⏱️ **Benchmarks** — quick CPU crypto, disk I/O, and network speed tests (`codex-benchmark`).
-- 🖧 **Network boot (PXE)** — boot CodexOS on other machines over the network, no USB needed (`codex-pxe`).
+- 🖧 **Network boot (PXE)** — boot CoLinux on other machines over the network, no USB needed (`codex-pxe`).
 
 ## Screenshots
 
@@ -71,14 +71,14 @@ CodexOS Lite is not a general-purpose Linux distribution. It's a purpose-built a
 
 ## Editions
 
-CodexOS Lite ships in multiple editions for different use cases:
+CoLinux Lite ships in multiple editions for different use cases:
 
 | Edition | Base | UI | Target | Status |
 |---|---|---|---|---|
-| `codexos-lite` | Alpine Linux | TTY (agetty) | USB sticks, headless machines | ✅ Stable |
-| `codexos-lite-gui` | Alpine Linux | cage + sway + foot | Machines with display output | 🧪 Experimental |
-| `codexos-compat` | Debian minimal | TTY (agetty) | Hardware incompatible with Alpine | 🧪 Experimental |
-| `codexos-desktop` | Alpine Linux | GNOME + Electron Codex | Full desktop experience | 📋 Planned |
+| `colinux-lite` | Alpine Linux | TTY (agetty) | USB sticks, headless machines | ✅ Stable |
+| `colinux-lite-gui` | Alpine Linux | cage + sway + foot | Machines with display output | 🧪 Experimental |
+| `colinux-compat` | Debian minimal | TTY (agetty) | Hardware incompatible with Alpine | 🧪 Experimental |
+| `colinux-desktop` | Alpine Linux | GNOME + Electron Codex | Full desktop experience | 📋 Planned |
 
 See [`docs/EDITIONS.md`](docs/EDITIONS.md) for a detailed comparison.
 
@@ -88,20 +88,20 @@ See [`docs/EDITIONS.md`](docs/EDITIONS.md) for a detailed comparison.
 
 ```bash
 # On an Alpine Linux host:
-cd ~/CoLinux/codexos
+cd ~/CoLinux/colinux
 sudo ./build.sh
 ```
 
 ### 2. Test with QEMU
 
 ```bash
-./scripts/qemu-test.sh dist/codexos-lite.iso
+./scripts/qemu-test.sh dist/colinux-lite.iso
 ```
 
 ### 3. Write to a USB drive
 
 ```bash
-sudo dd if=dist/codexos-lite.iso of=/dev/sdX bs=4M status=progress && sync
+sudo dd if=dist/colinux-lite.iso of=/dev/sdX bs=4M status=progress && sync
 ```
 
 > ⚠️ Replace `/dev/sdX` with your actual USB device. **This will erase all data on the target drive.**
@@ -129,7 +129,7 @@ Insert the USB, boot from it, and you'll be dropped into a Codex CLI session. St
 ## Project Structure
 
 ```
-codexos/
+colinux/
 ├── README.md                          # This file
 ├── LICENSE                            # MIT License
 ├── .gitignore                         # Git ignore rules
@@ -169,7 +169,7 @@ codexos/
 │       │   │   ├── codex-benchmark # Quick benchmarks (CPU/disk/net)
 │       │   │   ├── codex-pxe      # Network boot server (PXE)
 │       │   │   └── codex-logs     # Log viewer
-│       │   └── share/codexos/     # Shared resources
+│       │   └── share/colinux/     # Shared resources
 │   │       │       └── safety-phrases # Safety phrase bank
 │   │       └── var/                   # Runtime state
 │   └── debian/                        # Debian-based compat profile
@@ -193,19 +193,19 @@ See [`docs/BUILD.md`](docs/BUILD.md) for the full build guide. Here's the short 
 
 ```bash
 # Clone the repository
-git clone https://github.com/colinux/codexos.git
-cd codexos
+git clone https://github.com/gibavargas/colinux.git
+cd colinux
 
 # Build the default edition
 sudo ./build.sh
 
 # Build a specific edition
-sudo ./build.sh --edition codexos-lite-gui
+sudo ./build.sh --edition colinux-lite-gui
 
 # Build with custom config
 sudo ./build.sh --config my-build.conf
 
-# The output image will be at dist/codexos-lite.iso
+# The output image will be at dist/colinux-lite.iso
 ```
 
 ### Build configuration
@@ -214,7 +214,7 @@ Create a `build.conf` file in the project root to override defaults:
 
 ```bash
 # build.conf
-EDITION="codexos-lite"
+EDITION="colinux-lite"
 OUTPUT_DIR="dist"
 ENABLE_PERSISTENCE="true"
 CODEX_VERSION="latest"
@@ -239,7 +239,7 @@ sudo ./scripts/create-persistence.sh /dev/sdX
 
 ### PC Installation
 
-CodexOS Lite is designed as a *live appliance* — it runs entirely from USB without touching the host machine's disks. There is no "install to disk" flow.
+CoLinux Lite is designed as a *live appliance* — it runs entirely from USB without touching the host machine's disks. There is no "install to disk" flow.
 
 If you want persistent local storage:
 
@@ -251,7 +251,7 @@ If you want persistent local storage:
 
 ## First Boot Experience
 
-When you boot CodexOS Lite for the first time:
+When you boot CoLinux Lite for the first time:
 
 1. **Bootloader** — syslinux presents a brief boot menu (Live, Forensic, Debug).
 2. **Kernel + initramfs** — boots into Alpine's initramfs, loads modules.
@@ -269,7 +269,7 @@ Subsequent boots skip the first-boot wizard and go straight to Codex.
 
 ## Disk Safety Model
 
-CodexOS Lite treats **every disk as potentially valuable and dangerous by default**.
+CoLinux Lite treats **every disk as potentially valuable and dangerous by default**.
 
 | Operation | Default | Escalation |
 |---|---|---|
@@ -318,7 +318,7 @@ codexctl update --channel stable
 
 ### Prerequisites
 
-To use CodexOS Lite, you need:
+To use CoLinux Lite, you need:
 
 - **A USB drive** — 4 GB minimum, 8 GB+ recommended (for persistence)
 - **An x86_64 PC** with USB boot support (UEFI or legacy BIOS)
@@ -335,17 +335,17 @@ To **build** from source, you also need:
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/gibavargas/codexos.git
-cd codexos
+git clone https://github.com/gibavargas/colinux.git
+cd colinux
 
-# 2. Build the Docker image (this IS CodexOS — a full environment)
-docker build -t codexos-lite .
+# 2. Build the Docker image (this IS CoLinux — a full environment)
+docker build -t colinux-lite .
 
 # 3. Launch it
-docker run -it --rm codexos-lite
+docker run -it --rm colinux-lite
 ```
 
-That's it. You're inside CodexOS with all the disk tools, codexctl, and a shell. Run `codexctl status` to see system info.
+That's it. You're inside CoLinux with all the disk tools, codexctl, and a shell. Run `codexctl status` to see system info.
 
 For a bootable ISO instead:
 
@@ -366,7 +366,7 @@ docker run -it --rm -v "$PWD/dist:/dist" -w /build \
 lsblk
 
 # Write the image (REPLACE /dev/sdX WITH YOUR DEVICE)
-sudo dd if=dist/codexos-lite-x86_64-*.iso of=/dev/sdX bs=4M status=progress && sync
+sudo dd if=dist/colinux-lite-x86_64-*.iso of=/dev/sdX bs=4M status=progress && sync
 
 # Or use the safe helper script
 sudo ./scripts/usb-write.sh /dev/sdX
@@ -383,7 +383,7 @@ sudo ./scripts/usb-write.sh /dev/sdX
 
 ### First Boot Walkthrough
 
-When you boot CodexOS Lite for the first time, here's what happens:
+When you boot CoLinux Lite for the first time, here's what happens:
 
 1. **Bootloader menu** — syslinux shows three options:
    - `Live` — normal boot (choose this)
@@ -394,7 +394,7 @@ When you boot CodexOS Lite for the first time, here's what happens:
 
 3. **First-boot wizard** runs automatically:
    ```
-   === CodexOS Lite — First Boot Setup ===
+   === CoLinux Lite — First Boot Setup ===
    ? Enter your OpenAI API key: sk-...
    ✓ Codex CLI configured
    ? Set up encrypted persistence? (y/N):
@@ -504,7 +504,7 @@ curl -sS ifconfig.me
 
 ### FAQ
 
-**Q: Does CodexOS install anything on my computer?**
+**Q: Does CoLinux install anything on my computer?**
 A: No. It runs entirely from the USB drive. Nothing is written to your internal disks unless you explicitly request it.
 
 **Q: Can I use it without an OpenAI API key?**
@@ -514,7 +514,7 @@ A: You can use the shell and disk tools without an API key, but the Codex AI ass
 A: Run `codexctl update` — it checks for new versions and updates automatically.
 
 **Q: Can I run this in a virtual machine?**
-A: Yes. `qemu-system-x86_64 -m 2048 -cdrom dist/codexos-lite-x86_64-*.iso -boot d` or use VirtualBox/VMware.
+A: Yes. `qemu-system-x86_64 -m 2048 -cdrom dist/colinux-lite-x86_64-*.iso -boot d` or use VirtualBox/VMware.
 
 **Q: How do I set up persistence?**
 A: Run `codexctl persist setup /dev/sdX` during a live session. It creates an encrypted partition for your config, logs, and data.
@@ -528,7 +528,7 @@ A: Yes. API keys are stored in `/persist/config/` with 0600 permissions, owned b
 
 ### AGENTS.md — The Rules Codex Follows
 
-CodexOS places an `AGENTS.md` file at `/workspace/AGENTS.md` on first boot. This file contains all operating rules that Codex must follow. Key rules:
+CoLinux places an `AGENTS.md` file at `/workspace/AGENTS.md` on first boot. This file contains all operating rules that Codex must follow. Key rules:
 
 1. **Disk Safety** — Never write to disks without explicit user confirmation. Always run `codex-disk-inventory` first.
 2. **Read-First** — Mount unknown filesystems read-only before any write operations.
@@ -550,7 +550,7 @@ codexctl status                 # Human-readable status
 codexctl status --json          # JSON output for programmatic use
 
 # Version info
-codexctl version                # Show CodexOS + Codex CLI versions
+codexctl version                # Show CoLinux + Codex CLI versions
 
 # Disk operations
 codexctl disks                  # Disk inventory (human)
@@ -583,13 +583,13 @@ codexctl backup                 # Create workspace backup
 codexctl backup --list          # List existing backups
 
 # Installation
-codexctl install-usb /dev/sdX   # Install CodexOS to USB
+codexctl install-usb /dev/sdX   # Install CoLinux to USB
 codexctl install-pc             # Install to internal disk
 ```
 
 ### codex-* Command Reference
 
-Beyond `codexctl`, CodexOS provides specialized command-line tools for specific tasks:
+Beyond `codexctl`, CoLinux provides specialized command-line tools for specific tasks:
 
 #### Recovery & Cloning
 
@@ -622,7 +622,7 @@ codex-remote --status                       # Show remote access status
 ```bash
 codex-snapshot                              # Create timestamped snapshot with metadata
 codex-snapshot --list                       # List snapshots with metadata
-codex-snapshot --restore codexos-hostname-20250101.tar.gz  # Restore a snapshot
+codex-snapshot --restore colinux-hostname-20250101.tar.gz  # Restore a snapshot
 codex-snapshot --upload https://example.com/backups/  # Upload to remote server
 codex-snapshot --prune 5                    # Keep only last 5 snapshots
 ```
@@ -649,12 +649,12 @@ codex-benchmark --json                      # JSON output
 ```bash
 codex-pxe --start                           # Start PXE server on default interface
 codex-pxe --start eth1                      # Start on specific interface
-codex-pxe --start --iso /path/to/codexos.iso  # Extract from ISO and start
+codex-pxe --start --iso /path/to/colinux.iso  # Extract from ISO and start
 codex-pxe --status                          # Show server status + connected clients
 codex-pxe --stop                            # Stop PXE server
 ```
 
-> 💡 **PXE boot flow:** The host machine runs `codex-pxe --start --iso codexos.iso`. Any other PC on the same network boots via F12/Network Boot and loads CodexOS entirely over the network — no USB required. Perfect for remote assistance scenarios.
+> 💡 **PXE boot flow:** The host machine runs `codex-pxe --start --iso colinux.iso`. Any other PC on the same network boots via F12/Network Boot and loads CoLinux entirely over the network — no USB required. Perfect for remote assistance scenarios.
 
 ### Programmatic Disk Operations (JSON Output)
 
@@ -665,11 +665,11 @@ For CI/CD and automation, use `--json` flags:
 codexctl status --json
 # Output:
 # {
-#   "codexos_version": "0.1.0",
+#   "colinux_version": "0.1.0",
 #   "codex_cli": "codex 0.1.0",
 #   "kernel": "6.6.x",
 #   "arch": "x86_64",
-#   "hostname": "codexos",
+#   "hostname": "colinux",
 #   "uptime": "up 5 minutes",
 #   "timestamp": "2025-01-15T10:30:00Z"
 # }
@@ -703,13 +703,13 @@ codexctl status --json | jq '.codex_cli'
 # Build with a specific Codex version
 docker build \
   --build-arg CODEX_VERSION=0.1.0 \
-  -t codexos-lite:custom .
+  -t colinux-lite:custom .
 
 # Run with persistent volume
 docker run -it \
   -v ./my-data:/workspace/data \
   -e OPENAI_API_KEY=sk-... \
-  codexos-lite:custom
+  colinux-lite:custom
 ```
 
 **Alpine ISO build (in CI):**
@@ -738,14 +738,14 @@ bats tests/disk-safety.bats
 bats tests/integration.bats
 
 # Quick smoke test in Docker
-docker run --rm codexos-lite codexctl version
-docker run --rm codexos-lite codexctl status --json
+docker run --rm colinux-lite codexctl version
+docker run --rm colinux-lite codexctl status --json
 
 # Test ISO in QEMU (headless)
 qemu-system-x86_64 \
   -m 1024 \
   -nographic \
-  -cdrom dist/codexos-lite-x86_64-*.iso \
+  -cdrom dist/colinux-lite-x86_64-*.iso \
   -boot d \
   -net nic \
   -net user &
@@ -759,7 +759,7 @@ kill %1
 **Pattern 1: Automated data recovery pipeline**
 
 ```bash
-# Boot CodexOS, mount evidence drive, image it, hash it
+# Boot CoLinux, mount evidence drive, image it, hash it
 codexctl mount-ro /dev/sdb1
 codexctl image /dev/sdb --output /persist/images/evidence-$(date +%Y%m%d).img
 sha256sum /persist/images/evidence-*.img > /persist/images/evidence.sha256
@@ -768,11 +768,11 @@ sha256sum /persist/images/evidence-*.img > /persist/images/evidence.sha256
 **Pattern 2: CI/CD infrastructure tool**
 
 ```bash
-# Use CodexOS in Docker as a Codex agent for infrastructure tasks
+# Use CoLinux in Docker as a Codex agent for infrastructure tasks
 docker run -it --rm \
   -v ~/.ssh:/persist/ssh:ro \
   -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  codexos-lite \
+  colinux-lite \
   codex -q "Check the health of all disks on these servers: host1, host2, host3"
 ```
 
@@ -796,7 +796,7 @@ done
 docker run -it --rm \
   -v ./my-agents.md:/workspace/AGENTS.md \
   -v ./scripts:/workspace/custom-tools \
-  codexos-lite
+  colinux-lite
 ```
 
 ---
@@ -821,7 +821,7 @@ Contributions are welcome! Please follow these guidelines:
 ### Reporting issues
 
 Open a GitHub issue with:
-- CodexOS Lite edition and version.
+- CoLinux Lite edition and version.
 - Hardware description (PC model, USB drive).
 - Steps to reproduce.
 - Expected vs. actual behavior.
@@ -829,7 +829,7 @@ Open a GitHub issue with:
 
 ## License
 
-CodexOS Lite is released under the [MIT License](LICENSE).
+CoLinux Lite is released under the [MIT License](LICENSE).
 
 Copyright © 2025 CoLinux Project.
 
@@ -843,5 +843,5 @@ Copyright © 2025 CoLinux Project.
 ---
 
 <p align="center">
-  <sub>Built with ❤️ by the <a href="https://github.com/colinux">CoLinux Project</a></sub>
+  <sub>Built with ❤️ by the <a href="https://github.com/gibavargas/colinux">CoLinux Project</a></sub>
 </p>

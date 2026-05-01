@@ -55,7 +55,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-alpine-${{ matrix.arch }}
-          path: dist/codexos-lite-*
+          path: dist/colinux-lite-*
           retention-days: 1
           if-no-files-found: error
 
@@ -134,7 +134,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/${{ github.repository_owner }}/codexos-lite
+            ghcr.io/${{ github.repository_owner }}/colinux-lite
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -178,7 +178,7 @@ jobs:
       - name: Generate combined SHA256SUMS
         working-directory: release-artifacts
         run: |
-          sha256sum codexos-* > SHA256SUMS
+          sha256sum colinux-* > SHA256SUMS
           echo ""
           echo "=== SHA256SUMS ==="
           cat SHA256SUMS
@@ -195,7 +195,7 @@ jobs:
           echo "|------|-------------|" >> release-notes.md
 
           # List Alpine ISOs
-          for f in release-artifacts/codexos-lite-*.iso; do
+          for f in release-artifacts/colinux-lite-*.iso; do
             [ -f "$f" ] || continue
             bn=$(basename "$f")
             sz=$(du -h "$f" | cut -f1)
@@ -203,7 +203,7 @@ jobs:
           done
 
           # List raw images
-          for f in release-artifacts/codexos-lite-*.raw.img; do
+          for f in release-artifacts/colinux-lite-*.raw.img; do
             [ -f "$f" ] || continue
             bn=$(basename "$f")
             sz=$(du -h "$f" | cut -f1)
@@ -211,14 +211,14 @@ jobs:
           done
 
           # List Debian desktop
-          for f in release-artifacts/codexos-desktop-*.iso; do
+          for f in release-artifacts/colinux-desktop-*.iso; do
             [ -f "$f" ] || continue
             bn=$(basename "$f")
             sz=$(du -h "$f" | cut -f1)
             echo "| \`${bn}\` | Debian Desktop ISO (${sz}) |" >> release-notes.md
           done
 
-          for f in release-artifacts/codexos-desktop-*.img.gz; do
+          for f in release-artifacts/colinux-desktop-*.img.gz; do
             [ -f "$f" ] || continue
             bn=$(basename "$f")
             sz=$(du -h "$f" | cut -f1)
@@ -233,7 +233,7 @@ jobs:
           echo "" >> release-notes.md
           echo "### Docker" >> release-notes.md
           echo '```bash' >> release-notes.md
-          echo "docker run -it ghcr.io/gibavargas/codexos-lite:${TAG}" >> release-notes.md
+          echo "docker run -it ghcr.io/gibavargas/colinux-lite:${TAG}" >> release-notes.md
           echo '```' >> release-notes.md
 
           cat release-notes.md
@@ -241,13 +241,13 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: CodexOS ${{ github.ref_name }}
+          name: CoLinux ${{ github.ref_name }}
           body_path: release-notes.md
           files: |
-            release-artifacts/codexos-lite-*.iso
-            release-artifacts/codexos-lite-*.raw.img
-            release-artifacts/codexos-desktop-*.iso
-            release-artifacts/codexos-desktop-*.img.gz
+            release-artifacts/colinux-lite-*.iso
+            release-artifacts/colinux-lite-*.raw.img
+            release-artifacts/colinux-desktop-*.iso
+            release-artifacts/colinux-desktop-*.img.gz
             release-artifacts/SHA256SUMS
           draft: false
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}

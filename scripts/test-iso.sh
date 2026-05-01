@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Lite — ISO Automated Test Script
+# CoLinux Lite — ISO Automated Test Script
 # =============================================================================
-# Boots the CodexOS ISO in QEMU and runs smoke tests via serial console:
+# Boots the CoLinux ISO in QEMU and runs smoke tests via serial console:
 #   1. Boot completes (kernel + init)
 #   2. codex binary exists and is executable
 #   3. codex-disk-inventory runs without error
@@ -60,7 +60,7 @@ done
 
 # ── Auto-find ISO ────────────────────────────────────────────────────────────
 if [ -z "$ISO_PATH" ]; then
-    ISO_PATH="$(find "$DIST_DIR" -name "codexos-lite-${ARCH}-*.iso" 2>/dev/null | sort -V | tail -1)"
+    ISO_PATH="$(find "$DIST_DIR" -name "colinux-lite-${ARCH}-*.iso" 2>/dev/null | sort -V | tail -1)"
 fi
 
 if [ -z "$ISO_PATH" ] || [ ! -f "$ISO_PATH" ]; then
@@ -358,7 +358,7 @@ main() {
     : > "$SERIAL_LOG"
     : > "$TEST_LOG"
 
-    log_step "CodexOS Lite ISO Smoke Tests"
+    log_step "CoLinux Lite ISO Smoke Tests"
     echo "  ISO:     $ISO_PATH"
     echo "  Arch:    $ARCH"
     echo "  Timeout: ${TIMEOUT}s"

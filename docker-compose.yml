@@ -1,12 +1,12 @@
-# CodexOS Lite — Docker Compose for development
+# CoLinux Lite — Docker Compose for development
 version: "3.8"
 
 services:
-  codexos-lite:
+  colinux-lite:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: codexos-lite
+    container_name: colinux-lite
     stdin_open: true
     tty: true
     environment:
@@ -16,8 +16,8 @@ services:
       - CODEX_PERSIST=/persist
     volumes:
       # Persist workspace and config across container restarts
-      - codexos-workspace:/workspace
-      - codexos-persist:/persist
+      - colinux-workspace:/workspace
+      - colinux-persist:/persist
       # Mount host disks for testing (comment out if not needed)
       # - /dev:/dev:ro
       # - /mnt:/mnt/disks:ro
@@ -32,5 +32,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  codexos-workspace:
-  codexos-persist:
+  colinux-workspace:
+  colinux-persist:

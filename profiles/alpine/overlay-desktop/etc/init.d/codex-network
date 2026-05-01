@@ -1,9 +1,9 @@
 #!/sbin/openrc-run
-# CodexOS Desktop — codex-network init (OpenRC)
+# CoLinux Desktop — codex-network init (OpenRC)
 # Starts NetworkManager on boot for the desktop edition.
 
 name="codex-network"
-description="CodexOS Desktop network initialization (NetworkManager)"
+description="CoLinux Desktop network initialization (NetworkManager)"
 command="/usr/sbin/NetworkManager"
 command_background=true
 pidfile="/run/NetworkManager.pid"

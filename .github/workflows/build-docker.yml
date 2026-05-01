@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY_GHCR: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/codexos-lite
+  IMAGE_NAME: ${{ github.repository_owner }}/colinux-lite
 
 jobs:
   build-docker:
@@ -57,7 +57,7 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/codexos-lite', secrets.DOCKERHUB_USERNAME) || '' }}
+            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/colinux-lite', secrets.DOCKERHUB_USERNAME) || '' }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}

@@ -1,4 +1,4 @@
-# CodexOS Shared Packages — Alpine Camoufox Dependencies
+# CoLinux Shared Packages — Alpine Camoufox Dependencies
 # Python toolchain + system libraries needed for camoufox browser integration
 
 python3

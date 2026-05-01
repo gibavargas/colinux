@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Codex Desktop Auto-Update Script
+# CoLinux Desktop — Codex Desktop Auto-Update Script
 # =============================================================================
 # Checks for updates to the codex-desktop-linux Electron wrapper and the
 # underlying Codex binary. Supports rollback, notifications, and channel control.
@@ -330,9 +330,9 @@ update_electron_wrapper() {
         | xargs rm -rf 2>/dev/null || true
 
     # Run the setup script
-    if [ -x "/opt/codexos-setup/setup-codex-desktop.sh" ]; then
+    if [ -x "/opt/colinux-setup/setup-codex-desktop.sh" ]; then
         FORCE=true CODEX_DESKTOP_FORCE=true \
-            /opt/codexos-setup/setup-codex-desktop.sh || {
+            /opt/colinux-setup/setup-codex-desktop.sh || {
             log_error "Electron wrapper update failed"
             notify_desktop "Update Failed" "Codex Desktop wrapper update failed" "critical"
             return 1
@@ -399,7 +399,7 @@ rotate_logs() {
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
     rotate_logs
-    log_info "=== CodexOS Desktop Auto-Update ==="
+    log_info "=== CoLinux Desktop Auto-Update ==="
 
     load_config
 

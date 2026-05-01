@@ -1,6 +1,6 @@
 [Unit]
 Description=Codex Desktop Electron App Autostart Service
-Documentation=https://github.com/colinux/codexos
+Documentation=https://github.com/gibavargas/colinux
 After=graphical.target lightdm.service
 Wants=graphical.target
 ConditionPathExists=/opt/codex-desktop/codex-desktop

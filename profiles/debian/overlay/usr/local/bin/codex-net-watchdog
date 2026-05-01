@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Network Watchdog
+# CoLinux Desktop — Network Watchdog
 # =============================================================================
 # Monitors network connectivity and auto-reconnects Wi-Fi. Runs as a cron job
 # or can be triggered manually.

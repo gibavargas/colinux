@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# codex-shell-gui — GUI shell for CodexOS Lite GUI Edition
+# codex-shell-gui — GUI shell for CoLinux Lite GUI Edition
 # =============================================================================
 # This script is launched inside cage (Wayland kiosk) → foot (terminal).
 # It:
@@ -278,7 +278,7 @@ fallback_tty() {
 
     echo ""
     echo -e "${YELLOW}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║  CodexOS — GUI Failed, TTY Fallback        ║${NC}"
+    echo -e "${YELLOW}║  CoLinux — GUI Failed, TTY Fallback        ║${NC}"
     echo -e "${YELLOW}╚════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${RED}Wayland/GPU initialization failed.${NC}"

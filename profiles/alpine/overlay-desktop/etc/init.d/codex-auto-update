@@ -1,9 +1,9 @@
 #!/sbin/openrc-run
-# CodexOS Desktop — codex-auto-update init (OpenRC)
+# CoLinux Desktop — codex-auto-update init (OpenRC)
 # Sets up cron job for Codex Desktop app + Codex CLI auto-updates.
 
 name="codex-auto-update"
-description="CodexOS Desktop auto-update cron setup"
+description="CoLinux Desktop auto-update cron setup"
 
 depend() {
     need localmount
@@ -63,7 +63,7 @@ start() {
                 ;;
         esac
         cat > "${CRON_LINK}" <<EOF
-# CodexOS Desktop auto-update (Codex CLI + Desktop app)
+# CoLinux Desktop auto-update (Codex CLI + Desktop app)
 * */${INTERVAL} * * * /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1
 EOF
         chmod 0644 "${CRON_LINK}"

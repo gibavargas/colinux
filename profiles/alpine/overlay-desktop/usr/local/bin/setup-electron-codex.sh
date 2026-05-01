@@ -1,6 +1,6 @@
 #!/bin/bash
 # setup-electron-codex.sh — Install Electron Codex Desktop app on Alpine
-# Part of CodexOS Desktop
+# Part of CoLinux Desktop
 #
 # This script:
 #   1. Installs Node.js and build dependencies
@@ -152,7 +152,7 @@ install_to_opt() {
     # Create a wrapper script that launches Electron with Codex
     cat > "$INSTALL_DIR/codex-desktop" <<'WRAPPER'
 #!/bin/bash
-# CodexOS Desktop — Electron Codex Desktop launcher
+# CoLinux Desktop — Electron Codex Desktop launcher
 # This wrapper launches the Codex Desktop Electron application.
 
 set -euo pipefail
@@ -350,7 +350,7 @@ setup_auto_update() {
 
     cat > /etc/periodic/6h/codex-desktop-update <<'CRONSCRIPT'
 #!/bin/sh
-# CodexOS Desktop — Auto-update Codex Desktop Electron app
+# CoLinux Desktop — Auto-update Codex Desktop Electron app
 # Runs every 6 hours via cron
 
 LOG="/persist/logs/codex-desktop-update.log"
@@ -395,7 +395,7 @@ install_prebuilt_electron() {
     # Create a simple wrapper that uses the system's codex CLI
     cat > "$INSTALL_DIR/codex-desktop" <<'WRAPPER'
 #!/bin/bash
-# CodexOS Desktop — Fallback launcher
+# CoLinux Desktop — Fallback launcher
 # Launches Codex CLI in a dedicated GNOME Terminal window
 
 set -euo pipefail

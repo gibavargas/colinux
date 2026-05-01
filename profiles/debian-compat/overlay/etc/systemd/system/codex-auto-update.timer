@@ -1,5 +1,5 @@
 [Unit]
-Description=CodexOS Compat Auto-Update Timer
+Description=CoLinux Compat Auto-Update Timer
 Documentation=man:systemd.timer
 
 [Timer]

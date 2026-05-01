@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Update Wrapper
+# CoLinux Desktop — Update Wrapper
 # =============================================================================
 # Simplified update entry point. Calls both system and desktop updaters.
 #

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Lite — Release Script
+# CoLinux Lite — Release Script
 # =============================================================================
 # Creates release artifacts from the dist/ directory:
 #   • ISO image
@@ -53,9 +53,9 @@ done
 
 # ── Auto-detect version from ISO filename ────────────────────────────────────
 if [ -z "$VERSION" ]; then
-    local_iso="$(find "$OUTDIR" -maxdepth 1 -name 'codexos-lite-*.iso' 2>/dev/null | head -1)"
+    local_iso="$(find "$OUTDIR" -maxdepth 1 -name 'colinux-lite-*.iso' 2>/dev/null | head -1)"
     if [ -n "$local_iso" ]; then
-        # Extract version-like string from filename: codexos-lite-x86_64-3.21.0.iso
+        # Extract version-like string from filename: colinux-lite-x86_64-3.21.0.iso
         VERSION="$(basename "$local_iso" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
     fi
 fi
@@ -70,17 +70,17 @@ log_info "Collecting release artifacts..."
 ARTIFACTS=()
 
 # ISO
-for f in "$OUTDIR"/codexos-lite-*.iso; do
+for f in "$OUTDIR"/colinux-lite-*.iso; do
     [ -f "$f" ] && ARTIFACTS+=("$f")
 done
 
 # Raw images
-for f in "$OUTDIR"/codexos-lite-*.raw.img; do
+for f in "$OUTDIR"/colinux-lite-*.raw.img; do
     [ -f "$f" ] && ARTIFACTS+=("$f")
 done
 
 # QCOW2 images
-for f in "$OUTDIR"/codexos-lite-*.qcow2; do
+for f in "$OUTDIR"/colinux-lite-*.qcow2; do
     [ -f "$f" ] && ARTIFACTS+=("$f")
 done
 
@@ -104,7 +104,7 @@ log_info "Generating SHA256 checksums..."
 CHECKSUM_FILE="$RELEASE_DIR/SHA256SUMS"
 (
     cd "$RELEASE_DIR"
-    sha256sum codexos-lite-* > "$CHECKSUM_FILE"
+    sha256sum colinux-lite-* > "$CHECKSUM_FILE"
 )
 log_info "Checksums: $CHECKSUM_FILE"
 cat "$CHECKSUM_FILE"
@@ -117,7 +117,7 @@ if [ -n "$GPG_KEY" ] && command -v gpg >/dev/null 2>&1; then
     gpg --batch --yes --local-user "$GPG_KEY" --armor --detach-sign "$CHECKSUM_FILE"
 
     # Sign each artifact individually
-    for a in "$RELEASE_DIR"/codexos-lite-*; do
+    for a in "$RELEASE_DIR"/colinux-lite-*; do
         [ -f "$a" ] || continue
         case "$(basename "$a")" in
             *.asc|*.sig|SHA256SUMS*) continue ;;
@@ -145,7 +145,7 @@ fi
 # Build manifest
 cat > "$MANIFEST_FILE" <<MANIFEST
 {
-  "name": "codexos-lite",
+  "name": "colinux-lite",
   "version": "$VERSION",
   "arch": "$ARCH",
   "codex_version": "$CODEX_VER",
@@ -167,7 +167,7 @@ log_info "Manifest: $MANIFEST_FILE"
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║           CodexOS Lite $VERSION — Release             ║"
+echo "║           CoLinux Lite $VERSION — Release             ║"
 echo "╠══════════════════════════════════════════════════════════╣"
 echo "║                                                          ║"
 echo "║  Release directory: $RELEASE_DIR"
@@ -176,7 +176,7 @@ echo "║  Manifest:           release.json"
 echo "║  Signed:             $([ -n "$GPG_KEY" ] && echo "yes ($GPG_KEY)" || echo "no")"
 echo "║                                                          ║"
 
-for f in "$RELEASE_DIR"/codexos-lite-*; do
+for f in "$RELEASE_DIR"/colinux-lite-*; do
     [ -f "$f" ] || continue
     echo "║  $(printf "%-18s %s" "$(basename "$f"):" "$(du -h "$f" | cut -f1)")"
 done

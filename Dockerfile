@@ -1,11 +1,11 @@
-# CodexOS Lite — Development & Testing Container
-# Simulates the full Alpine-based CodexOS environment
-# Usage: docker build -t codexos-lite . && docker run -it codexos-lite
+# CoLinux Lite — Development & Testing Container
+# Simulates the full Alpine-based CoLinux environment
+# Usage: docker build -t colinux-lite . && docker run -it colinux-lite
 
 FROM alpine:3.21
 
 LABEL maintainer="CoLinux Project"
-LABEL description="CodexOS Lite development/test environment"
+LABEL description="CoLinux Lite development/test environment"
 LABEL version="0.1.0"
 
 # Install all packages from the lite edition
@@ -92,7 +92,7 @@ RUN chmod +x /usr/local/bin/first-boot /usr/local/bin/setup-codex /usr/local/bin
 COPY AGENTS.md /workspace/AGENTS.md
 
 # Install system configs
-COPY profiles/alpine/overlay/etc/profile /etc/profile.d/codexos.sh
+COPY profiles/alpine/overlay/etc/profile /etc/profile.d/colinux.sh
 COPY profiles/alpine/overlay/etc/motd /etc/motd
 COPY profiles/alpine/overlay/etc/config/auto-update.conf /persist/config/auto-update.conf
 COPY profiles/alpine/overlay/etc/codex-update-crontab /etc/codex-update-crontab
@@ -100,11 +100,11 @@ COPY profiles/alpine/overlay/etc/codex-update-crontab /etc/codex-update-crontab
 # Create mock codex binary for testing (placeholder until real binary is downloaded)
 RUN printf '%s\n' \
     '#!/bin/bash' \
-    '# CodexOS — Codex CLI placeholder' \
+    '# CoLinux — Codex CLI placeholder' \
     'VERSION="${CODEX_VERSION:-0.1.0-placeholder}"' \
-    'if [ "$1" = "--version" ]; then echo "codex $VERSION (CodexOS Lite placeholder)"; exit 0; fi' \
-    'if [ "$1" = "--help" ]; then echo "CodexOS Lite - OpenAI Codex CLI placeholder"; echo "Run: setup-codex --install"; exit 0; fi' \
-    'echo "CodexOS Lite - Codex CLI Placeholder"' \
+    'if [ "$1" = "--version" ]; then echo "codex $VERSION (CoLinux Lite placeholder)"; exit 0; fi' \
+    'if [ "$1" = "--help" ]; then echo "CoLinux Lite - OpenAI Codex CLI placeholder"; echo "Run: setup-codex --install"; exit 0; fi' \
+    'echo "CoLinux Lite - Codex CLI Placeholder"' \
     'echo "To install real Codex binary: setup-codex --install"' \
     'exec bash' \
     > /usr/local/bin/codex && chmod +x /usr/local/bin/codex

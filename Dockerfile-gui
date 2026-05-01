@@ -1,5 +1,5 @@
-# CodexOS Lite GUI — Development & Testing Container
-# Simulates the full Alpine-based CodexOS GUI environment.
+# CoLinux Lite GUI — Development & Testing Container
+# Simulates the full Alpine-based CoLinux GUI environment.
 # Includes cage/sway/foot Wayland stack for syntax validation and basic testing.
 #
 # NOTE: cage/sway will NOT work inside Docker without GPU passthrough.
@@ -7,20 +7,20 @@
 #       install correctly. For actual GUI testing, use QEMU or bare metal.
 #
 # Usage:
-#   docker build -t codexos-lite-gui -f Dockerfile-gui .
-#   docker run -it --rm codexos-lite-gui bash
+#   docker build -t colinux-lite-gui -f Dockerfile-gui .
+#   docker run -it --rm colinux-lite-gui bash
 #
 # With GPU passthrough (for actual GUI testing):
 #   docker run -it --rm \
 #     --device /dev/dri \
 #     -e XDG_RUNTIME_DIR=/run/user/1000 \
 #     -e WAYLAND_DISPLAY=wayland-1 \
-#     codexos-lite-gui
+#     colinux-lite-gui
 
 FROM alpine:3.21
 
 LABEL maintainer="CoLinux Project"
-LABEL description="CodexOS Lite GUI development/test environment (cage + sway + foot)"
+LABEL description="CoLinux Lite GUI development/test environment (cage + sway + foot)"
 LABEL version="0.1.0"
 
 # ── Install core packages (same as lite edition) ─────────────────────────────
@@ -137,7 +137,7 @@ RUN mkdir -p /run/codex \
     /etc/cage \
     /etc/udev/rules.d \
     /opt/camoufox \
-    /usr/local/lib/codexos
+    /usr/local/lib/colinux
 
 # ── Create codex user with proper group membership ───────────────────────────
 RUN adduser -D -s /bin/bash -h /home/codex codex && \
@@ -204,7 +204,7 @@ RUN chmod +x /usr/local/sbin/codex-network-stack /usr/local/bin/codex-network \
 COPY AGENTS.md /workspace/AGENTS.md
 
 # ── Install system configs ───────────────────────────────────────────────────
-COPY profiles/alpine/overlay/etc/profile /etc/profile.d/codexos.sh
+COPY profiles/alpine/overlay/etc/profile /etc/profile.d/colinux.sh
 COPY profiles/alpine/overlay/etc/motd /etc/motd
 COPY profiles/alpine/overlay/etc/config/auto-update.conf /persist/config/auto-update.conf
 COPY profiles/alpine/overlay/etc/codex-update-crontab /etc/codex-update-crontab
@@ -219,11 +219,11 @@ RUN chown codex:codex /home/codex/.bashrc
 # ── Create mock codex binary for testing ─────────────────────────────────────
 RUN printf '%s\n' \
     '#!/bin/bash' \
-    '# CodexOS — Codex CLI placeholder' \
+    '# CoLinux — Codex CLI placeholder' \
     'VERSION="${CODEX_VERSION:-0.1.0-placeholder}"' \
-    'if [ "$1" = "--version" ]; then echo "codex $VERSION (CodexOS Lite GUI placeholder)"; exit 0; fi' \
-    'if [ "$1" = "--help" ]; then echo "CodexOS Lite GUI - OpenAI Codex CLI placeholder"; echo "Run: setup-codex --install"; exit 0; fi' \
-    'echo "CodexOS Lite GUI - Codex CLI Placeholder"' \
+    'if [ "$1" = "--version" ]; then echo "codex $VERSION (CoLinux Lite GUI placeholder)"; exit 0; fi' \
+    'if [ "$1" = "--help" ]; then echo "CoLinux Lite GUI - OpenAI Codex CLI placeholder"; echo "Run: setup-codex --install"; exit 0; fi' \
+    'echo "CoLinux Lite GUI - Codex CLI Placeholder"' \
     'echo "To install real Codex binary: setup-codex --install"' \
     'echo "GUI mode: cage + foot + sway available"' \
     'exec bash' \

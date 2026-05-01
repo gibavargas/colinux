@@ -1,5 +1,5 @@
 [Unit]
-Description=CodexOS Compat Auto-Update Service
+Description=CoLinux Compat Auto-Update Service
 After=network-online.target
 Wants=network-online.target
 

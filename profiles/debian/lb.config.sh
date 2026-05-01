@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CodexOS Desktop — Debian Live Build Configuration
+# CoLinux Desktop — Debian Live Build Configuration
 # =============================================================================
 # Configures and runs debian-live (live-build) to create a bootable
-# codexos-desktop ISO with XFCE4, encrypted persistence, and Electron Codex.
+# colinux-desktop ISO with XFCE4, encrypted persistence, and Electron Codex.
 #
 # This is the primary build entry point for the Debian desktop edition.
 # It replaces the Alpine mkimage approach with live-build.
@@ -149,14 +149,14 @@ configure_lb() {
         \
         --bootloader "syslinux,grub-efi" \
         \
-        --iso-application "CodexOS Desktop" \
+        --iso-application "CoLinux Desktop" \
         --iso-publisher "CoLinux Project" \
-        --iso-volume "CODEXOS-DESKTOP" \
+        --iso-volume "COLINUX-DESKTOP" \
         \
         --apt-indices false \
         --cache-packages true \
         --cache-indices true \
-        --package-lists "codexos-desktop" \
+        --package-lists "colinux-desktop" \
         \
         --linux-flavours "amd64" \
         \
@@ -176,7 +176,7 @@ apply_packages() {
     mkdir -p "$pkg_list_dir"
 
     # Copy our package list
-    cp "$PROFILE_DIR/packages.desktop" "$pkg_list_dir/codexos-desktop.list.chroot"
+    cp "$PROFILE_DIR/packages.desktop" "$pkg_list_dir/colinux-desktop.list.chroot"
 
     log_info "Package list applied: $(wc -l < "$PROFILE_DIR/packages.desktop") packages"
 }
@@ -253,10 +253,10 @@ set -euo pipefail
 
 echo "I: Installing Codex Desktop..."
 
-if [ -x /opt/codexos-setup/setup-codex-desktop.sh ]; then
+if [ -x /opt/colinux-setup/setup-codex-desktop.sh ]; then
     CODEX_DESKTOP_FORCE=true \
     CODEX_DESKTOP_VERSION="${CODEX_DESKTOP_VERSION:-latest}" \
-    /opt/codexos-setup/setup-codex-desktop.sh
+    /opt/colinux-setup/setup-codex-desktop.sh
     echo "I: Codex Desktop installed"
 elif command -v npm >/dev/null 2>&1; then
     # Fallback: Install codex CLI via npm for now
@@ -338,7 +338,7 @@ post_build() {
     mkdir -p "$OUTPUT_DIR"
 
     # Copy and rename
-    local output_file="$OUTPUT_DIR/codexos-desktop-${ARCHITECTURE}-$(date +%Y%m%d).iso"
+    local output_file="$OUTPUT_DIR/colinux-desktop-${ARCHITECTURE}-$(date +%Y%m%d).iso"
     cp "$iso_file" "$output_file"
 
     # Generate checksum
@@ -355,7 +355,7 @@ print_summary() {
     log_step "Build Complete"
 
     echo ""
-    echo "  Edition:      codexos-desktop"
+    echo "  Edition:      colinux-desktop"
     echo "  Distribution: Debian $DISTRIBUTION"
     echo "  Architecture: $ARCHITECTURE"
     echo "  Desktop:      XFCE4"
@@ -373,7 +373,7 @@ print_summary() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 main() {
-    log_step "CodexOS Desktop Build — Debian $DISTRIBUTION / $ARCHITECTURE"
+    log_step "CoLinux Desktop Build — Debian $DISTRIBUTION / $ARCHITECTURE"
 
     check_root
     check_lb

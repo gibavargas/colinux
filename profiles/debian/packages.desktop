@@ -1,7 +1,7 @@
 # =============================================================================
-# CodexOS Desktop — Debian Package List
+# CoLinux Desktop — Debian Package List
 # =============================================================================
-# Packages for the codexos-desktop edition.
+# Packages for the colinux-desktop edition.
 # Based on Debian 12 (bookworm) with XFCE4 desktop and Electron Codex app.
 #
 # Organized by category. Comments explain why each package is included.

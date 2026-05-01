@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-mount-rw — Mount a block device read-write with serial confirmation
-# Part of CodexOS Lite
+# Part of CoLinux Lite
 #
 # Usage: codex-mount-rw --confirm SERIAL /dev/sdX1 [--timeout MINUTES]
 #

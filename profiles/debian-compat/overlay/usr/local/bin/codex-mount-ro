@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-mount-ro — Mount a block device read-only under /mnt/disks/
-# Part of CodexOS Lite
+# Part of CoLinux Lite
 #
 # Usage: codex-mount-ro /dev/sdX1
 #   Mounts device at /mnt/disks/by-device/<devname>

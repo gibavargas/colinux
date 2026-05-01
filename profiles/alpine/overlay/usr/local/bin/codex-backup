@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-backup — Create tar snapshots of /persist and /workspace
-# Part of CodexOS Lite
+# Part of CoLinux Lite
 #
 # Usage: codex-backup [OPTIONS]
 #   (no args)    — Create a timestamped backup of both /persist and /workspace
@@ -90,7 +90,7 @@ mkdir -p "$BACKUP_DIR"
 
 # ── List backups ──────────────────────────────────────────────────────────
 if [[ "$LIST_ONLY" == true ]]; then
-    echo "=== CodexOS Backups ==="
+    echo "=== CoLinux Backups ==="
     echo "Location: $BACKUP_DIR"
     echo ""
 
@@ -132,7 +132,7 @@ fi
 # ── Create backup ─────────────────────────────────────────────────────────
 TIMESTAMP="$(date -u '+%Y%m%d-%H%M%S')"
 HOSTNAME="$(hostname -s 2>/dev/null || echo 'codex')"
-BACKUP_FILE="${BACKUP_DIR}/codexos-${HOSTNAME}-${TIMESTAMP}.tar.gz"
+BACKUP_FILE="${BACKUP_DIR}/colinux-${HOSTNAME}-${TIMESTAMP}.tar.gz"
 
 # Build list of paths to backup
 PATHS=()

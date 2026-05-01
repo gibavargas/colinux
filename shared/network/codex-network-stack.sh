@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================================
-# CodexOS — Unified Network Stack
+# CoLinux — Unified Network Stack
 # ============================================================================
-# Common network initialization for ALL CodexOS editions.
+# Common network initialization for ALL CoLinux editions.
 # Handles Ethernet, WiFi, DNS, connectivity validation, and state reporting.
 #
 # Usage:
@@ -122,7 +122,7 @@ configure_dns() {
     if [[ "$managed" == "false" ]]; then
         # Write our own resolv.conf
         cat > /etc/resolv.conf <<EOF
-# CodexOS DNS Configuration
+# CoLinux DNS Configuration
 # Managed by codex-network-stack — do not edit manually
 # Primary: Cloudflare ($DNS_PRIMARY)
 # Secondary: Google ($DNS_SECONDARY)
@@ -324,7 +324,7 @@ setup_wifi() {
 show_status() {
     echo ""
     echo -e "${BOLD}╔══════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}║     CodexOS Network Status            ║${NC}"
+    echo -e "${BOLD}║     CoLinux Network Status            ║${NC}"
     echo -e "${BOLD}╚══════════════════════════════════════╝${NC}"
     echo ""
 
@@ -415,7 +415,7 @@ main() {
     esac
 
     echo ""
-    echo -e "${BOLD}CodexOS Network Initialization${NC}"
+    echo -e "${BOLD}CoLinux Network Initialization${NC}"
     echo ""
 
     local ethernet_ok=false

@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-clone — Clone disks/partitions with ddrescue and verification
-# Part of CodexOS Lite
+# Part of CoLinux Lite
 #
 # Usage:
 #   codex-clone /dev/sdX /dev/sdY           Clone disk X to disk Y

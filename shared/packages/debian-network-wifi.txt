@@ -1,4 +1,4 @@
-# CodexOS Shared Packages — Debian Network/WiFi
+# CoLinux Shared Packages — Debian Network/WiFi
 # Used by all editions for network connectivity and WiFi support
 
 iwd
