@@ -246,22 +246,25 @@ EOF
     done
 
     # Hook: clean up any inherited Ubuntu apt sources inside the chroot early
-    cat > "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot" <<'HOOK'
+    # This runs as the first chroot hook, before lb installs any packages
+    cat > "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot_early" <<'HOOK'
 #!/bin/bash
 set -e
 # Replace any leftover Ubuntu sources with pure Debian ones
 cat > /etc/apt/sources.list <<EOF
 deb http://deb.debian.org/debian bookworm main
-deb http://security.debian.org/debian-security bookworm-security main
 deb http://deb.debian.org/debian bookworm-updates main
 EOF
 # Also fix any Ubuntu entries in sources.list.d
 if [ -d /etc/apt/sources.list.d ]; then
+    rm -f /etc/apt/sources.list.d/ubuntu*.list 2>/dev/null || true
     sed -i 's|security.ubuntu.com|security.debian.org/debian-security|g' \
         /etc/apt/sources.list.d/*.list 2>/dev/null || true
 fi
+# Remove any Ubuntu-only packages that debootstrap may have pulled from host
+apt-get remove -y ubuntu-keyring 2>/dev/null || true
 HOOK
-    chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot"
+    chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot_early"
 
     ok "live-build configured"
 
