@@ -205,13 +205,17 @@ run_mkimage() {
     # --profile:     Our custom profile name
     # --arch:        Target architecture
     # --outdir:      Where to put the result
+    # Set PACKAGER_PUBKEY so mkimage.sh can inject APK signing keys
+    # (without it, cp "" fails inside the aports build framework)
+    export PACKAGER_PUBKEY="${PACKAGER_PUBKEY:-$(ls /usr/share/apk/keys/*.rsa.pub 2>/dev/null | head -1)}"
+
     "$mkimage_script" \
         --profile "colinux-lite" \
         --arch "$ARCH" \
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/main" \
         --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/community" \
+        --repository "${ALPINE_MIRROR}/alpine/edge/main" \
         --outdir "$OUTDIR" \
-        --extra-repository "${ALPINE_MIRROR}/alpine/edge/main" \
         --tag "v${ALPINE_RELEASE}" \
         --yaml "$APORTS_DIR/scripts/mkimg.colinux-lite.sh" \
         || {
