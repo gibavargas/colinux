@@ -197,9 +197,12 @@ configure_lb() {
         --debian-installer none \
         --architectures amd64 \
         --archive-areas main \
-        --mirror http://deb.debian.org/debian \
-        --parent-mirror http://deb.debian.org/debian \
-        --security-mirror http://security.debian.org/debian-security \
+        --mirror-bootstrap http://deb.debian.org/debian \
+        --mirror-chroot http://deb.debian.org/debian \
+        --mirror-binary http://deb.debian.org/debian \
+        --parent-mirror-bootstrap http://deb.debian.org/debian \
+        --parent-mirror-chroot http://deb.debian.org/debian \
+        --parent-mirror-binary http://deb.debian.org/debian \
         --bootloader syslinux,grub-efi \
         --memtest none \
         --source false \

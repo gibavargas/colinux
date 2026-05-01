@@ -49,7 +49,7 @@ jobs:
           ARCH=${{ matrix.arch }} \
           ALPINE_RELEASE=${{ env.ALPINE_RELEASE }} \
           OUTDIR="$GITHUB_WORKSPACE/dist" \
-          bash scripts/build-alpine.sh
+          sudo bash scripts/build-alpine.sh
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
