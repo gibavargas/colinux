@@ -199,8 +199,11 @@ configure_lb() {
     export LB_MIRROR_CHROOT_SECURITY="http://security.debian.org/debian-security"
     export LB_MIRROR_BINARY_SECURITY="http://security.debian.org/debian-security"
 
-    # Exclude ubuntu-* packages that debootstrap pulls from the Ubuntu host
-    export LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring,ubuntu-minimal,ubuntu-advantage-tools"
+    # Exclude ubuntu-* packages that debootstrap pulls from the Ubuntu host.
+    # LB_DEBOOTSTRAP_OPTIONS env var is unreliable in live-build 3.x; write file directly.
+    cat > config/debootstrap.options <<'EOF'
+--exclude=ubuntu-keyring,ubuntu-minimal,ubuntu-advantage-tools
+EOF
 
     lb config \
         --distribution bookworm \
