@@ -57,7 +57,6 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/colinux-lite', secrets.DOCKERHUB_USERNAME) || '' }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}

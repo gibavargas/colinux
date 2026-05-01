@@ -203,6 +203,9 @@ configure_lb() {
         --parent-mirror-bootstrap http://deb.debian.org/debian \
         --parent-mirror-chroot http://deb.debian.org/debian \
         --parent-mirror-binary http://deb.debian.org/debian \
+        --security-mirror-bootstrap http://security.debian.org/debian-security \
+        --security-mirror-chroot http://security.debian.org/debian-security \
+        --security-mirror-binary http://security.debian.org/debian-security \
         --bootloader syslinux,grub-efi \
         --memtest none \
         --source false \

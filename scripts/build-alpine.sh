@@ -122,7 +122,6 @@ install_build_deps() {
                 squashfs-tools \
                 xorriso \
                 grub-efi-amd64-bin \
-                grub-efi-arm64-bin \
                 mtools \
                 dosfstools \
                 fdisk \
@@ -132,7 +131,9 @@ install_build_deps() {
                 git \
                 qemu-utils \
                 openssl \
-                sgdisk
+                gdisk
+            # grub-efi-arm64-bin may not be available; install with fallback
+            apt-get install -y --no-install-recommends grub-efi-arm64-bin 2>/dev/null || true
             ;;
     esac
 

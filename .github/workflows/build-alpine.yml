@@ -42,7 +42,7 @@ jobs:
             mtools dosfstools fdisk \
             bash curl ca-certificates git qemu-utils \
             openssl gdisk e2fsprogs
-          # grub-efi-arm64-bin may not be available on all runners; install if present
+          # grub-efi-arm64-bin may not be available on all runners; install with fallback
           sudo apt-get install -y --no-install-recommends grub-efi-arm64-bin 2>/dev/null || true
 
       - name: Build Alpine ISO (${{ matrix.arch }})
