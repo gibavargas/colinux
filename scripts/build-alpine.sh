@@ -179,7 +179,8 @@ install_profile() {
     # Copy overlay directory
     if [ -d "$PROFILE_DIR/overlay" ]; then
         local overlay_dest="$APORTS_DIR/scripts/colinux-lite/overlay"
-        rm -rf "$overlay_dest"
+        mkdir -p "$overlay_dest"
+        rm -rf "${overlay_dest:?}"
         cp -a "$PROFILE_DIR/overlay" "$overlay_dest"
     fi
 

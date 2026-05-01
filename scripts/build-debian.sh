@@ -203,9 +203,6 @@ configure_lb() {
         --parent-mirror-bootstrap http://deb.debian.org/debian \
         --parent-mirror-chroot http://deb.debian.org/debian \
         --parent-mirror-binary http://deb.debian.org/debian \
-        --security-mirror-bootstrap http://security.debian.org/debian-security \
-        --security-mirror-chroot http://security.debian.org/debian-security \
-        --security-mirror-binary http://security.debian.org/debian-security \
         --bootloader syslinux,grub-efi \
         --memtest none \
         --source false \
@@ -221,6 +218,14 @@ configure_lb() {
         --cache-indices true \
         --initramfs systemd \
         2>&1
+
+    # Override security mirror to use Debian's (not Ubuntu's)
+    # live-build CLI flags differ between versions; write config files directly
+    for cfg in bootstrap chroot binary; do
+        cat > "$BUILD_DIR/config/archives/security.${cfg}.list" <<EOF
+deb http://security.debian.org/debian-security bookworm-security main
+EOF
+    done
 
     ok "live-build configured"
 
