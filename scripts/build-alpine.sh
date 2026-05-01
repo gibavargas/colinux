@@ -476,7 +476,7 @@ label: gpt
 unit: sectors
 
 start=2048,  size=65536,  type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="codex-efi"
-start=67584, size=*,      type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="codex-boot"
+start=67584,  type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="codex-boot"
 EOF
 
     # Set up loop device

@@ -199,15 +199,15 @@ configure_lb() {
     export LB_MIRROR_CHROOT_SECURITY="http://security.debian.org/debian-security"
     export LB_MIRROR_BINARY_SECURITY="http://security.debian.org/debian-security"
 
-    # Ubuntu's debootstrap hard-codes ubuntu-keyring as a base dependency
-    # even when building a Debian target.  Strip it from the debootstrap scripts
-    # so lb_chroot_dpkg doesn't fail trying to install a non-existent package.
-    if [ -f /usr/share/debootstrap/scripts/bookworm ]; then
-        sudo sed -i '/ubuntu-keyring/d' /usr/share/debootstrap/scripts/bookworm
+    # Ubuntu's debootstrap hard-codes ubuntu-keyring everywhere.
+    # Strip it from ALL debootstrap scripts to prevent lb_chroot_dpkg
+    # from failing on a non-existent package in a Debian chroot.
+    if [ -d /usr/share/debootstrap/scripts ]; then
+        sudo sed -i '/ubuntu-keyring/d' /usr/share/debootstrap/scripts/*
     fi
-    # Also the base script if it exists
-    if [ -f /usr/share/debootstrap/scripts/debian-common ]; then
-        sudo sed -i '/ubuntu-keyring/d' /usr/share/debootstrap/scripts/debian-common
+    # Also check the debootstrap package's base list
+    if [ -f /usr/share/debootstrap/pkgdetails ]; then
+        sudo sed -i '/ubuntu-keyring/d' /usr/share/debootstrap/pkgdetails
     fi
 
     lb config \
