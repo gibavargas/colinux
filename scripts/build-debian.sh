@@ -199,12 +199,14 @@ configure_lb() {
     export LB_MIRROR_CHROOT_SECURITY="http://security.debian.org/debian-security"
     export LB_MIRROR_BINARY_SECURITY="http://security.debian.org/debian-security"
 
+    # Exclude ubuntu-* packages that debootstrap pulls from the Ubuntu host
+    export LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring,ubuntu-minimal,ubuntu-advantage-tools"
+
     lb config \
         --distribution bookworm \
         --debian-installer none \
         --architectures amd64 \
         --archive-areas main \
-        --debootstrap-options "--exclude=ubuntu-keyring,ubuntu-minimal,ubuntu-advantage-tools" \
         --mirror-bootstrap http://deb.debian.org/debian \
         --mirror-chroot http://deb.debian.org/debian \
         --mirror-binary http://deb.debian.org/debian \

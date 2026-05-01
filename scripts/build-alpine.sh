@@ -222,6 +222,10 @@ run_mkimage() {
     # (without it, cp "" fails inside the aports build framework)
     export PACKAGER_PUBKEY="${PACKAGER_PUBKEY:-$(ls /usr/share/apk/keys/*.rsa.pub 2>/dev/null | head -1)}"
 
+    # Prevent mkimage.sh from discovering colinux repo's .git in /src
+    # (mkimage.sh calls git status on $scriptdir but git walks up to /src/.git)
+    export GIT_CEILING_DIRECTORIES="/src"
+
     "$mkimage_script" \
         --profile "colinux-lite" \
         --arch "$ARCH" \
