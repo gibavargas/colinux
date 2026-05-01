@@ -202,16 +202,24 @@ configure_lb() {
     # Ubuntu's debootstrap hard-codes ubuntu-keyring as a required package.
     # Installing Debian's debootstrap avoids this entirely.
     log "Replacing Ubuntu debootstrap with Debian's version..."
-    curl -fsSL \
-        http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.128_all.deb \
-        -o /tmp/debootstrap.deb
-    sudo dpkg -i /tmp/debootstrap.deb || {
-        # Fallback: if the Debian .deb install fails, strip ubuntu-keyring
-        # from ALL debootstrap files as a best-effort alternative
-        warn "Debian debootstrap install failed, stripping ubuntu-keyring from scripts..."
+    DEBOOT_URL="http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.143_all.deb"
+    if curl -fsSL "$DEBOOT_URL" -o /tmp/debootstrap.deb 2>/dev/null; then
+        sudo dpkg -i /tmp/debootstrap.deb || {
+            warn "Debian debootstrap dpkg install failed, trying fallback..."
+            DEBOOT_URL="http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.141_all.deb"
+            curl -fsSL "$DEBOOT_URL" -o /tmp/debootstrap.deb 2>/dev/null && \
+                sudo dpkg -i /tmp/debootstrap.deb || true
+        }
+    fi
+    # Fallback: if .deb install still failed, strip ubuntu-keyring from ALL debootstrap files
+    if dpkg -l debootstrap 2>/dev/null | grep -q ubuntu; then
+        warn "Still on Ubuntu debootstrap, stripping ubuntu-keyring from scripts..."
         sudo sed -i '/ubuntu-keyring/d' /usr/share/debootstrap/scripts/* 2>/dev/null || true
         sudo sed -i '/ubuntu-keyring/d' /usr/share/debootstrap/functions 2>/dev/null || true
-    }
+        # Also strip from the base scripts that debootstrap copies into the chroot
+        sudo grep -rl 'ubuntu-keyring' /usr/share/debootstrap/ 2>/dev/null | \
+            xargs -r sudo sed -i '/ubuntu-keyring/d'
+    fi
     rm -f /tmp/debootstrap.deb
 
     lb config \
