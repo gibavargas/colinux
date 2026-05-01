@@ -295,12 +295,31 @@ if [ -d /etc/apt/sources.list.d ]; then
         /etc/apt/sources.list.d/*.list 2>/dev/null || true
 fi
 # Remove ubuntu-keyring from dpkg database so apt doesn't try to upgrade it.
-# dpkg commands don't work this early in chroot; edit the status file directly.
 if [ -f /var/lib/dpkg/status ]; then
     sed -i '/^Package: ubuntu-keyring$/,/^$/d' /var/lib/dpkg/status
 fi
 HOOK
     chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot_early"
+
+    # Also create a dummy ubuntu-keyring package to satisfy any dependency that
+    # apt resolves before the chroot_early hook runs.  The dpkg --remove in the
+    # hook will clean it up afterwards.  Without this, lb_chroot_apt fails when
+    # a dependency references ubuntu-keyring (which exists in the Ubuntu runner
+    # dpkg database but not in Debian repos).
+    mkdir -p "$BUILD_DIR/config/packages.chroot"
+    local dummy_dir
+    dummy_dir="$(mktemp -d)"
+    mkdir -p "$dummy_dir/DEBIAN"
+    cat > "$dummy_dir/DEBIAN/control" <<EOF
+Package: ubuntu-keyring
+Version: 999.0-dummy
+Architecture: all
+Maintainer: CoLinux Build <build@colinux.local>
+Description: Dummy ubuntu-keyring for cross-distro builds
+ This is an empty placeholder to satisfy apt dependencies on Ubuntu runners.
+EOF
+    dpkg-deb --build "$dummy_dir" "$BUILD_DIR/config/packages.chroot/ubuntu-keyring-dummy.deb" 2>/dev/null || true
+    rm -rf "$dummy_dir"
 
     ok "live-build configured"
 
