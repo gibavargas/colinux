@@ -192,6 +192,13 @@ configure_lb() {
 
     # Initialize live-build config
     # Explicitly set Debian mirrors to avoid inheriting Ubuntu runner defaults
+    # Force Debian security mirror — live-build auto-detects from the host's
+    # /etc/apt/sources.list which is Ubuntu on GitHub runners (security.ubuntu.com).
+    export LB_PARENT_MIRROR_CHROOT_SECURITY="http://security.debian.org/debian-security"
+    export LB_PARENT_MIRROR_BINARY_SECURITY="http://security.debian.org/debian-security"
+    export LB_MIRROR_CHROOT_SECURITY="http://security.debian.org/debian-security"
+    export LB_MIRROR_BINARY_SECURITY="http://security.debian.org/debian-security"
+
     lb config \
         --distribution bookworm \
         --debian-installer none \

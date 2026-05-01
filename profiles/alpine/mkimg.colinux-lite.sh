@@ -18,6 +18,8 @@ profile_colinux-lite() {
     desc="Bootable Alpine Linux appliance for OpenAI Codex CLI"
     profile_name="colinux-lite"
     image_name="colinux-lite-$ARCH-$RELEASE"
+    image_ext="iso"
+    output_format="iso"
 
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
     kernel_cmdline="
