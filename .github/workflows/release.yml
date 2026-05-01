@@ -32,24 +32,19 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            squashfs-tools xorriso grub-efi-amd64-bin \
-            mtools dosfstools fdisk \
-            bash curl ca-certificates git qemu-utils \
-            openssl gdisk e2fsprogs
-          # grub-efi-arm64-bin may not be available on all runners; install with fallback
-          sudo apt-get install -y --no-install-recommends grub-efi-arm64-bin 2>/dev/null || true
-
       - name: Build Alpine ISO (${{ matrix.arch }})
         run: |
           mkdir -p dist
           ARCH=${{ matrix.arch }} \
           ALPINE_RELEASE=${{ env.ALPINE_RELEASE }} \
           OUTDIR="$GITHUB_WORKSPACE/dist" \
-          sudo bash scripts/build-alpine.sh
+          sudo docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -e ARCH \
+            -e ALPINE_RELEASE \
+            -e OUTDIR \
+            alpine:3.21 \
+            sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine.sh"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
