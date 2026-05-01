@@ -200,6 +200,19 @@ run_mkimage() {
     fi
     chmod +x "$mkimage_script"
 
+    # Patch mkimg.base.sh: make build_kernel tolerant of depmod warnings
+    # Alpine 3.21's depmod/BusyBox install emits errors that are non-fatal
+    # (depmod: ERROR: fstatat vmlinuz; install: omitting directory) but
+    # cause build_section to fail via || return 1
+    local mkimg_base="$APORTS_DIR/scripts/mkimg.base.sh"
+    if [ -f "$mkimg_base" ]; then
+        # Patch line with: || return 1  (the update-kernel continuation line)
+        # Alpine 3.21 depmod/busybox install emit non-fatal errors that cause
+        # build_section kernel to fail. We tolerate these since the kernel
+        # and initramfs are still generated correctly.
+        sed -i 's/^\t\t|| return 1$/\t\t|| true/' "$mkimg_base"
+    fi
+
     # Build the ISO
     # --repository: Alpine package repos to use
     # --profile:     Our custom profile name

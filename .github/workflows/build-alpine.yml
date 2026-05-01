@@ -41,6 +41,7 @@ jobs:
           ALPINE_RELEASE=${{ env.ALPINE_RELEASE }} \
           OUTDIR="$GITHUB_WORKSPACE/dist" \
           sudo docker run --rm \
+            --platform ${{ matrix.arch == 'aarch64' && 'linux/arm64' || 'linux/amd64' }} \
             -v "$GITHUB_WORKSPACE:/src" \
             -e ARCH \
             -e ALPINE_RELEASE \
