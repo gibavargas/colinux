@@ -228,6 +228,7 @@ configure_lb() {
         --architectures amd64 \
         --archive-areas main \
         --apt-recommends false \
+        --debootstrap-options="--exclude=ubuntu-keyring" \
         --mirror-bootstrap http://deb.debian.org/debian \
         --mirror-chroot http://deb.debian.org/debian \
         --mirror-binary http://deb.debian.org/debian \
