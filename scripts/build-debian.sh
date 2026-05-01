@@ -220,12 +220,26 @@ configure_lb() {
         2>&1
 
     # Override security mirror to use Debian's (not Ubuntu's)
-    # live-build CLI flags differ between versions; write config files directly
+    # live-build may inherit the runner's sources.list; fix via chroot hooks
+    # Remove any Ubuntu sources that debootstrap may have copied in
     for cfg in bootstrap chroot binary; do
         cat > "$BUILD_DIR/config/archives/security.${cfg}.list" <<EOF
 deb http://security.debian.org/debian-security bookworm-security main
 EOF
     done
+
+    # Hook to clean up any inherited Ubuntu apt sources inside the chroot
+    cat > "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot" <<'HOOK'
+#!/bin/bash
+set -e
+# Replace any leftover Ubuntu sources with pure Debian ones
+cat > /etc/apt/sources.list <<EOF
+deb http://deb.debian.org/debian bookworm main
+deb http://security.debian.org/debian-security bookworm-security main
+deb http://deb.debian.org/debian bookworm-updates main
+EOF
+HOOK
+    chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot"
 
     ok "live-build configured"
 

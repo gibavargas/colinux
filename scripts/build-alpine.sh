@@ -212,9 +212,9 @@ run_mkimage() {
     "$mkimage_script" \
         --profile "colinux-lite" \
         --arch "$ARCH" \
-        --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/main" \
-        --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/community" \
-        --repository "${ALPINE_MIRROR}/alpine/edge/main" \
+        --repository "${ALPINE_MIRROR}/v${ALPINE_RELEASE}/main" \
+        --repository "${ALPINE_MIRROR}/v${ALPINE_RELEASE}/community" \
+        --repository "${ALPINE_MIRROR}/edge/main" \
         --outdir "$OUTDIR" \
         --tag "v${ALPINE_RELEASE}" \
         --yaml "$APORTS_DIR/scripts/mkimg.colinux-lite.sh" \
