@@ -222,9 +222,12 @@ run_mkimage() {
     # (without it, cp "" fails inside the aports build framework)
     export PACKAGER_PUBKEY="${PACKAGER_PUBKEY:-$(ls /usr/share/apk/keys/*.rsa.pub 2>/dev/null | head -1)}"
 
-    # Prevent mkimage.sh from discovering colinux repo's .git in /src
-    # (mkimage.sh calls git status on $scriptdir but git walks up to /src/.git)
-    export GIT_CEILING_DIRECTORIES="/src"
+    # Prevent mkimage.sh from discovering colinux repo's .git in /src.
+    # GitHub Actions sets GIT_DIR=/src/.git which shadows the aports repo.
+    # Unset ALL git env vars and let mkimage.sh discover aports/.git naturally.
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CEILING_DIRECTORIES
+    unset GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+    unset GITHUB_WORKSPACE 2>/dev/null || true
 
     "$mkimage_script" \
         --profile "colinux-lite" \

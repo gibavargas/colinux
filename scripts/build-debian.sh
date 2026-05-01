@@ -267,8 +267,11 @@ if [ -d /etc/apt/sources.list.d ]; then
     sed -i 's|security.ubuntu.com|security.debian.org/debian-security|g' \
         /etc/apt/sources.list.d/*.list 2>/dev/null || true
 fi
-# Remove any Ubuntu-only packages that debootstrap may have pulled from host
-dpkg --remove --force-remove-reinstreq ubuntu-keyring 2>/dev/null || true
+# Remove ubuntu-keyring from dpkg database so apt doesn't try to upgrade it.
+# dpkg commands don't work this early in chroot; edit the status file directly.
+if [ -f /var/lib/dpkg/status ]; then
+    sed -i '/^Package: ubuntu-keyring$/,/^$/d' /var/lib/dpkg/status
+fi
 HOOK
     chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot_early"
 
