@@ -211,6 +211,7 @@ EOF
         --debian-installer none \
         --architectures amd64 \
         --archive-areas main \
+        --apt-recommends false \
         --mirror-bootstrap http://deb.debian.org/debian \
         --mirror-chroot http://deb.debian.org/debian \
         --mirror-binary http://deb.debian.org/debian \
