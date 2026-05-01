@@ -462,6 +462,19 @@ create_raw_image() {
         return 0
     fi
 
+    # Check if loop devices are available (Docker containers often lack /dev/loop*)
+    # Try to create the primary loop device node if missing
+    if [ ! -e /dev/loop0 ]; then
+        # Attempt to create the loop device node (major 7, minor 0)
+        mknod /dev/loop0 b 7 0 2>/dev/null || true
+    fi
+    # Verify losetup actually works before proceeding
+    if ! losetup --find --show --partscan >/dev/null 2>&1; then
+        log_warn "Loop devices are not available (common in Docker containers)."
+        log_warn "Skipping raw disk image creation — the ISO is the critical artifact."
+        return 0
+    fi
+
     local raw_file="${iso_file%.iso}.raw.img"
     local size_mb=1024  # 1 GB raw image
 
@@ -497,7 +510,7 @@ EOF
     iso_mount="$(mktemp -d)"
     mount -o loop "$iso_file" "$iso_mount"
 
-    cp -a "$iso_mount"/. "$boot_mount"/
+    cp -a "$iso_mount"/. "$boot_mount"/.
     sync
 
     umount "$iso_mount"
