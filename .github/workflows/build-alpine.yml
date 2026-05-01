@@ -47,7 +47,7 @@ jobs:
             -e ALPINE_RELEASE \
             -e OUTDIR \
             alpine:3.21 \
-            sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine.sh"
+            sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl ca-certificates git xorriso squashfs-tools mtools dosfstools syslinux grub grub-efi efibootmgr e2fsprogs qemu-img openssl && git config --global safe.directory '*' && cd /src && bash scripts/build-alpine.sh"
 
       - name: Generate checksums
         working-directory: dist

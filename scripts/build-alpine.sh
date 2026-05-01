@@ -463,7 +463,7 @@ create_raw_image() {
     log_info "Creating ${size_mb}MB raw disk image..."
 
     # Create raw image with GPT + ESP + boot partition
-    dd if=/dev/zero of="$raw_file" bs=1M count="$size_mb" status=progress
+    dd if=/dev/zero of="$raw_file" bs=1M count="$size_mb" 2>/dev/null
 
     # Partition
     sfdisk "$raw_file" <<EOF
