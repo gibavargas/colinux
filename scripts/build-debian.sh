@@ -228,7 +228,6 @@ configure_lb() {
         --architectures amd64 \
         --archive-areas main \
         --apt-recommends false \
-        --debootstrap-options="--exclude=ubuntu-keyring" \
         --mirror-bootstrap http://deb.debian.org/debian \
         --mirror-chroot http://deb.debian.org/debian \
         --mirror-binary http://deb.debian.org/debian \
@@ -250,6 +249,15 @@ configure_lb() {
         --cache-indices true \
         --initramfs systemd \
         2>&1
+
+    # Pass --exclude=ubuntu-keyring to debootstrap via live-build config.
+    # lb config doesn't have a --debootstrap-options flag; instead we write
+    # the option directly to the bootstrap config file that lb reads.
+    if [ -f "$BUILD_DIR/config/bootstrap" ]; then
+        sed -i 's/^LB_DEBOOTSTRAP_OPTIONS="/LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring /' \
+            "$BUILD_DIR/config/bootstrap" 2>/dev/null || \
+        echo 'LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring"' >> "$BUILD_DIR/config/bootstrap"
+    fi
 
     # Override security mirror to use Debian's (not Ubuntu's)
     # live-build inherits the runner's security mirror (security.ubuntu.com) which
