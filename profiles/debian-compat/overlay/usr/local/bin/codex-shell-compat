@@ -55,9 +55,28 @@ if [[ -d "${WORKSPACE_DIR}/bin" ]]; then
     export PATH="${WORKSPACE_DIR}/bin:${PATH}"
 fi
 
-# ── Source user profile if exists ─────────────────────────────────────────
+# ── Load user profile if exists (safe parse, never source) ──────────────
 if [[ -f "${PERSIST_DIR}/profile" ]]; then
-    source "${PERSIST_DIR}/profile"
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$line" ]] && continue
+        if [[ "$line" =~ ^export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            varname="${line#export }"
+            varname="${varname%%=*}"
+            varval="${line#*=}"
+            # Strip surrounding quotes
+            varval="${varval#\"}"
+            varval="${varval%\"}"
+            varval="${varval#\'}"
+            varval="${varval%\'}"
+            # Reject values containing command substitution or subshells
+            if [[ "$varval" == *'$('* ]] || [[ "$varval" == *'`'* ]] || [[ "$varval" == *'${'* ]]; then
+                echo "WARNING: Skipping unsafe export line for $varname (contains command substitution)" >&2
+                continue
+            fi
+            export "$varname=$varval"
+        fi
+    done < "${PERSIST_DIR}/profile"
 fi
 
 # ── Check if we're already in a tmux session ──────────────────────────────

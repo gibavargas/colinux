@@ -64,9 +64,9 @@ usbutils
 # Boot & image tools
 xorriso
 grub
-grub-efi
+grub-arm64-efi
 efibootmgr
-syslinux
+# syslinux removed: x86-only, not available on aarch64
 mtools
 squashfs-tools
 

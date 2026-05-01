@@ -219,7 +219,7 @@ cmd_wifi_scan() {
             /RSN:/ || /WPA:/ { printf "  encrypted" }
         '
     else
-        echo "Neither iwlist nor iw found. Install: apk add wireless-tools iw"
+        echo "Neither iwlist nor iw found. Install: sudo apt install wireless-tools iw"
         return 1
     fi
 
@@ -258,7 +258,7 @@ cmd_wifi_connect() {
     elif command -v iwd &>/dev/null; then
         _connect_iwd "$iface" "$ssid" "$PASSPHRASE"
     else
-        echo "No Wi-Fi supplicant found. Install: apk add wpa_supplicant or iwd"
+        echo "No Wi-Fi supplicant found. Install: sudo apt install wpasupplicant or iwd"
         return 1
     fi
 
