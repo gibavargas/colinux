@@ -262,7 +262,7 @@ if [ -d /etc/apt/sources.list.d ]; then
         /etc/apt/sources.list.d/*.list 2>/dev/null || true
 fi
 # Remove any Ubuntu-only packages that debootstrap may have pulled from host
-apt-get remove -y ubuntu-keyring 2>/dev/null || true
+dpkg --remove --force-remove-reinstreq ubuntu-keyring 2>/dev/null || true
 HOOK
     chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot_early"
 

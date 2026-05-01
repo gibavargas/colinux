@@ -43,11 +43,8 @@ profile_colinux-lite() {
 
     # ── Boot loader configuration ─────────────────────────────────────────────
     # GRUB modules for EFI boot (used by section_grub_efi in mkimg.base.sh)
-    if [ "$ARCH" = "x86_64" ]; then
-        grub_mod="biosdisk part_gpt fat normal configfile linux chain boot"
-    else
-        grub_mod="part_gpt fat normal configfile linux chain boot"
-    fi
+    # Note: biosdisk is i386-pc only — do NOT include for EFI grub-mkimage
+    grub_mod="part_gpt fat normal configfile linux chain boot"
 
     # ── Image layout ──────────────────────────────────────────────────────────
     # Partition 1: EFI System Partition (ESP) — FAT32, ~32 MB
