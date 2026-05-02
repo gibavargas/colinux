@@ -231,11 +231,12 @@ setup_codex_auth() {
         return 0
     fi
 
-    # Safely check for existing OPENAI_API_KEY in config (never source it)
+    # Safely extract existing OPENAI_API_KEY value (never source the file)
     if [ -f "$auth_file" ]; then
-        existing_key="$(grep '^OPENAI_API_KEY=' "$auth_file" 2>/dev/null | head -1 | sed 's/^OPENAI_API_KEY=//' | tr -d '"' | tr -d "'" || true)"
-        # Skip if the key is just masked placeholder
-        if [ "$existing_key" = "***" ] || [ -z "$existing_key" ]; then
+        existing_key="$(grep '^OPENAI_API_KEY=' "$auth_file" 2>/dev/null | head -1 \
+            | sed 's/^OPENAI_API_KEY=//' | tr -d '"' | tr -d "'" || true)"
+        # Skip if empty or only contained a masked placeholder
+        if [ "$existing_key" = "***" ] || [ "$existing_key" = "MASKED" ] || [ -z "$existing_key" ]; then
             existing_key=""
         fi
     fi
@@ -244,10 +245,11 @@ setup_codex_auth() {
         cat > "$auth_file" <<EOF
 # CoLinux authentication configuration
 # Created: $(date -Iseconds)
-export OPENAI_API_KEY="$existing_key"
+export OPENAI_API_KEY="$api_key"
 EOF
         chmod 600 "$auth_file"
         chown codex:codex "$auth_file" 2>/dev/null || true
+        log_info "Preserved existing API key in $auth_file"
         return 0
     fi
 

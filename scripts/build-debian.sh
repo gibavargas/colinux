@@ -251,12 +251,17 @@ configure_lb() {
         2>&1
 
     # Pass --exclude=ubuntu-keyring to debootstrap via live-build config.
-    # lb config doesn't have a --debootstrap-options flag; instead we write
-    # the option directly to the bootstrap config file that lb reads.
+    # lb config doesn't expose a direct flag; we inject it into the bootstrap config.
     if [ -f "$BUILD_DIR/config/bootstrap" ]; then
-        sed -i 's/^LB_DEBOOTSTRAP_OPTIONS="/LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring /' \
-            "$BUILD_DIR/config/bootstrap" 2>/dev/null || \
-        echo 'LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring"' >> "$BUILD_DIR/config/bootstrap"
+        if grep -q '^LB_DEBOOTSTRAP_OPTIONS=' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
+            # Append to existing options if not already excluded
+            if ! grep -q 'exclude=ubuntu-keyring' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
+                sed -i 's/^LB_DEBOOTSTRAP_OPTIONS="/LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring /' \
+                    "$BUILD_DIR/config/bootstrap"
+            fi
+        else
+            echo 'LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring"' >> "$BUILD_DIR/config/bootstrap"
+        fi
     fi
 
     # Override security mirror to use Debian's (not Ubuntu's)
