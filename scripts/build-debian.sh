@@ -284,8 +284,10 @@ EOF
     done
 
     # Hook: clean up any inherited Ubuntu apt sources inside the chroot early
-    # This runs as the first chroot hook, before lb installs any packages
-    cat > "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot_early" <<'HOOK'
+    # This runs as the first chroot hook, before lb installs any packages.
+    # NOTE: live-build requires the '.hook.' segment in the filename to
+    # recognize the file as a hook — without it, the hook is silently ignored.
+    cat > "$BUILD_DIR/config/hooks/0001-fix-apt-sources.hook.chroot_early" <<'HOOK'
 #!/bin/bash
 set -e
 # Replace any leftover Ubuntu sources with pure Debian ones
@@ -304,7 +306,7 @@ if [ -f /var/lib/dpkg/status ]; then
     sed -i '/^Package: ubuntu-keyring$/,/^$/d' /var/lib/dpkg/status
 fi
 HOOK
-    chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.chroot_early"
+    chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.hook.chroot_early"
 
     # Also create a dummy ubuntu-keyring package to satisfy any dependency that
     # apt resolves before the chroot_early hook runs.  The dpkg --remove in the
@@ -323,7 +325,7 @@ Maintainer: CoLinux Build <build@colinux.local>
 Description: Dummy ubuntu-keyring for cross-distro builds
  This is an empty placeholder to satisfy apt dependencies on Ubuntu runners.
 EOF
-    dpkg-deb --build "$dummy_dir" "$BUILD_DIR/config/packages.chroot/ubuntu-keyring-dummy.deb" 2>/dev/null || true
+    dpkg-deb --build "$dummy_dir" "$BUILD_DIR/config/packages.chroot/ubuntu-keyring_999.0-dummy_all.deb" 2>/dev/null || true
     rm -rf "$dummy_dir"
 
     ok "live-build configured"
