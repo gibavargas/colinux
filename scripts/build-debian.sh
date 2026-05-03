@@ -89,7 +89,7 @@ check_prerequisites() {
         sudo apt-get update -qq
         sudo apt-get install -y live-build debootstrap squashfs-tools xorriso \
             dpkg-dev fakeroot cpio dosfstools mtools grub-efi-amd64-bin \
-            grub-pc-bin syslinux isolinux 2>&1 || {
+            grub-pc-bin syslinux isolinux gnupg 2>&1 || {
             err "Failed to install prerequisites"
             exit 1
         }

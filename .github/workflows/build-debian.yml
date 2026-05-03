@@ -33,7 +33,7 @@ jobs:
             live-build debootstrap squashfs-tools xorriso \
             dpkg-dev fakeroot cpio dosfstools mtools \
             grub-efi-amd64-bin grub-pc-bin syslinux \
-            isolinux systemd-container
+            isolinux systemd-container gnupg
 
       - name: Build Debian ISO
         run: |
