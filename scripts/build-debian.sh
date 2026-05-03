@@ -248,6 +248,7 @@ configure_lb() {
         --cache-packages true \
         --cache-indices true \
         --initramfs systemd \
+        --bootstrap-include "gnupg" \
         2>&1
 
     # Pass --exclude=ubuntu-keyring to debootstrap via live-build config.
