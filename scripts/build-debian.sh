@@ -269,6 +269,20 @@ configure_lb() {
         fi
     fi
 
+    # Ensure gnupg is in the bootstrap — lb_chroot_archives needs the gpg
+    # binary inside the chroot to manage repository signing keys.  Without it,
+    # apt exits with "gpg: No such file or directory" (exit code 127).
+    if [ -f "$BUILD_DIR/config/bootstrap" ]; then
+        if grep -q '^LB_BOOTSTRAP_INCLUDE=' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
+            if ! grep -q 'gnupg' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
+                sed -i 's/^LB_BOOTSTRAP_INCLUDE="/LB_BOOTSTRAP_INCLUDE="gnupg /' \
+                    "$BUILD_DIR/config/bootstrap"
+            fi
+        else
+            echo 'LB_BOOTSTRAP_INCLUDE="gnupg"' >> "$BUILD_DIR/config/bootstrap"
+        fi
+    fi
+
     # Override security mirror to use Debian's (not Ubuntu's)
     # live-build inherits the runner's security mirror (security.ubuntu.com) which
     # does not serve Debian packages. Force Debian's security mirror in all stages.
