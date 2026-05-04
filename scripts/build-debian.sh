@@ -222,6 +222,12 @@ configure_lb() {
     fi
     rm -f /tmp/debootstrap.deb
 
+    # Include gnupg in the bootstrap so lb_chroot_archives can verify
+    # repository signing keys.  Must be exported BEFORE lb config so
+    # live-build v3 (shipped on Ubuntu runners) writes it into the
+    # bootstrap config correctly.
+    export LB_BOOTSTRAP_INCLUDE="gnupg"
+
     lb config \
         --distribution bookworm \
         --debian-installer none \
@@ -250,35 +256,11 @@ configure_lb() {
         --initramfs systemd \
         2>&1
 
-    # Pass --include=gnupg and --exclude=ubuntu-keyring to debootstrap via live-build config.
-    # lb config doesn't expose a direct flag; we inject it into the bootstrap config.
+    # Belt-and-suspenders: verify gnupg made it into the bootstrap config.
+    # If lb config somehow dropped it, inject it into the config file.
     if [ -f "$BUILD_DIR/config/bootstrap" ]; then
-        if grep -q '^LB_DEBOOTSTRAP_OPTIONS=' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
-            # Append include if not already present
-            if ! grep -q 'include=gnupg' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
-                sed -i 's/^LB_DEBOOTSTRAP_OPTIONS="/LB_DEBOOTSTRAP_OPTIONS="--include=gnupg /' \
-                    "$BUILD_DIR/config/bootstrap"
-            fi
-            # Append exclude if not already present
-            if ! grep -q 'exclude=ubuntu-keyring' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
-                sed -i 's/^LB_DEBOOTSTRAP_OPTIONS="/LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring /' \
-                    "$BUILD_DIR/config/bootstrap"
-            fi
-        else
-            echo 'LB_DEBOOTSTRAP_OPTIONS="--include=gnupg --exclude=ubuntu-keyring"' >> "$BUILD_DIR/config/bootstrap"
-        fi
-    fi
-
-    # Ensure gnupg is in the bootstrap — lb_chroot_archives needs the gpg
-    # binary inside the chroot to manage repository signing keys.  Without it,
-    # apt exits with "gpg: No such file or directory" (exit code 127).
-    if [ -f "$BUILD_DIR/config/bootstrap" ]; then
-        if grep -q '^LB_BOOTSTRAP_INCLUDE=' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
-            if ! grep -q 'gnupg' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
-                sed -i 's/^LB_BOOTSTRAP_INCLUDE="/LB_BOOTSTRAP_INCLUDE="gnupg /' \
-                    "$BUILD_DIR/config/bootstrap"
-            fi
-        else
+        if ! grep -q 'gnupg' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
+            warn "LB_BOOTSTRAP_INCLUDE missing from bootstrap config — injecting gnupg"
             echo 'LB_BOOTSTRAP_INCLUDE="gnupg"' >> "$BUILD_DIR/config/bootstrap"
         fi
     fi
