@@ -248,20 +248,24 @@ configure_lb() {
         --cache-packages true \
         --cache-indices true \
         --initramfs systemd \
-        --bootstrap-include "gnupg" \
         2>&1
 
-    # Pass --exclude=ubuntu-keyring to debootstrap via live-build config.
+    # Pass --include=gnupg and --exclude=ubuntu-keyring to debootstrap via live-build config.
     # lb config doesn't expose a direct flag; we inject it into the bootstrap config.
     if [ -f "$BUILD_DIR/config/bootstrap" ]; then
         if grep -q '^LB_DEBOOTSTRAP_OPTIONS=' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
-            # Append to existing options if not already excluded
+            # Append include if not already present
+            if ! grep -q 'include=gnupg' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
+                sed -i 's/^LB_DEBOOTSTRAP_OPTIONS="/LB_DEBOOTSTRAP_OPTIONS="--include=gnupg /' \
+                    "$BUILD_DIR/config/bootstrap"
+            fi
+            # Append exclude if not already present
             if ! grep -q 'exclude=ubuntu-keyring' "$BUILD_DIR/config/bootstrap" 2>/dev/null; then
                 sed -i 's/^LB_DEBOOTSTRAP_OPTIONS="/LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring /' \
                     "$BUILD_DIR/config/bootstrap"
             fi
         else
-            echo 'LB_DEBOOTSTRAP_OPTIONS="--exclude=ubuntu-keyring"' >> "$BUILD_DIR/config/bootstrap"
+            echo 'LB_DEBOOTSTRAP_OPTIONS="--include=gnupg --exclude=ubuntu-keyring"' >> "$BUILD_DIR/config/bootstrap"
         fi
     fi
 
