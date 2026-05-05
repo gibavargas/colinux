@@ -403,6 +403,27 @@ do_build() {
 
     cd "$BUILD_DIR"
 
+    # lb_chroot_archives signs local Release files with GPG.  In headless
+    # environments (CI runners) gpg --gen-key fails with "Inappropriate
+    # ioctl for device" and falls back to signing with no key at all.
+    # Generate a throwaway key non-interactively so signing succeeds.
+    if ! gpg --list-secret-keys >/dev/null 2>&1; then
+        step "Generating throwaway GPG key for apt repository signing"
+        GPG_TTY="" gpg --batch --gen-key <<EOF 2>/dev/null || true
+%echo Generating throwaway build key
+Key-Type: RSA
+Key-Length: 4096
+Subkey-Type: RSA
+Subkey-Length: 4096
+Name-Real: CoLinux Build
+Name-Email: build@colinux.local
+Expire-Date: 0
+%no-protection
+%commit
+%echo done
+EOF
+    fi
+
     # Run live-build
     if lb build 2>&1 | tee "$BUILD_DIR/build.log"; then
         ok "Build completed successfully"
