@@ -407,14 +407,15 @@ do_build() {
     # environments (CI runners) gpg --gen-key fails with "Inappropriate
     # ioctl for device" and falls back to signing with no key at all.
     # Generate a throwaway key non-interactively so signing succeeds.
+    # Note: 4096-bit RSA is too slow in CI; use 2048-bit.  --pinentry-mode
+    # loopback is required for non-tty environments.
     if ! gpg --list-secret-keys >/dev/null 2>&1; then
         step "Generating throwaway GPG key for apt repository signing"
-        GPG_TTY="" gpg --batch --gen-key <<EOF 2>/dev/null || true
+        GPG_TTY="" gpg --batch --pinentry-mode loopback --passphrase "" \
+            --gen-key <<EOF 2>/dev/null || true
 %echo Generating throwaway build key
 Key-Type: RSA
-Key-Length: 4096
-Subkey-Type: RSA
-Subkey-Length: 4096
+Key-Length: 2048
 Name-Real: CoLinux Build
 Name-Email: build@colinux.local
 Expire-Date: 0
