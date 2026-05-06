@@ -8,7 +8,6 @@
 # =============================================================================
 
 # --- Base System ---
-debian-standard
 initramfs-tools
 systemd
 systemd-sysv
@@ -24,8 +23,7 @@ grub-efi-amd64
 grub-pc-bin
 efibootmgr
 shim-signed
-linux-firmware
-firmware-linux-nonfree
+firmware-misc-nonfree
 firmware-linux-free
 
 # --- XFCE4 Desktop Environment ---
@@ -110,7 +108,7 @@ lvm2
 cryptsetup
 mdadm
 parted
-gptfdisk
+gdisk
 fdisk
 testdisk
 udisks2
@@ -181,7 +179,7 @@ apparmor-profiles
 apparmor-utils
 ufw
 polkitd
-polkit-1-pkexec
+pkexec
 sudo
 
 # --- Auto-Update ---
@@ -211,7 +209,6 @@ pulseaudio
 pulseaudio-utils
 alsa-utils
 blueman                       # Bluetooth manager
-power-management-icons
 xfce4-power-manager
 xfce4-battery-plugin
 tumbler                       # Thumbnail generation for Thunar

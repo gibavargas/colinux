@@ -241,7 +241,7 @@ configure_lb() {
         --distribution bookworm \
         --debian-installer none \
         --architectures amd64 \
-        --archive-areas main \
+        --archive-areas "main contrib non-free non-free-firmware" \
         --apt-recommends false \
         --apt-secure false \
         --mirror-bootstrap http://deb.debian.org/debian \
@@ -344,8 +344,12 @@ EOF
 
     # ── Install package list ─────────────────────────────────────────────
     if [ -f "$BUILD_DIR/profile/packages.desktop" ]; then
-        cp "$BUILD_DIR/profile/packages.desktop" \
-            "$BUILD_DIR/config/package-lists/desktop.list.chroot"
+        awk '
+            /^[[:space:]]*#/ { next }
+            { sub(/[[:space:]]+#.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, "") }
+            NF { print }
+        ' "$BUILD_DIR/profile/packages.desktop" \
+            > "$BUILD_DIR/config/package-lists/desktop.list.chroot"
         ok "Package list installed"
     fi
 
