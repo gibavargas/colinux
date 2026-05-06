@@ -371,6 +371,13 @@ EOF
         ok "Package list installed"
     fi
 
+    # live-build v3 runs the ISO hybridization step inside the chroot when
+    # LB_BUILD_WITH_CHROOT=true.  On Debian Bookworm, /usr/bin/isohybrid is
+    # provided by syslinux-utils, so include it in the chroot package set.
+    cat > "$BUILD_DIR/config/package-lists/live-build-binary-deps.list.chroot" <<'EOF'
+syslinux-utils
+EOF
+
     # ── Install overlay ─────────────────────────────────────────────────
     log "Installing overlay filesystem..."
     local overlay_src="$BUILD_DIR/profile/overlay"
