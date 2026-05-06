@@ -309,25 +309,11 @@ fi
 HOOK
     chmod 755 "$BUILD_DIR/config/hooks/0001-fix-apt-sources.hook.chroot_early"
 
-    # Also create a dummy ubuntu-keyring package to satisfy any dependency that
-    # apt resolves before the chroot_early hook runs.  The dpkg --remove in the
-    # hook will clean it up afterwards.  Without this, lb_chroot_apt fails when
-    # a dependency references ubuntu-keyring (which exists in the Ubuntu runner
-    # dpkg database but not in Debian repos).
-    mkdir -p "$BUILD_DIR/config/packages.chroot"
-    local dummy_dir
-    dummy_dir="$(mktemp -d)"
-    mkdir -p "$dummy_dir/DEBIAN"
-    cat > "$dummy_dir/DEBIAN/control" <<EOF
-Package: ubuntu-keyring
-Version: 999.0-dummy
-Architecture: all
-Maintainer: CoLinux Build <build@colinux.local>
-Description: Dummy ubuntu-keyring for cross-distro builds
- This is an empty placeholder to satisfy apt dependencies on Ubuntu runners.
-EOF
-    dpkg-deb --build "$dummy_dir" "$BUILD_DIR/config/packages.chroot/ubuntu-keyring_999.0-dummy_all.deb" 2>/dev/null || true
-    rm -rf "$dummy_dir"
+    # Do not place local .deb files in config/packages.chroot unless strictly
+    # necessary: live-build turns them into a local apt repository and attempts
+    # to generate/sign Release files inside the chroot, which fails on headless
+    # CI runners without a usable pinentry.  Debian debootstrap plus the early
+    # ubuntu-keyring status cleanup above is sufficient for current runners.
 
     ok "live-build configured"
 
