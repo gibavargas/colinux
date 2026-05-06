@@ -253,7 +253,7 @@ configure_lb() {
         --parent-mirror-bootstrap http://deb.debian.org/debian \
         --parent-mirror-chroot http://deb.debian.org/debian \
         --parent-mirror-binary http://deb.debian.org/debian \
-        --bootloader syslinux,grub-efi \
+        --bootloader syslinux \
         --memtest none \
         --source false \
         --binary-images iso-hybrid \
