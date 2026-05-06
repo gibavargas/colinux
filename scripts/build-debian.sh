@@ -222,6 +222,15 @@ configure_lb() {
     fi
     rm -f /tmp/debootstrap.deb
 
+    # Ubuntu live-build v3 adds local config/packages.chroot debs as
+    # "deb file:/root/packages ./" without trusted=yes when apt-secure=false.
+    # That skips signing but apt still refuses the unsigned local repository.
+    # Patch only this local repository stanza; remote Debian mirrors remain normal.
+    if [ -f /usr/lib/live/build/lb_chroot_archives ]; then
+        sudo sed -i 's|deb file:/root/packages ./|deb [trusted=yes] file:/root/packages ./|' \
+            /usr/lib/live/build/lb_chroot_archives || true
+    fi
+
     # Include gnupg in the bootstrap so lb_chroot_archives can verify
     # repository signing keys.  Must be exported BEFORE lb config so
     # live-build v3 (shipped on Ubuntu runners) writes it into the
@@ -404,28 +413,6 @@ do_build() {
     step "Building ISO (this may take 10-30 minutes)"
 
     cd "$BUILD_DIR"
-
-    # lb_chroot_archives signs local Release files with GPG.  In headless
-    # environments (CI runners) gpg --gen-key fails with "Inappropriate
-    # ioctl for device" and falls back to signing with no key at all.
-    # Generate a throwaway key non-interactively so signing succeeds.
-    # Note: 4096-bit RSA is too slow in CI; use 2048-bit.  --pinentry-mode
-    # loopback is required for non-tty environments.
-    if ! gpg --list-secret-keys >/dev/null 2>&1; then
-        step "Generating throwaway GPG key for apt repository signing"
-        GPG_TTY="" gpg --batch --pinentry-mode loopback --passphrase "" \
-            --gen-key <<EOF 2>/dev/null || true
-%echo Generating throwaway build key
-Key-Type: RSA
-Key-Length: 2048
-Name-Real: CoLinux Build
-Name-Email: build@colinux.local
-Expire-Date: 0
-%no-protection
-%commit
-%echo done
-EOF
-    fi
 
     # Run live-build
     if lb build 2>&1 | tee "$BUILD_DIR/build.log"; then
