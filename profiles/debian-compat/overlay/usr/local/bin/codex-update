@@ -4,13 +4,13 @@
 #
 # Updates:
 #   1. Codex CLI binary (downloads from GitHub releases with checksum verification)
-#   2. Alpine Linux packages (apk upgrade)
+#   2. System packages (apt or apk upgrade, depending on edition)
 #
 # Security: Verifies SHA256 checksums before installing. Keeps rollback binary.
 #
 # Usage: codex-update [OPTIONS]
 #   --codex-only    Only update Codex CLI
-#   --system-only   Only update Alpine packages
+#   --system-only   Only update system packages
 #   --check         Check for updates without applying
 #   --force         Force update even if already latest
 set -euo pipefail
@@ -73,7 +73,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --codex-only    Only update Codex CLI binary"
-            echo "  --system-only   Only update Alpine packages"
+            echo "  --system-only   Only update system packages"
             echo "  --check         Check for updates without applying"
             echo "  --force         Force update even if already latest"
             echo ""

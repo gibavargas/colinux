@@ -287,12 +287,16 @@ deb http://security.debian.org/debian-security bookworm-security main
 EOF
     done
 
-    # Also override chroot_sources if lb config generated them pointing to Ubuntu
+    # Also override chroot_sources if lb config generated host/default security
+    # entries.  Ubuntu live-build v3 can emit Debian's obsolete
+    # bookworm/updates suite; Bookworm security is bookworm-security.
     for cfg in chroot binary; do
         if [ -f "$BUILD_DIR/config/chroot_sources/security.${cfg}" ]; then
             sed -i 's|security.ubuntu.com/ubuntu|security.debian.org/debian-security|g' \
                 "$BUILD_DIR/config/chroot_sources/security.${cfg}"
             sed -i 's|jammy|bookworm-security|g' \
+                "$BUILD_DIR/config/chroot_sources/security.${cfg}"
+            sed -i 's|bookworm/updates|bookworm-security|g' \
                 "$BUILD_DIR/config/chroot_sources/security.${cfg}"
         fi
     done
@@ -378,7 +382,7 @@ EOF
     mkdir -p "$BUILD_DIR/config/hooks"
 
     # Post-chroot hook: setup Codex Desktop
-    cat > "$BUILD_DIR/config/hooks/9999-setup-codex-desktop.chroot" <<'HOOK'
+    cat > "$BUILD_DIR/config/hooks/9999-setup-codex-desktop.hook.chroot" <<'HOOK'
 #!/bin/bash
 set -e
 
@@ -410,7 +414,7 @@ systemctl enable lightdm 2>/dev/null || true
 
 echo "=== CoLinux: Desktop setup complete ==="
 HOOK
-    chmod 755 "$BUILD_DIR/config/hooks/9999-setup-codex-desktop.chroot"
+    chmod 755 "$BUILD_DIR/config/hooks/9999-setup-codex-desktop.hook.chroot"
 
     ok "Hooks installed"
 }
