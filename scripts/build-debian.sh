@@ -259,7 +259,7 @@ configure_lb() {
         --iso-volume "colinux-desktop" \
         --linux-flavours "amd64" \
         --firmware-binary true \
-        --firmware-chroot true \
+        --firmware-chroot false \
         --apt-indices false \
         --cache-packages true \
         --cache-indices false \
