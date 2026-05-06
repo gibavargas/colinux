@@ -309,7 +309,7 @@ EOF
         xargs -r sed -i \
             -e 's|security.ubuntu.com/ubuntu|security.debian.org/debian-security|g' \
             -e 's|bookworm/updates|bookworm-security|g' \
-            -e 's|jammy|bookworm-security|g'
+            -e 's|jammy|bookworm-security|g' || true
 
     # Hook: clean up any inherited Ubuntu apt sources inside the chroot early
     # This runs as the first chroot hook, before lb installs any packages.
