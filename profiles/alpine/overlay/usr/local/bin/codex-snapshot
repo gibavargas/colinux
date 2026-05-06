@@ -84,7 +84,7 @@ gather_metadata() {
     elif [[ -f /var/lib/dbus/machine-id ]]; then
         hw_id="$(cat /var/lib/dbus/machine-id 2>/dev/null | cut -c1-12)"
     else
-        hw_id="$(ip link show 2>/dev/null | grep -oP 'link/ether \K[0-9a-f:]+' | head -1 | tr -d ':' || echo 'unknown')"
+        hw_id="$(ip link show 2>/dev/null | awk '/link\/ether/ {print $2; exit}' | head -1 | tr -d ':' || echo 'unknown')"
     fi
 
     # Disk info

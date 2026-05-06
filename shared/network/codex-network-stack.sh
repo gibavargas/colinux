@@ -81,7 +81,7 @@ write_state() {
     local iface="${2:-none}"
     local ssid="${3:-}"
     local ip=""
-    ip="$(ip -4 addr show "$iface" 2>/dev/null | grep -oP 'inet \K[0-9./]+')" || true
+    ip="$(ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {print $2}')" || true
     local dns_ok="false"
     if host google.com &>/dev/null || nslookup google.com &>/dev/null; then
         dns_ok="true"
@@ -243,7 +243,7 @@ configure_ethernet() {
 
     # Verify
     local ip_addr
-    ip_addr="$(ip -4 addr show "$eth_iface" 2>/dev/null | grep -oP 'inet \K[0-9.]+')" || true
+    ip_addr="$(ip -4 addr show "$eth_iface" 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]}')" || true
 
     if [[ -n "$ip_addr" ]]; then
         info "Ethernet connected: $eth_iface ($ip_addr)"

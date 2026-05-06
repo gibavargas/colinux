@@ -86,21 +86,21 @@ if [[ "$RUN_CPU" == true ]]; then
 
     # AES-256-CBC
     echo -n "  AES-256-CBC:     "
-    AES_SPEED="$(openssl speed -evp aes-256-cbc 2>/dev/null | grep -oP '\d+(?=\s+KBytes/sec)' | tail -1 || echo 0)"
+    AES_SPEED="$(openssl speed -evp aes-256-cbc 2>/dev/null | grep -oE '[0-9]+([.][0-9]+)?[[:space:]]+KBytes/sec' | awk '{print int($1)}' | tail -1 || echo 0)"
     AES_MBPS="$((AES_SPEED / 1024))"
     echo "${AES_MBPS} MB/s"
     RESULTS="$(echo "$RESULTS" | jq -c --arg val "${AES_MBPS} MB/s" '. + {cpu_aes: $val}')"
 
     # SHA-256
     echo -n "  SHA-256:         "
-    SHA_SPEED="$(openssl speed sha256 2>/dev/null | grep -oP '\d+(?=\s+KBytes/sec)' | tail -1 || echo 0)"
+    SHA_SPEED="$(openssl speed sha256 2>/dev/null | grep -oE '[0-9]+([.][0-9]+)?[[:space:]]+KBytes/sec' | awk '{print int($1)}' | tail -1 || echo 0)"
     SHA_MBPS="$((SHA_SPEED / 1024))"
     echo "${SHA_MBPS} MB/s"
     RESULTS="$(echo "$RESULTS" | jq -c --arg val "${SHA_MBPS} MB/s" '. + {cpu_sha256: $val}')"
 
     # RSA 2048 sign
     echo -n "  RSA-2048 sign:   "
-    RSA_SIGN="$(openssl speed rsa2048 2>/dev/null | grep 'sign' | grep -oP '\d+(?=\s+signs/sec)' | tail -1 || echo 0)"
+    RSA_SIGN="$(openssl speed rsa2048 2>/dev/null | grep 'sign' | grep -oE '[0-9]+([.][0-9]+)?[[:space:]]+signs/sec' | awk '{print int($1)}' | tail -1 || echo 0)"
     echo "${RSA_SIGN} ops/s"
     RESULTS="$(echo "$RESULTS" | jq -c --arg val "${RSA_SIGN} ops/s" '. + {cpu_rsa2048_sign: $val}')"
 
@@ -130,7 +130,7 @@ if [[ "$RUN_DISK" == true ]]; then
 
     # Sequential write
     echo -n "  Seq write:       "
-    WRITE_SPEED="$(dd if=/dev/zero of="$TEST_FILE" bs=1M count=256 oflag=direct 2>&1 | grep -oP '\d+(?=\s+bytes/sec)' | tail -1 || echo 0)"
+    WRITE_SPEED="$(dd if=/dev/zero of="$TEST_FILE" bs=1M count=256 oflag=direct 2>&1 | grep -oE '[0-9]+([.][0-9]+)?[[:space:]]+bytes/sec' | awk '{print int($1)}' | tail -1 || echo 0)"
     if [[ "$WRITE_SPEED" -gt 0 ]]; then
         WRITE_HR="$(numfmt --to=iec --suffix=B "$WRITE_SPEED" 2>/dev/null || echo "${WRITE_SPEED}B")/s"
     else
@@ -146,7 +146,7 @@ if [[ "$RUN_DISK" == true ]]; then
         sync 2>/dev/null
         echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
 
-        READ_SPEED="$(dd if="$TEST_FILE" of=/dev/null bs=1M count=256 iflag=direct 2>&1 | grep -oP '\d+(?=\s+bytes/sec)' | tail -1 || echo 0)"
+        READ_SPEED="$(dd if="$TEST_FILE" of=/dev/null bs=1M count=256 iflag=direct 2>&1 | grep -oE '[0-9]+([.][0-9]+)?[[:space:]]+bytes/sec' | awk '{print int($1)}' | tail -1 || echo 0)"
         if [[ "$READ_SPEED" -gt 0 ]]; then
             READ_HR="$(numfmt --to=iec --suffix=B "$READ_SPEED" 2>/dev/null || echo "${READ_SPEED}B")/s"
         else
@@ -159,7 +159,7 @@ if [[ "$RUN_DISK" == true ]]; then
     # Random I/O (4K)
     if [[ -f "$TEST_FILE" ]]; then
         echo -n "  Random 4K write: "
-        RAND_SPEED="$(dd if=/dev/urandom of="$TEST_FILE.rand" bs=4K count=10000 oflag=direct 2>&1 | grep -oP '\d+(?=\s+bytes/sec)' | tail -1 || echo 0)"
+        RAND_SPEED="$(dd if=/dev/urandom of="$TEST_FILE.rand" bs=4K count=10000 oflag=direct 2>&1 | grep -oE '[0-9]+([.][0-9]+)?[[:space:]]+bytes/sec' | awk '{print int($1)}' | tail -1 || echo 0)"
         if [[ "$RAND_SPEED" -gt 0 ]]; then
             RAND_HR="$(numfmt --to=iec --suffix=B "$RAND_SPEED" 2>/dev/null || echo "${RAND_SPEED}B")/s"
         else

@@ -124,7 +124,6 @@ hdparm
 pciutils
 usbutils
 lm-sensors
-hddtemp
 acpi
 acpid
 

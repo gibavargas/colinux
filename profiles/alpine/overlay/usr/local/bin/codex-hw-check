@@ -241,7 +241,7 @@ if [[ "$MODE" == "full" ]]; then
     echo ""
 
     echo "--- Network ---"
-    ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '127\.' | while read -r addr; do
+    ip -4 addr show 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]}' | grep -v '127\.' | while read -r addr; do
         echo "  IP: $addr"
     done
 

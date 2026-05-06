@@ -103,8 +103,8 @@ get_target_codex_version() {
             | jq -r '.tag_name // .name' 2>/dev/null || true)"
     fi
 
-    # Strip leading 'v' if present
-    version="${version#v}"
+    # Return the raw GitHub tag (e.g. rust-v0.128.0). URL construction must use
+    # the exact tag; display/comparison code normalizes it separately.
     echo "$version"
 }
 
@@ -117,14 +117,34 @@ get_current_codex_version() {
 }
 
 # ── Verify SHA256 checksum ────────────────────────────────────────────────
+get_asset_digest_sha256() {
+    local tag="$1"
+    local asset_name="$2"
+    local digest
+
+    if ! command -v jq &>/dev/null; then
+        log_action "WARN jq_not_available_for_asset_digest"
+        return 1
+    fi
+
+    digest="$(curl -sfL "https://api.github.com/repos/${CODEX_REPO}/releases/tags/${tag}"         | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .digest // empty' 2>/dev/null         | head -1)" || true
+    digest="${digest#sha256:}"
+
+    if [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        echo "$digest"
+        return 0
+    fi
+    return 1
+}
+
 verify_checksum() {
     local file="$1"
     local expected_sha256="$2"
 
     if ! command -v sha256sum &>/dev/null; then
-        log_action "WARN sha256sum not available, skipping checksum verification"
-        echo "WARNING: sha256sum not found. Cannot verify checksum. Skipping."
-        return 0
+        log_action "FAIL sha256sum not available, refusing to install"
+        echo "ERROR: sha256sum not found. Cannot verify checksum. Refusing to install."
+        return 1
     fi
 
     local actual_sha256
@@ -143,9 +163,11 @@ verify_checksum() {
 update_codex() {
     log_action "codex_update_start"
 
-    local latest_version current_version
+    local latest_version current_version latest_display
     latest_version="$(get_target_codex_version)"
     current_version="$(get_current_codex_version)"
+    latest_display="${latest_version#rust-v}"
+    latest_display="${latest_display#v}"
 
     if [[ -z "$latest_version" ]]; then
         echo "Could not determine latest Codex version. Check network connectivity."
@@ -155,12 +177,12 @@ update_codex() {
 
     echo "Codex CLI:"
     echo "  Current: $current_version"
-    echo "  Latest:  $latest_version"
+    echo "  Latest:  $latest_display ($latest_version)"
     if [[ -n "$PINNED_TAG" ]]; then
         echo "  Pinned:  $PINNED_TAG"
     fi
 
-    if [[ "$current_version" == "$latest_version" ]] && [[ "$FORCE" != true ]]; then
+    if [[ "$current_version" == "$latest_display" ]] && [[ "$FORCE" != true ]]; then
         echo "  → Already up to date."
         log_action "codex_update_skip already_current=$current_version"
         return 0
@@ -186,10 +208,10 @@ update_codex() {
 
     # Construct correct artifact name
     local tarball_name="codex-${arch}-unknown-linux-musl.tar.gz"
-    local tag_prefix="v${latest_version}"
+    local tag_prefix="$latest_version"
     local base_url="https://github.com/${CODEX_REPO}/releases/download/${tag_prefix}"
 
-    echo "  → Downloading Codex CLI v${latest_version}..."
+    echo "  → Downloading Codex CLI ${latest_display}..."
     log_action "codex_download_start version=$latest_version arch=$arch"
 
     local tmp_dir
@@ -203,29 +225,31 @@ update_codex() {
         return 1
     fi
 
-    # Download SHA256SUMS and verify
+    # Verify integrity. Prefer SHA256SUMS when present; current Codex releases
+    # publish per-asset SHA-256 digests via the GitHub release API instead.
     local checksum_ok=false
+    local expected_sha256=""
     if curl -sfL -o "${tmp_dir}/SHA256SUMS" "${base_url}/SHA256SUMS" 2>/dev/null; then
-        local expected_sha256
         expected_sha256="$(grep "${tarball_name}" "${tmp_dir}/SHA256SUMS" 2>/dev/null | awk '{print $1}' || true)"
-        if [[ -n "$expected_sha256" ]]; then
-            if verify_checksum "${tmp_dir}/${tarball_name}" "$expected_sha256"; then
-                checksum_ok=true
-                echo "  ✓ SHA256 checksum verified."
-            else
-                echo "  ✗ SHA256 CHECKSUM MISMATCH! Refusing to install."
-                echo "  Expected: $expected_sha256"
-                log_action "codex_update_fail checksum_mismatch version=$latest_version"
-                rm -rf "$tmp_dir"
-                return 1
-            fi
-        else
-            echo "  ⚠ Could not find checksum in SHA256SUMS for $tarball_name"
-            log_action "WARN checksum_not_found file=$tarball_name"
-        fi
+    fi
+    if [[ -z "$expected_sha256" ]]; then
+        expected_sha256="$(get_asset_digest_sha256 "$tag_prefix" "$tarball_name" || true)"
+    fi
+    if [[ -z "$expected_sha256" ]]; then
+        echo "  ✗ Could not obtain SHA256 digest. Refusing to install."
+        log_action "codex_update_fail checksum_unavailable version=$latest_version file=$tarball_name"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+    if verify_checksum "${tmp_dir}/${tarball_name}" "$expected_sha256"; then
+        checksum_ok=true
+        echo "  ✓ SHA256 checksum verified."
     else
-        echo "  ⚠ Could not download SHA256SUMS. Skipping verification."
-        log_action "WARN sha256sums_download_failed"
+        echo "  ✗ SHA256 CHECKSUM MISMATCH! Refusing to install."
+        echo "  Expected: $expected_sha256"
+        log_action "codex_update_fail checksum_mismatch version=$latest_version"
+        rm -rf "$tmp_dir"
+        return 1
     fi
 
     # Extract tarball
@@ -266,9 +290,9 @@ update_codex() {
     rm -rf "$tmp_dir"
 
     # Record version
-    echo "$latest_version" > "$CODEX_VERSION_FILE"
+    echo "$latest_display" > "$CODEX_VERSION_FILE"
 
-    echo "  ✓ Codex CLI updated to v${latest_version}"
+    echo "  ✓ Codex CLI updated to ${latest_display}"
     if [[ "$checksum_ok" == true ]]; then
         echo "  ✓ Integrity verified (SHA256)"
     fi

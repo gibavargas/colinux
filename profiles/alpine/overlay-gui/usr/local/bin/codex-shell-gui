@@ -130,7 +130,7 @@ init_network() {
         if codex-network-stack --non-interactive --eth-only 2>&1 | tee -a "$GUI_LOG"; then
             # Check if we got an IP
             local ip_addr
-            ip_addr="$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)" || true
+            ip_addr="$(ip -4 addr show 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]}' | head -1)" || true
             if [[ -n "$ip_addr" ]]; then
                 log_info "Ethernet connected: $ip_addr"
                 return 0
@@ -311,7 +311,7 @@ main() {
 
     # Step 2: Initialize network (only if not already connected)
     local has_ip
-    has_ip="$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)" || true
+    has_ip="$(ip -4 addr show 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]}' | head -1)" || true
     if [[ -n "${CODEX_GUI_INNER:-}" ]]; then
         log_info "Running inside cage — skipping network init (already done by outer)"
     elif [[ -z "$has_ip" ]]; then

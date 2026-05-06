@@ -593,7 +593,7 @@ EOF
 validate_connection() {
     local adapter="${1:-$SELECTED_ADAPTER}"
     local ip_addr
-    ip_addr="$(ip -4 addr show "$adapter" 2>/dev/null | grep -oP 'inet \K[0-9.]+')" || true
+    ip_addr="$(ip -4 addr show "$adapter" 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]}')" || true
 
     if [[ -z "$ip_addr" ]]; then
         return 1
@@ -632,7 +632,7 @@ show_status() {
 
     # IP address
     local ip_addr
-    ip_addr="$(ip -4 addr show "$adapter" 2>/dev/null | grep -oP 'inet \K[0-9.]+')" || true
+    ip_addr="$(ip -4 addr show "$adapter" 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]}')" || true
     echo -e "  IP:       ${CYAN}${ip_addr:-none}${NC}"
 
     # Connected SSID
@@ -653,7 +653,7 @@ show_status() {
     # Signal
     if command -v iwconfig &>/dev/null; then
         local signal
-        signal="$(iwconfig "$adapter" 2>/dev/null | grep 'Signal level' | grep -oP 'Signal level=\K[-0-9]+')" || true
+        signal="$(iwconfig "$adapter" 2>/dev/null | grep 'Signal level' | sed -n 's/.*Signal level=\([-0-9][0-9]*\).*/\1/p')" || true
         if [[ -n "$signal" ]]; then
             echo -e "  Signal:   ${YELLOW}${signal} dBm${NC}"
         fi
@@ -706,7 +706,7 @@ update_network_status() {
     local iface="$2"
     local ssid="$3"
     local ip_addr=""
-    ip_addr="$(ip -4 addr show "$iface" 2>/dev/null | grep -oP 'inet \K[0-9.]+')" || true
+    ip_addr="$(ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]}')" || true
 
     mkdir -p "$CODEX_STATE_DIR"
     cat > "$CODEX_STATE_DIR/network.json" <<EOF

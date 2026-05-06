@@ -166,14 +166,55 @@ get_latest_version() {
     echo "$version"
 }
 
+
+get_asset_digest_sha256() {
+    local version="$1"
+    local asset_name="$2"
+    local digest
+
+    if ! command -v jq >/dev/null 2>&1; then
+        log_error "jq is required to verify GitHub release asset digest"
+        return 1
+    fi
+
+    digest="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${version}"         | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .digest // empty' 2>/dev/null         | head -1)" || true
+    digest="${digest#sha256:}"
+    if [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        echo "$digest"
+        return 0
+    fi
+    return 1
+}
+
+verify_download_digest() {
+    local file="$1"
+    local version="$2"
+    local asset_name="$3"
+    local expected actual
+
+    expected="$(get_asset_digest_sha256 "$version" "$asset_name" || true)"
+    if [ -z "$expected" ]; then
+        log_error "Could not obtain SHA256 digest for $asset_name; refusing to install"
+        return 1
+    fi
+    actual="$(sha256sum "$file" | awk '{print $1}')"
+    if [ "$actual" != "$expected" ]; then
+        log_error "SHA256 mismatch for $asset_name"
+        log_error "Expected: $expected"
+        log_error "Actual:   $actual"
+        return 1
+    fi
+    log_info "SHA256 digest verified for $asset_name"
+}
+
 # ── Compare versions ─────────────────────────────────────────────────────────
 # Returns 0 if $1 >= $2, 1 if $1 < $2
 version_gte() {
     local v1="$1" v2="$2"
 
-    # Strip leading 'v' if present
-    v1="${v1#v}"
-    v2="${v2#v}"
+    # Normalize current release tags (e.g. rust-v0.128.0) to semver-like values.
+    v1="${v1#rust-v}"; v1="${v1#v}"
+    v2="${v2#rust-v}"; v2="${v2#v}"
 
     # Use sort -V for version comparison
     local sorted
@@ -227,13 +268,14 @@ do_update() {
         return 1
     fi
 
-    # Verify size
+    # Verify size and integrity
     local dl_size
     dl_size="$(stat -c%s "$tmpdir/$filename" 2>/dev/null || echo 0)"
     if [ "$dl_size" -lt 1048576 ]; then
         log_error "Downloaded file too small (${dl_size} bytes) — possible error page"
         return 1
     fi
+    verify_download_digest "$tmpdir/$filename" "$new_version" "$filename" || return 1
 
     # Extract and install
     tar xzf "$tmpdir/$filename" -C "$tmpdir" 2>/dev/null || {

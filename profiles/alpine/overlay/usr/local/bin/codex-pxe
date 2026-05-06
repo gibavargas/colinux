@@ -107,13 +107,13 @@ find_default_iface() {
         fi
     done
     # Fallback: first non-loopback
-    ip -4 link show up 2>/dev/null | grep -oP '^\d+: \K[^\s:]+' | grep -v lo | head -1
+    ip -4 link show up 2>/dev/null | awk -F': ' '/^[0-9]+: / && $2 !~ /^lo:/ {split($2,a,":"); print a[1]}' | head -1
 }
 
 # ── Get subnet from interface ─────────────────────────────────────────────
 get_subnet() {
     local iface="$1"
-    ip -4 addr show "$iface" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1
+    ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]}' | head -1
 }
 
 # ── Extract boot files from ISO ───────────────────────────────────────────
@@ -237,7 +237,7 @@ pxe_start() {
 
     # Detect netmask from interface (P0-2)
     local cidr_prefix
-    cidr_prefix="$(ip -4 addr show "$iface" 2>/dev/null | grep -oP 'inet \K[0-9./]+' | head -1 | cut -d/ -f2)"
+    cidr_prefix="$(ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {print $2}' | head -1 | cut -d/ -f2)"
     if [[ -z "$cidr_prefix" || "$cidr_prefix" -le 0 || "$cidr_prefix" -gt 30 ]]; then
         cidr_prefix=24
     fi

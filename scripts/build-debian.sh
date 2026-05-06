@@ -238,10 +238,12 @@ configure_lb() {
     export LB_BOOTSTRAP_INCLUDE="gnupg"
 
     lb config \
+        --mode debian \
         --distribution bookworm \
         --debian-installer none \
         --architectures amd64 \
         --archive-areas "main contrib non-free non-free-firmware" \
+        --parent-archive-areas "main contrib non-free non-free-firmware" \
         --apt-recommends false \
         --apt-secure false \
         --mirror-bootstrap http://deb.debian.org/debian \
@@ -257,6 +259,7 @@ configure_lb() {
         --iso-application "CoLinux Desktop" \
         --iso-publisher "CoLinux Project" \
         --iso-volume "colinux-desktop" \
+        --linux-packages "linux-image" \
         --linux-flavours "amd64" \
         --firmware-binary true \
         --firmware-chroot false \
