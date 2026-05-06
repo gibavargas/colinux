@@ -83,8 +83,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             live-build debootstrap squashfs-tools xorriso \
             dpkg-dev fakeroot cpio dosfstools mtools \
-            grub-efi-amd64-bin grub-pc-bin syslinux \
-            isolinux systemd-container
+            grub-efi-amd64-bin grub-pc-bin syslinux syslinux-utils \
+            isolinux systemd-container gnupg
 
       - name: Build Debian Desktop ISO
         run: |

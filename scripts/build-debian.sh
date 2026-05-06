@@ -78,7 +78,7 @@ check_prerequisites() {
 
     local missing=()
 
-    for cmd in lb debootstrap squashfs-tools xorriso mksquashfs dpkg-dev; do
+    for cmd in lb debootstrap squashfs-tools xorriso mksquashfs dpkg-dev isohybrid; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing+=("$cmd")
         fi
@@ -89,7 +89,7 @@ check_prerequisites() {
         sudo apt-get update -qq
         sudo apt-get install -y live-build debootstrap squashfs-tools xorriso \
             dpkg-dev fakeroot cpio dosfstools mtools grub-efi-amd64-bin \
-            grub-pc-bin syslinux isolinux gnupg 2>&1 || {
+            grub-pc-bin syslinux syslinux-utils isolinux gnupg 2>&1 || {
             err "Failed to install prerequisites"
             exit 1
         }
