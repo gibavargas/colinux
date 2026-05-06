@@ -246,6 +246,7 @@ configure_lb() {
         --parent-archive-areas "main contrib non-free non-free-firmware" \
         --apt-recommends false \
         --apt-secure false \
+        --security false \
         --mirror-bootstrap http://deb.debian.org/debian \
         --mirror-chroot http://deb.debian.org/debian \
         --mirror-binary http://deb.debian.org/debian \
