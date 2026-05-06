@@ -371,10 +371,12 @@ EOF
         ok "Package list installed"
     fi
 
-    # live-build v3 runs the ISO hybridization step inside the chroot when
-    # LB_BUILD_WITH_CHROOT=true.  On Debian Bookworm, /usr/bin/isohybrid is
-    # provided by syslinux-utils, so include it in the chroot package set.
+    # live-build v3 prepares syslinux/isohybrid assets inside the chroot when
+    # LB_BUILD_WITH_CHROOT=true.  Include the Debian packages that provide the
+    # absolute symlink targets for isolinux.bin, vesamenu.c32, and isohybrid.
     cat > "$BUILD_DIR/config/package-lists/live-build-binary-deps.list.chroot" <<'EOF'
+isolinux
+syslinux-common
 syslinux-utils
 EOF
 
