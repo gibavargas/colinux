@@ -240,7 +240,7 @@ configure_lb() {
     lb config \
         --mode debian \
         --distribution bookworm \
-        --debian-installer none \
+        --debian-installer false \
         --architectures amd64 \
         --archive-areas "main contrib non-free non-free-firmware" \
         --parent-archive-areas "main contrib non-free non-free-firmware" \
