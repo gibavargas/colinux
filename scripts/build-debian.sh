@@ -301,6 +301,16 @@ EOF
         fi
     done
 
+    # Catch any other live-build v3-generated security source files.  On
+    # Ubuntu-hosted runners the obsolete bookworm/updates suite can appear
+    # outside config/chroot_sources and then gets copied into the chroot before
+    # hooks run.
+    grep -rl 'bookworm/updates\|security.ubuntu.com' "$BUILD_DIR/config" 2>/dev/null | \
+        xargs -r sed -i \
+            -e 's|security.ubuntu.com/ubuntu|security.debian.org/debian-security|g' \
+            -e 's|bookworm/updates|bookworm-security|g' \
+            -e 's|jammy|bookworm-security|g'
+
     # Hook: clean up any inherited Ubuntu apt sources inside the chroot early
     # This runs as the first chroot hook, before lb installs any packages.
     # NOTE: live-build requires the '.hook.' segment in the filename to
