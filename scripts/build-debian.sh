@@ -262,7 +262,7 @@ configure_lb() {
         --firmware-chroot true \
         --apt-indices false \
         --cache-packages true \
-        --cache-indices true \
+        --cache-indices false \
         --initramfs systemd \
         2>&1
 
