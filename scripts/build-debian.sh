@@ -416,6 +416,19 @@ if [ -f "/opt/colinux-setup/setup-codex-desktop.sh" ]; then
     echo "Setup script staged for first boot"
 fi
 
+# live-build v3's Ubuntu package ships isolinux theme symlinks that point at
+# older syslinux paths (/usr/lib/syslinux/{isolinux.bin,vesamenu.c32}). Debian
+# bookworm packages install those files under /usr/lib/ISOLINUX/ and
+# /usr/lib/syslinux/modules/bios/. Create compatibility symlinks before the
+# binary_syslinux phase dereferences the theme inside the chroot.
+mkdir -p /usr/lib/syslinux
+if [ ! -e /usr/lib/syslinux/isolinux.bin ] && [ -e /usr/lib/ISOLINUX/isolinux.bin ]; then
+    ln -s ../ISOLINUX/isolinux.bin /usr/lib/syslinux/isolinux.bin
+fi
+if [ ! -e /usr/lib/syslinux/vesamenu.c32 ] && [ -e /usr/lib/syslinux/modules/bios/vesamenu.c32 ]; then
+    ln -s modules/bios/vesamenu.c32 /usr/lib/syslinux/vesamenu.c32
+fi
+
 # Set correct permissions
 chown -R root:root /usr/local/bin/codex-* 2>/dev/null || true
 chmod 755 /usr/local/bin/codex-* 2>/dev/null || true
