@@ -360,6 +360,15 @@ EOF
 
     ok "live-build configured"
 
+    # Ubuntu's live-build v3 syslinux helper expects a bootlogo cpio archive in
+    # the isolinux theme, but the packaged default theme no longer ships one.
+    # Use a local copy with an empty archive so lb_binary_syslinux can repack it.
+    mkdir -p "$BUILD_DIR/config/bootloaders"
+    if [ -d /usr/share/live/build/bootloaders/isolinux ]; then
+        cp -a /usr/share/live/build/bootloaders/isolinux "$BUILD_DIR/config/bootloaders/"
+        (cd "$BUILD_DIR/config/bootloaders/isolinux" && printf '' | cpio --quiet -o > bootlogo)
+    fi
+
     # ── Install package list ─────────────────────────────────────────────
     if [ -f "$BUILD_DIR/profile/packages.desktop" ]; then
         awk '
