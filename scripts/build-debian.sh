@@ -371,13 +371,16 @@ EOF
         ok "Package list installed"
     fi
 
-    # live-build v3 prepares syslinux/isohybrid assets inside the chroot when
-    # LB_BUILD_WITH_CHROOT=true.  Include the Debian packages that provide the
-    # absolute symlink targets for isolinux.bin, vesamenu.c32, and isohybrid.
+    # live-build v3 prepares syslinux/isohybrid/theme assets inside the chroot
+    # when LB_BUILD_WITH_CHROOT=true. Include packages that provide the Debian
+    # bookworm bootloader paths plus librsvg2-bin for the default theme renderer.
     cat > "$BUILD_DIR/config/package-lists/live-build-binary-deps.list.chroot" <<'EOF'
 isolinux
+syslinux
 syslinux-common
 syslinux-utils
+mtools
+librsvg2-bin
 EOF
 
     # ── Install overlay ─────────────────────────────────────────────────
@@ -427,6 +430,9 @@ if [ ! -e /usr/lib/syslinux/isolinux.bin ] && [ -e /usr/lib/ISOLINUX/isolinux.bi
 fi
 if [ ! -e /usr/lib/syslinux/vesamenu.c32 ] && [ -e /usr/lib/syslinux/modules/bios/vesamenu.c32 ]; then
     ln -s modules/bios/vesamenu.c32 /usr/lib/syslinux/vesamenu.c32
+fi
+if [ ! -e /usr/bin/rsvg ] && [ -e /usr/bin/rsvg-convert ]; then
+    ln -s rsvg-convert /usr/bin/rsvg
 fi
 
 # Set correct permissions
