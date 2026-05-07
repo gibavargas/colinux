@@ -432,7 +432,33 @@ if [ ! -e /usr/lib/syslinux/vesamenu.c32 ] && [ -e /usr/lib/syslinux/modules/bio
     ln -s modules/bios/vesamenu.c32 /usr/lib/syslinux/vesamenu.c32
 fi
 if [ ! -e /usr/bin/rsvg ] && [ -e /usr/bin/rsvg-convert ]; then
-    ln -s rsvg-convert /usr/bin/rsvg
+    cat > /usr/bin/rsvg <<'RSVG'
+#!/bin/sh
+set -e
+format="png"
+height=""
+width=""
+input=""
+output=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --format) shift; format="$1" ;;
+        --height) shift; height="$1" ;;
+        --width) shift; width="$1" ;;
+        *)
+            if [ -z "$input" ]; then input="$1"; else output="$1"; fi
+            ;;
+    esac
+    shift
+done
+[ -n "$input" ] || exit 1
+[ -n "$output" ] || output="${input%.*}.${format}"
+set -- -f "$format"
+[ -n "$height" ] && set -- "$@" -h "$height"
+[ -n "$width" ] && set -- "$@" -w "$width"
+exec rsvg-convert "$@" -o "$output" "$input"
+RSVG
+    chmod 755 /usr/bin/rsvg
 fi
 
 # Set correct permissions
