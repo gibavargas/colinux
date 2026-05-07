@@ -328,7 +328,7 @@ cmd_resize() {
         log_action "resize_ok device=$device size=$new_size"
         echo "✓ Partition resized. Verify with: codex-usb-persist status $device"
     else
-        die "sgdisk required for partition resize. Install: apk add gptfdisk"
+        die "sgdisk required for partition resize. Install: apt install gdisk"
     fi
 }
 

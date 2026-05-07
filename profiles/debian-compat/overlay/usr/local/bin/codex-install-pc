@@ -232,12 +232,12 @@ log_action "START mode=$MODE device=$DEVICE serial=$SERIAL size=${SIZE_GB}GB ext
 # ── Check dependencies ────────────────────────────────────────────────────
 for cmd in sgdisk mkfs.vfat mkfs.ext4; do
     if ! command -v "$cmd" &>/dev/null; then
-        die "Required command not found: $cmd. Install with: apk add gptfdisk dosfstools e2fsprogs"
+        die "Required command not found: $cmd. Install with: apt install gdisk dosfstools e2fsprogs"
     fi
 done
 
 if ! command -v cryptsetup &>/dev/null; then
-    die "Required command not found: cryptsetup. Install with: apk add cryptsetup"
+    die "Required command not found: cryptsetup. Install with: apt install cryptsetup"
 fi
 
 # ── Dual-boot: find the first partition number we can use ─────────────────

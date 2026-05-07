@@ -204,7 +204,7 @@ log_action "START mode=$MODE device=$DEVICE serial=$SERIAL size=${SIZE_GB}GB"
 # ── Check dependencies ────────────────────────────────────────────────────
 for cmd in sgdisk mkfs.vfat mkfs.ext4; do
     if ! command -v "$cmd" &>/dev/null; then
-        die "Required command not found: $cmd. Install with: apk add gptfdisk dosfstools e2fsprogs"
+        die "Required command not found: $cmd. Install with: apt install gdisk dosfstools e2fsprogs"
     fi
 done
 

@@ -34,7 +34,19 @@ if [[ -f /persist/profile ]]; then
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "$line" ]] && continue
         if [[ "$line" =~ ^export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*= ]]; then
-            eval "$line"
+            # Safe export: parse name=value without eval to prevent shell injection.
+            varname="${line#export }"
+            varname="${varname%%=*}"
+            varval="${line#*=}"
+            # Strip one layer of simple quotes.
+            varval="${varval#\"}" ; varval="${varval%\"}"
+            varval="${varval#\'}" ; varval="${varval%\'}"
+            # Reject command/subshell expansion and parameter-expansion forms that can execute commands.
+            if [[ "$varval" == *'$('* ]] || [[ "$varval" == *'`'* ]] || [[ "$varval" == *'${'*[';|&<>']* ]]; then
+                echo "WARNING: Skipping unsafe export line for $varname" >&2
+                continue
+            fi
+            export "$varname=$varval"
         fi
     done < /persist/profile
 fi

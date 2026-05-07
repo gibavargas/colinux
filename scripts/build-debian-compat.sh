@@ -62,6 +62,47 @@ log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 log_step()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}\n"; }
 
+get_latest_codex_version() {
+    curl -fsSL https://api.github.com/repos/openai/codex/releases/latest \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
+        | head -1
+}
+
+get_codex_asset_digest_sha256() {
+    local version="$1" asset_name="$2"
+    curl -fsSL "https://api.github.com/repos/openai/codex/releases/tags/${version}" \
+        | awk -v name="$asset_name" '
+            index($0, "\"name\": \"" name "\"") { found=1 }
+            found && /"digest":/ {
+                sub(/^.*"digest": "sha256:/, "")
+                sub(/".*$/, "")
+                print
+                exit
+            }
+        ' \
+        | grep -E '^[0-9a-fA-F]{64}$' \
+        | head -1
+}
+
+verify_codex_archive_digest() {
+    local archive="$1" version="$2" asset_name="$3"
+    local expected actual
+    expected="$(get_codex_asset_digest_sha256 "$version" "$asset_name" || true)"
+    if [ -z "$expected" ]; then
+        log_error "Could not obtain SHA256 digest for $asset_name; refusing to install."
+        exit 1
+    fi
+    actual="$(sha256sum "$archive" | awk '{print $1}')"
+    if [ "$actual" != "$expected" ]; then
+        log_error "SHA256 mismatch for $asset_name."
+        log_error "Expected: $expected"
+        log_error "Actual:   $actual"
+        exit 1
+    fi
+    log_info "SHA256 digest verified for $asset_name."
+}
+
+
 # ── Argument parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -308,9 +349,13 @@ inject_codex() {
     _CLEANUP_DIRS+=("$tmpdir")
 
     if curl -fsSL --retry 3 --retry-delay 5 -o "$tmpdir/$codex_filename" "$download_url" 2>/dev/null; then
+        verify_codex_archive_digest "$tmpdir/$codex_filename" "$codex_tag" "$codex_filename"
         tar xzf "$tmpdir/$codex_filename" -C "$tmpdir" 2>/dev/null || true
         local codex_bin
-        codex_bin="$(find "$tmpdir" -name 'codex' -type f -executable | head -1)"
+        codex_bin="$(find "$tmpdir" -name "codex-${codex_arch}" -type f -executable | head -1)"
+        if [[ -z "$codex_bin" ]]; then
+            codex_bin="$(find "$tmpdir" -name 'codex' -type f -executable | head -1)"
+        fi
         if [[ -n "$codex_bin" ]]; then
             cp "$codex_bin" "$chroot/usr/local/bin/codex"
             chmod 755 "$chroot/usr/local/bin/codex"

@@ -55,6 +55,47 @@ log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 log_step()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}\n"; }
 
+get_latest_codex_version() {
+    curl -fsSL https://api.github.com/repos/openai/codex/releases/latest \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
+        | head -1
+}
+
+get_codex_asset_digest_sha256() {
+    local version="$1" asset_name="$2"
+    curl -fsSL "https://api.github.com/repos/openai/codex/releases/tags/${version}" \
+        | awk -v name="$asset_name" '
+            index($0, "\"name\": \"" name "\"") { found=1 }
+            found && /"digest":/ {
+                sub(/^.*"digest": "sha256:/, "")
+                sub(/".*$/, "")
+                print
+                exit
+            }
+        ' \
+        | grep -E '^[0-9a-fA-F]{64}$' \
+        | head -1
+}
+
+verify_codex_archive_digest() {
+    local archive="$1" version="$2" asset_name="$3"
+    local expected actual
+    expected="$(get_codex_asset_digest_sha256 "$version" "$asset_name" || true)"
+    if [ -z "$expected" ]; then
+        log_error "Could not obtain SHA256 digest for $asset_name; refusing to install."
+        exit 1
+    fi
+    actual="$(sha256sum "$archive" | awk '{print $1}')"
+    if [ "$actual" != "$expected" ]; then
+        log_error "SHA256 mismatch for $asset_name."
+        log_error "Expected: $expected"
+        log_error "Actual:   $actual"
+        exit 1
+    fi
+    log_info "SHA256 digest verified for $asset_name."
+}
+
+
 # ── Argument parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -266,14 +307,20 @@ inject_codex() {
             ;;
     esac
 
-    local download_url
+    # Resolve version to an immutable release tag so the downloaded asset can be verified.
+    local codex_tag download_url
     if [ "$CODEX_VERSION" = "latest" ]; then
-        download_url="https://github.com/openai/codex/releases/latest/download/${codex_filename}"
+        codex_tag="$(get_latest_codex_version)"
     else
-        download_url="https://github.com/openai/codex/releases/download/${CODEX_VERSION}/${codex_filename}"
+        codex_tag="$CODEX_VERSION"
     fi
+    if [ -z "$codex_tag" ]; then
+        log_error "Could not resolve Codex CLI release tag."
+        exit 1
+    fi
+    download_url="https://github.com/openai/codex/releases/download/${codex_tag}/${codex_filename}"
 
-    log_info "Downloading Codex CLI from: $download_url"
+    log_info "Downloading Codex CLI $codex_tag from: $download_url"
 
     local tmpdir
     tmpdir="$(mktemp -d)"
@@ -284,6 +331,7 @@ inject_codex() {
         log_error "Failed to download Codex CLI binary."
         exit 1
     }
+    verify_codex_archive_digest "$tmpdir/$codex_filename" "$codex_tag" "$codex_filename"
 
     tar xzf "$tmpdir/$codex_filename" -C "$tmpdir" || {
         log_error "Failed to extract Codex CLI archive."
@@ -291,7 +339,10 @@ inject_codex() {
     }
 
     local codex_bin
-    codex_bin="$(find "$tmpdir" -name 'codex' -type f -executable | head -1)"
+    codex_bin="$(find "$tmpdir" -name "codex-${codex_arch}" -type f -executable | head -1)"
+    if [ -z "$codex_bin" ]; then
+        codex_bin="$(find "$tmpdir" -name 'codex' -type f -executable | head -1)"
+    fi
     if [ -z "$codex_bin" ]; then
         log_error "Could not find codex binary in archive."
         exit 1
