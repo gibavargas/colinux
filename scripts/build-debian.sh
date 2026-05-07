@@ -267,7 +267,7 @@ configure_lb() {
         --apt-indices false \
         --cache-packages true \
         --cache-indices false \
-        --initramfs systemd \
+        --initramfs live-boot \
         2>&1
 
     # Belt-and-suspenders: verify gnupg made it into the bootstrap config.

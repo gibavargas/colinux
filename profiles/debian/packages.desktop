@@ -9,6 +9,7 @@
 
 # --- Base System ---
 initramfs-tools
+live-boot
 systemd
 systemd-sysv
 dbus
