@@ -202,11 +202,11 @@ configure_lb() {
     # Ubuntu's debootstrap hard-codes ubuntu-keyring as a required package.
     # Installing Debian's debootstrap avoids this entirely.
     log "Replacing Ubuntu debootstrap with Debian's version..."
-    DEBOOT_URL="http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.143_all.deb"
+    DEBOOT_URL="https://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.143_all.deb"
     if curl -fsSL "$DEBOOT_URL" -o /tmp/debootstrap.deb 2>/dev/null; then
         sudo dpkg -i /tmp/debootstrap.deb || {
             warn "Debian debootstrap dpkg install failed, trying fallback..."
-            DEBOOT_URL="http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.141_all.deb"
+            DEBOOT_URL="https://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.141_all.deb"
             curl -fsSL "$DEBOOT_URL" -o /tmp/debootstrap.deb 2>/dev/null && \
                 sudo dpkg -i /tmp/debootstrap.deb || true
         }

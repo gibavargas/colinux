@@ -11,7 +11,7 @@ RemainAfterExit=yes
 TimeoutStartSec=300
 StandardOutput=journal
 StandardError=journal
-ConditionPathExists=!/var/lib/colinux/.first-boot-done
+ConditionPathExists=!/persist/.first-boot-done
 
 [Install]
 WantedBy=multi-user.target

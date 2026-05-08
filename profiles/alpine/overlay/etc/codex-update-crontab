@@ -12,4 +12,4 @@
 # │ │ │ │ ┌───────────── day of week (0-7, 0 and 7 = Sunday)
 # │ │ │ │ │
 # │ │ │ │ │
-# * */6 * * * /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1
+0 */6 * * * /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1

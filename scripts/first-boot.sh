@@ -24,7 +24,7 @@ CODEX_RUNTIME="/run/codex"
 CODEX_CONFIG="$CODEX_PERSIST/config"
 CODEX_LOGS="$CODEX_PERSIST/logs"
 CODEX_DATA="$CODEX_PERSIST/data"
-FIRST_BOOT_FLAG="/var/lib/colinux/.first-boot-done"
+FIRST_BOOT_FLAG="/persist/.first-boot-done"
 MOTD_FILE="/etc/motd"
 
 # ── Logging ───────────────────────────────────────────────────────────────────

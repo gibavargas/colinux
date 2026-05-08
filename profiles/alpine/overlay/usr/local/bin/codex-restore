@@ -30,6 +30,31 @@ die() {
     exit 1
 }
 
+
+validate_archive_members() {
+    local archive="$1"
+    local entry
+
+    # Validate names before extraction so malicious archives cannot write outside
+    # the staging directory. Reject links entirely because tar can otherwise
+    # create a link first and write later members through it.
+    tar tzf "$archive" >/dev/null 2>&1 || die "Failed to read tar archive."
+
+    while IFS= read -r entry; do
+        case "$entry" in
+            ""|/*|../*|*/../*|*/..) die "Unsafe archive path: $entry" ;;
+        esac
+        case "$entry" in
+            persist|persist/*|workspace|workspace/*) ;;
+            *) die "Archive contains unsupported path: $entry" ;;
+        esac
+    done < <(tar tzf "$archive")
+
+    if tar tvzf "$archive" 2>/dev/null | awk '$1 ~ /^[lh]/ { bad=1 } END { exit bad ? 0 : 1 }'; then
+        die "Archive contains symlinks or hardlinks; refusing unsafe restore."
+    fi
+}
+
 usage() {
     echo "Usage: codex-restore [OPTIONS] FILE"
     echo ""
@@ -118,6 +143,9 @@ log_action "restore_start file=$local_f"
 # ── Extract to staging directory ─────────────────────────────────────────
 STAGING_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGING_DIR"' EXIT
+
+echo "Validating archive metadata..."
+validate_archive_members "$RESTORE_FILE"
 
 echo "Extracting to staging directory..."
 tar xzf "$RESTORE_FILE" -C "$STAGING_DIR" 2>&1 || {

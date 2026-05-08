@@ -22,11 +22,16 @@ case "$CMD" in
         /usr/local/bin/codex-system-autoupdate --force 2>&1
         /usr/local/bin/codex-desktop-autoupdate --force 2>&1
         ;;
-    --help|-h|"")
+    --help|-h)
         echo "Usage: codex-update [--check] [--force]"
         ;;
-    *)
+    "")
         /usr/local/bin/codex-system-autoupdate 2>&1
         /usr/local/bin/codex-desktop-autoupdate 2>&1
+        ;;
+    *)
+        echo "Unknown option: $CMD" >&2
+        echo "Usage: codex-update [--check] [--force]" >&2
+        exit 1
         ;;
 esac

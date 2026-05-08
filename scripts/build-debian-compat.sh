@@ -322,25 +322,29 @@ inject_codex() {
 
     local chroot="$BUILD_DIR/chroot"
 
-    local codex_arch codex_filename
+    local codex_arch codex_filename codex_tag
     case "$ARCH" in
         amd64)
-            codex_arch="x86_64-unknown-linux-gnu"
+            codex_arch="x86_64-unknown-linux-musl"
             codex_filename="codex-${codex_arch}.tar.gz"
             ;;
         i386)
-            codex_arch="i686-unknown-linux-gnu"
-            codex_filename="codex-${codex_arch}.tar.gz"
+            log_warn "OpenAI Codex does not publish i386 Linux binaries; will install on first boot if available."
+            return 0
             ;;
     esac
 
-    # Try musl first (Alpine binary), fall back to gnu
     local download_url
     if [ "$CODEX_VERSION" = "latest" ]; then
-        download_url="https://github.com/openai/codex/releases/latest/download/${codex_filename}"
+        codex_tag="$(get_latest_codex_version)"
     else
-        download_url="https://github.com/openai/codex/releases/download/${CODEX_VERSION}/${codex_filename}"
+        codex_tag="$CODEX_VERSION"
     fi
+    if [ -z "$codex_tag" ]; then
+        log_warn "Could not resolve Codex release tag. Will install on first boot."
+        return 0
+    fi
+    download_url="https://github.com/openai/codex/releases/download/${codex_tag}/${codex_filename}"
 
     log_info "Downloading Codex CLI from: $download_url"
 

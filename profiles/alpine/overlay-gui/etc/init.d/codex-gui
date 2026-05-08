@@ -1,9 +1,8 @@
+#!/sbin/openrc-run
+# /etc/init.d/codex-gui
 # CoLinux — codex-gui OpenRC init service
 # Starts the GUI session (cage + foot + codex) after boot.
 # Depends on: localmount, seatd, dbus
-
-#!/sbin/openrc-run
-# /etc/init.d/codex-gui
 # CoLinux Lite GUI — Wayland kiosk session service
 
 name="codex-gui"
@@ -47,11 +46,6 @@ start_pre() {
 start() {
     ebegin "Starting CoLinux GUI session"
 
-    # Only start on tty1 (the main console)
-    if [ "$(tty)" != "/dev/tty1" ]; then
-        eend 0 "Not tty1, skipping GUI autostart"
-        return 0
-    fi
 
     # Check if XDG_RUNTIME_DIR exists
     if [ ! -d "$XDG_RUNTIME_DIR" ]; then

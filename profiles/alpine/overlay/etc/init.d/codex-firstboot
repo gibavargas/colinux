@@ -16,7 +16,7 @@ depend() {
     before codex-auto-update
 }
 
-FIRSTBOOT_DONE="/var/lib/colinux/.first-boot-done"
+FIRSTBOOT_DONE="/persist/.first-boot-done"
 FIRSTBOOT_SCRIPT="/usr/local/bin/first-boot"
 FIRSTBOOT_LOG="/persist/logs/first-boot.log"
 

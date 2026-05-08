@@ -29,6 +29,24 @@ die() {
     exit 1
 }
 
+
+validate_snapshot_archive() {
+    local archive="$1"
+    local entry
+
+    tar tzf "$archive" >/dev/null 2>&1 || die "Failed to read snapshot archive."
+
+    while IFS= read -r entry; do
+        case "$entry" in
+            ""|/*|../*|*/../*|*/..) die "Unsafe snapshot path: $entry" ;;
+        esac
+    done < <(tar tzf "$archive")
+
+    if tar tvzf "$archive" 2>/dev/null | awk '$1 ~ /^[lh]/ { bad=1 } END { exit bad ? 0 : 1 }'; then
+        die "Snapshot contains symlinks or hardlinks; refusing unsafe restore."
+    fi
+}
+
 usage() {
     cat <<'EOF'
 Usage: codex-snapshot [OPTIONS]
@@ -256,7 +274,8 @@ if [[ "$MODE" == "restore" ]]; then
 
     log_action "restore_start source=$RESTORE_FILE"
 
-    # Extract snapshot
+    # Validate before extraction, then extract snapshot
+    validate_snapshot_archive "$RESTORE_FILE"
     RESTORE_TMP="$(mktemp -d /tmp/colinux-restore.XXXXXX)"
     tar xzf "$RESTORE_FILE" -C "$RESTORE_TMP" 2>&1
 
