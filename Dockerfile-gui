@@ -36,12 +36,12 @@ RUN apk add --no-cache \
     sudo \
     tmux \
     git \
-    openssh-client \
+    openssh-client-default \
     curl \
     wget \
     ca-certificates \
     jq \
-    yq \
+    yq-go \
     ripgrep \
     fd \
     fzf \
@@ -71,7 +71,7 @@ RUN apk add --no-cache \
     procps \
     dbus \
     dialog \
-    xkb-utils
+    xkeyboard-config
 
 # ── Install GUI/Wayland packages ─────────────────────────────────────────────
 RUN apk add --no-cache \
@@ -96,8 +96,6 @@ RUN apk add --no-cache \
     dhcpcd \
     wireless-tools \
     iw \
-    crda \
-    rfkill \
     ethtool
 
 # ── Install Camoufox dependencies (from shared) ──────────────────────────────

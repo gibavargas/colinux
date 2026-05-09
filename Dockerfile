@@ -19,12 +19,12 @@ RUN apk add --no-cache \
     doas \
     tmux \
     git \
-    openssh-client \
+    openssh-client-default \
     curl \
     wget \
     ca-certificates \
     jq \
-    yq \
+    yq-go \
     ripgrep \
     fd \
     fzf \

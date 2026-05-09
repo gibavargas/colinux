@@ -20,14 +20,14 @@ tmux
 git
 
 # Networking
-openssh-client
+openssh-client-default
 curl
 wget
 ca-certificates
 
 # CLI utilities
 jq
-yq
+yq-go
 ripgrep
 fd
 fzf

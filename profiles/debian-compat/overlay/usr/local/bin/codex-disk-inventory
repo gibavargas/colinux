@@ -290,34 +290,35 @@ echo "$FULL_JSON" | jq '.' > "${RUN_DIR}/disks.json"
     echo "---"
     echo ""
 
-    echo "$FULL_JSON" | jq -r '.devices[] | '
-    '## \(.device)  \(.is_boot | if . then "★ BOOT" else "" end)\(.is_removable | if . then " 🔌 USB" else "" end)"
-
-    echo ""
-    echo "| Property | Value |"
-    echo "|----------|-------|"
-    echo "| Model | \(.model // "Unknown") |"
-    echo "| Serial | `\(.serial // "N/A")` |"
-    echo "| Size | \(.size) |"
-    echo "| Transport | \(.transport // "N/A") |"
-    echo "| Partition Table | \(.partition_table // "none") |"
-    echo "| Mount Status | \(.mount_status) |"
-    echo "| LUKS | \(.has_luks | if . then "Yes (\(.luks_status))" else "No" end) |"
-    echo "| BitLocker | \(.has_bitlocker | if . then "⚠ Yes" else "No" end) |"
-    echo "| SMART | \(.smart_summary) |"
-    echo ""
-    if (.partitions | length > 0) then
-        "### Partitions"
-        echo ""
-        "| # | Name | Size | FS | Label | UUID | Mount |"
-        echo "|---|------|------|----|-------|------|-------|"
+    echo "$FULL_JSON" | jq -r '
+    .devices[] |
+    "## \(.device)  \(.is_boot | if . then "★ BOOT" else "" end)\(.is_removable | if . then " 🔌 USB" else "" end)",
+    "",
+    "| Property | Value |",
+    "|----------|-------|",
+    "| Model | \(.model // "Unknown") |",
+    "| Serial | `\(.serial // "N/A")` |",
+    "| Size | \(.size) |",
+    "| Transport | \(.transport // "N/A") |",
+    "| Partition Table | \(.partition_table // "none") |",
+    "| Mount Status | \(.mount_status) |",
+    "| LUKS | \(.has_luks | if . then "Yes (\(.luks_status))" else "No" end) |",
+    "| BitLocker | \(.has_bitlocker | if . then "⚠ Yes" else "No" end) |",
+    "| SMART | \(.smart_summary) |",
+    "",
+    (if (.partitions | length > 0) then
+        "### Partitions",
+        "",
+        "| # | Name | Size | FS | Label | UUID | Mount |",
+        "|---|------|------|----|-------|------|-------|",
         (.partitions | to_entries[] |
             "| \(.key + 1) | \(.value.name) | \(.value.size) | \(.value.filesystem) | \(.value.label // "-") | `\(.value.uuid // "-")` | \(.value.mountpoint // "-") |"
-        )
-        echo ""
-    end
-    echo "---"
-    echo ""'
+        ),
+        ""
+    else empty end),
+    "---",
+    ""
+    '
 
 } > "${RUN_DIR}/disks.md"
 

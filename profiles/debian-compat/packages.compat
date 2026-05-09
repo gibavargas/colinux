@@ -30,7 +30,6 @@ wireless-tools
 iw
 rfkill
 ethtool
-crda
 dialog
 openssh-client
 gnutls-bin

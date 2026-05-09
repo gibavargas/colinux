@@ -22,12 +22,12 @@ RUN apk add --no-cache \
     polkit \
     tmux \
     git \
-    openssh-client \
+    openssh-client-default \
     curl \
     wget \
     ca-certificates \
     jq \
-    yq \
+    yq-go \
     ripgrep \
     fd \
     fzf \
@@ -59,7 +59,6 @@ RUN apk add --no-cache \
     npm \
     nss \
     at-spi2-core \
-    at-spi2-atk \
     libnotify \
     xdg-utils \
     dbus \
@@ -141,8 +140,7 @@ COPY profiles/alpine/overlay/etc/config/auto-update.conf /persist/config/auto-up
 
 # Install home directory configs
 COPY profiles/alpine/overlay/home/codex/.profile /home/codex/.profile
-COPY profiles/alpine/overlay/home/codex/.bashrc /home/codex/.bashrc 2>/dev/null || true
-COPY profiles/alpine/overlay-desktop/home/codex/.config/gnome-initial-setup-done /home/codex/.config/gnome-initial-setup-done
+COPY profiles/alpine/overlay-gui/home/codex/.bashrc /home/codex/.bashrc
 RUN chown -R codex:codex /home/codex
 
 # Create mock codex binary for testing

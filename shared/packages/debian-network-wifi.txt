@@ -6,7 +6,6 @@ wpasupplicant
 dhcpcd5
 wireless-tools
 iw
-crda
 dialog
 rfkill
 ethtool

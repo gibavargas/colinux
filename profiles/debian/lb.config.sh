@@ -258,14 +258,8 @@ if [ -x /opt/colinux-setup/setup-codex-desktop.sh ]; then
     CODEX_DESKTOP_VERSION="${CODEX_DESKTOP_VERSION:-latest}" \
     /opt/colinux-setup/setup-codex-desktop.sh
     echo "I: Codex Desktop installed"
-elif command -v npm >/dev/null 2>&1; then
-    # Fallback: Install codex CLI via npm for now
-    echo "I: Setting up Codex CLI via npm..."
-    npm install -g @anthropic-ai/codex 2>/dev/null || \
-    npm install -g codex 2>/dev/null || \
-    echo "W: Could not install Codex CLI via npm"
 else
-    echo "W: Node.js not available, Codex Desktop setup deferred to first boot"
+    echo "W: Codex Desktop setup script unavailable; refusing unverified npm fallback"
 fi
 HOOK_EOF
     chmod 755 "$hooks_dir/normal/0300-install-codex-desktop.hook.chroot"

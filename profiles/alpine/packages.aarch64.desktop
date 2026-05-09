@@ -25,14 +25,14 @@ tmux
 git
 
 # Networking
-openssh-client
+openssh-client-default
 curl
 wget
 ca-certificates
 
 # CLI utilities
 jq
-yq
+yq-go
 ripgrep
 fd
 fzf
@@ -64,7 +64,7 @@ usbutils
 # Boot & image tools
 xorriso
 grub
-grub-arm64-efi
+grub-efi
 efibootmgr
 # syslinux removed: x86-only, not available on aarch64
 mtools
@@ -91,7 +91,7 @@ seatd
 mesa-dri-gallium
 font-dejavu
 wlr-randr
-xkb-utils
+xkeyboard-config
 libinput-libs
 libinput-tools
 eudev-rule-generator
@@ -113,7 +113,6 @@ gnome-shell-extensions
 gjs
 mutter
 gnome-keyring
-chrome-gnome-shell
 firefox
 evince
 eog
@@ -130,7 +129,6 @@ xdg-desktop-portal
 
 nss
 at-spi2-core
-at-spi2-atk
 libnotify
 xdg-utils
 sassc
@@ -157,7 +155,7 @@ flatpak
 # Network Manager
 # =============================================================================
 
-NetworkManager
+networkmanager
 networkmanager-cli
 networkmanager-wifi
 networkmanager-openrc
@@ -169,7 +167,6 @@ mobile-broadband-provider-info
 # =============================================================================
 
 adwaita-icon-theme
-gnome-themes-extra
 gvfs
 gvfs-smb
 grim

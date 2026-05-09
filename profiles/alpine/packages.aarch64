@@ -20,14 +20,14 @@ tmux
 git
 
 # Networking
-openssh-client
+openssh-client-default
 curl
 wget
 ca-certificates
 
 # CLI utilities
 jq
-yq
+yq-go
 ripgrep
 fd
 fzf
@@ -59,7 +59,7 @@ usbutils
 # Boot & image tools
 xorriso
 grub
-grub-arm64-efi
+grub-efi
 efibootmgr
 mtools
 squashfs-tools

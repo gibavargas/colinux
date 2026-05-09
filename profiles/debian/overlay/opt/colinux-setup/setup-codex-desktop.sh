@@ -57,7 +57,7 @@ else
 fi
 log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*"; >&2; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 log_step()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}\n"; }
 
 # ── Argument parsing ─────────────────────────────────────────────────────────

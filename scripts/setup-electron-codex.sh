@@ -82,8 +82,8 @@ install_nodejs() {
     if [[ -f /etc/alpine-release ]]; then
         apk add --no-cache nodejs npm 2>/dev/null || true
     elif command -v apt-get >/dev/null 2>&1; then
-        curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash -
-        apt-get install -y nodejs
+        apt-get update
+        apt-get install -y nodejs npm
     fi
 
     if command -v node >/dev/null 2>&1; then
@@ -101,7 +101,6 @@ install_electron_deps() {
         apk add --no-cache \
             nss \
             at-spi2-core \
-            at-spi2-atk \
             libnotify \
             gtk+3.0 \
             libsecret \

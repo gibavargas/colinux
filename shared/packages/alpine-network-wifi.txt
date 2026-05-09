@@ -6,7 +6,5 @@ wpa_supplicant
 dhcpcd
 wireless-tools
 iw
-crda
 dialog
-rfkill
 ethtool

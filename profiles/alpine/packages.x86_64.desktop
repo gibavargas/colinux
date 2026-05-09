@@ -26,14 +26,14 @@ tmux
 git
 
 # Networking
-openssh-client
+openssh-client-default
 curl
 wget
 ca-certificates
 
 # CLI utilities
 jq
-yq
+yq-go
 ripgrep
 fd
 fzf
@@ -98,7 +98,7 @@ seatd
 # GPU drivers
 mesa-dri-gallium
 mesa-vulkan-intel
-mesa-vulkan-radeon
+mesa-vulkan-ati
 
 # Fonts
 font-dejavu
@@ -107,7 +107,7 @@ font-dejavu
 wlr-randr
 
 # Keyboard layout support
-xkb-utils
+xkeyboard-config
 
 # Input drivers
 libinput-libs
@@ -146,7 +146,6 @@ mutter
 gnome-keyring
 
 # Chrome/Firefox integration
-chrome-gnome-shell
 
 # Fallback web browser
 firefox
@@ -174,7 +173,6 @@ nss
 
 # Accessibility (AT-SPI — required by Electron)
 at-spi2-core
-at-spi2-atk
 
 # Notifications
 libnotify
@@ -212,7 +210,7 @@ flatpak
 # Network Manager (full GUI integration)
 # =============================================================================
 
-NetworkManager
+networkmanager
 networkmanager-cli
 networkmanager-wifi
 networkmanager-openrc
@@ -225,7 +223,6 @@ mobile-broadband-provider-info
 
 # Theming
 adwaita-icon-theme
-gnome-themes-extra
 
 # File management (additional)
 gvfs

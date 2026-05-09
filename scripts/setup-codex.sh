@@ -34,8 +34,8 @@ if [ -t 1 ]; then
 else
     RED='' GREEN='' YELLOW='' NC=''
 fi
-log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+log_info()  { echo -e "${GREEN}[INFO]${NC}  $*" >&2; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 # ── Argument parsing ─────────────────────────────────────────────────────────
