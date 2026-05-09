@@ -301,7 +301,7 @@ echo "$FULL_JSON" | jq '.' > "${RUN_DIR}/disks.json"
     "| Transport | \(.transport // "N/A") |",
     "| Partition Table | \(.partition_table // "none") |",
     "| Mount Status | \(.mount_status) |",
-    "| LUKS | \(.has_luks | if . then "Yes (\(.luks_status))" else "No" end) |",
+    "| LUKS | \(if .has_luks then "Yes (\(.luks_status))" else "No" end) |",
     "| BitLocker | \(.has_bitlocker | if . then "⚠ Yes" else "No" end) |",
     "| SMART | \(.smart_summary) |",
     "",
