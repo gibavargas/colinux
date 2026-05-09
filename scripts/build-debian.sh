@@ -200,17 +200,28 @@ configure_lb() {
     export LB_MIRROR_BINARY_SECURITY="http://security.debian.org/debian-security"
 
     # Ubuntu's debootstrap hard-codes ubuntu-keyring as a required package.
-    # Installing Debian's debootstrap avoids this entirely.
-    log "Replacing Ubuntu debootstrap with Debian's version..."
-    DEBOOT_URL="https://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.143_all.deb"
-    if curl -fsSL "$DEBOOT_URL" -o /tmp/debootstrap.deb 2>/dev/null; then
-        sudo dpkg -i /tmp/debootstrap.deb || {
-            warn "Debian debootstrap dpkg install failed, trying fallback..."
-            DEBOOT_URL="https://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.141_all.deb"
-            curl -fsSL "$DEBOOT_URL" -o /tmp/debootstrap.deb 2>/dev/null && \
-                sudo dpkg -i /tmp/debootstrap.deb || true
-        }
-    fi
+    # Installing Debian's debootstrap avoids this entirely. Verify the .deb
+    # before dpkg executes maintainer scripts.
+    install_debian_debootstrap() {
+        local version="$1" expected_sha="$2" url actual_sha
+        url="https://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_${version}_all.deb"
+        if ! curl -fsSL "$url" -o /tmp/debootstrap.deb 2>/dev/null; then
+            return 1
+        fi
+        actual_sha="$(sha256sum /tmp/debootstrap.deb | awk '{print $1}')"
+        if [ "$actual_sha" != "$expected_sha" ]; then
+            warn "Debian debootstrap checksum mismatch for ${version}; refusing install"
+            rm -f /tmp/debootstrap.deb
+            return 1
+        fi
+        sudo dpkg -i /tmp/debootstrap.deb
+    }
+
+    log "Replacing Ubuntu debootstrap with Debian's verified package..."
+    install_debian_debootstrap "1.0.143" "86d50d71c93c41c5002c750a6d3fd9083b45c3a1d9f78a48673cd2dc607cfe4f" || {
+        warn "Debian debootstrap install failed, trying fallback..."
+        install_debian_debootstrap "1.0.141" "8c02cb8ad712eb67afb0d23fab175c562804cc97eda70b70cb0f3bc2a21732d7" || true
+    }
     # Fallback: if .deb install still failed, strip ubuntu-keyring from ALL debootstrap files
     if dpkg -l debootstrap 2>/dev/null | grep -q ubuntu; then
         warn "Still on Ubuntu debootstrap, stripping ubuntu-keyring from scripts..."
