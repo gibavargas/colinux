@@ -148,31 +148,46 @@ download_codex_desktop() {
 
     # Download latest Codex release (for the binary)
     log "Checking latest Codex release..."
-    local latest_release
-    latest_release="$(curl -fsSL -H "Accept: application/vnd.github+json" \
-        https://api.github.com/repos/openai/codex/releases/latest 2>/dev/null \
-        | jq -r '.tag_name // "latest"' 2>/dev/null)" || latest_release="latest"
+    local release_info latest_release
+    release_info="$(curl -fsSL -H "Accept: application/vnd.github+json" \
+        https://api.github.com/repos/openai/codex/releases/latest 2>/dev/null)" || release_info=""
+    latest_release="$(echo "$release_info" | jq -r '.tag_name // "latest"' 2>/dev/null)" || latest_release="latest"
 
     log "Latest Codex release: $latest_release"
 
-    # Download macOS Codex app (the source for the Electron wrapper)
-    local codex_url
-    codex_url="https://github.com/openai/codex/releases/download/${latest_release}/codex-macos.zip"
+    # Download macOS Codex app (the source for the Electron wrapper). Only use
+    # release API assets with GitHub-provided SHA256 digests; direct URL guesses
+    # cannot be verified and must not be consumed by the build.
+    local codex_url asset_digest asset_name
+    asset_name="codex-macos.zip"
+    codex_url="$(echo "$release_info" | jq -r --arg name "$asset_name" \
+        '.assets[]? | select(.name==$name) | .browser_download_url // empty' 2>/dev/null | head -1)" || codex_url=""
+    asset_digest="$(echo "$release_info" | jq -r --arg name "$asset_name" \
+        '.assets[]? | select(.name==$name) | .digest // empty' 2>/dev/null | head -1)" || asset_digest=""
+    asset_digest="${asset_digest#sha256:}"
     local codex_zip="$cache_dir/codex-macos.zip"
 
     if [ ! -f "$codex_zip" ]; then
-        log "Downloading Codex desktop release..."
-        if curl -fsSL --connect-timeout 30 -o "$codex_zip" "$codex_url" 2>/dev/null; then
-            local dl_size
-            dl_size="$(stat -c%s "$codex_zip" 2>/dev/null || echo 0)"
-            if [ "$dl_size" -lt 1048576 ]; then
-                warn "Download seems too small ($(numfmt --to=iec "$dl_size")), will retry during build"
-                rm -f "$codex_zip"
-            else
-                ok "Downloaded Codex v$latest_release ($(numfmt --to=iec "$dl_size"))"
-            fi
+        if [ -z "$codex_url" ] || [[ ! "$asset_digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            warn "Verified Codex desktop asset not available — will retry during build"
         else
-            warn "Codex download failed — will retry during build"
+            log "Downloading Codex desktop release..."
+            if curl -fsSL --connect-timeout 30 -o "$codex_zip" "$codex_url" 2>/dev/null; then
+                local dl_size actual_digest
+                dl_size="$(stat -c%s "$codex_zip" 2>/dev/null || echo 0)"
+                actual_digest="$(sha256sum "$codex_zip" | awk '{print $1}')"
+                if [ "$dl_size" -lt 1048576 ]; then
+                    warn "Download seems too small ($(numfmt --to=iec "$dl_size")), will retry during build"
+                    rm -f "$codex_zip"
+                elif [ "$actual_digest" != "$asset_digest" ]; then
+                    warn "Codex desktop SHA256 mismatch, will retry during build"
+                    rm -f "$codex_zip"
+                else
+                    ok "Downloaded and verified Codex v$latest_release ($(numfmt --to=iec "$dl_size"))"
+                fi
+            else
+                warn "Codex download failed — will retry during build"
+            fi
         fi
     else
         ok "Using cached Codex download"

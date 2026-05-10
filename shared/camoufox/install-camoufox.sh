@@ -153,10 +153,16 @@ install_deps_debian() {
     if [[ -f "$pkg_file" ]]; then
         local pkgs
         pkgs=$(grep -v '^\s*#' "$pkg_file" | grep -v '^\s*$' | tr '\n' ' ')
-        # Fix linux-headers for non-amd64
-        local host_arch
+        # Fix linux-headers for non-amd64 (Debian uses dpkg arch names, not uname -m)
+        local host_arch deb_arch
         host_arch="$(uname -m)"
-        pkgs="${pkgs/linux-headers-amd64/linux-headers-${host_arch}}"
+        case "$host_arch" in
+            x86_64|amd64) deb_arch="amd64" ;;
+            aarch64|arm64) deb_arch="arm64" ;;
+            armv7l|armhf) deb_arch="armhf" ;;
+            *) deb_arch="$host_arch" ;;
+        esac
+        pkgs="${pkgs/linux-headers-amd64/linux-headers-${deb_arch}}"
         if [[ -n "$pkgs" ]]; then
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $pkgs 2>&1 || \
                 warn "Some packages failed to install (non-fatal)"

@@ -85,7 +85,7 @@ sudo
 polkitd
 
 # --- Firmware (broad hardware support) ---
-linux-firmware-nonfree
+firmware-linux-nonfree
 firmware-iwlwifi
 firmware-atheros
 firmware-b43-installer

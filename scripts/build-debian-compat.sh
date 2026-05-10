@@ -150,7 +150,7 @@ install_build_deps() {
             mtools \
             dosfstools \
             fdisk \
-            sgdisk \
+            gdisk \
             bash \
             curl \
             ca-certificates \
@@ -205,9 +205,9 @@ configure_chroot() {
 
     # Set up apt sources
     cat > "$chroot/etc/apt/sources.list" <<EOF
-deb $DEBIAN_MIRROR $SUITE main contrib non-free-firmware
-deb $DEBIAN_MIRROR $SUITE-updates main contrib non-free-firmware
-deb $DEBIAN_SECURITY $SUITE-security main contrib non-free-firmware
+deb $DEBIAN_MIRROR $SUITE main contrib non-free non-free-firmware
+deb $DEBIAN_MIRROR $SUITE-updates main contrib non-free non-free-firmware
+deb $DEBIAN_SECURITY $SUITE-security main contrib non-free non-free-firmware
 EOF
 
     # Set locale

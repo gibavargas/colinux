@@ -108,7 +108,7 @@ profile_colinux_desktop_install_bootloader() {
 
     case "$ARCH" in
         x86_64)
-            cp "$ROOTDIR/usr/lib/grub/i386-efi/grubx64.efi" "$mnt/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true
+            cp "$ROOTDIR/usr/lib/grub/x86_64-efi/grubx64.efi" "$mnt/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true
             ;;
         aarch64)
             cp "$ROOTDIR/usr/lib/grub/arm64-efi/grub.efi" "$mnt/EFI/BOOT/BOOTAA64.EFI" 2>/dev/null || true

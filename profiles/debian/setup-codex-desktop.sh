@@ -206,7 +206,7 @@ download_codex_desktop() {
     # and wraps it with Electron for Linux.
 
     # Find the darwin release asset
-    local release_info download_url asset_name
+    local release_info download_url asset_name asset_digest
     release_info="$(curl -fsSL "$GITHUB_API/$CODEX_REPO/releases/tags/$version" 2>/dev/null)" || \
         release_info="$(curl -fsSL "$GITHUB_API/$CODEX_REPO/releases/latest" 2>/dev/null)" || {
         log_error "Failed to fetch release info"
@@ -225,25 +225,11 @@ download_codex_desktop() {
     fi
 
     if [ -n "$asset_name" ]; then
-        download_url="$(echo "$release_info" | jq -r \
-            ".assets[] | select(.name==\"$asset_name\") | .browser_download_url" 2>/dev/null)"
-    fi
-
-    if [ -z "$download_url" ]; then
-        # Fallback: try the direct download patterns
-        log_warn "Could not find download URL from release API"
-        log_info "Trying fallback download patterns..."
-
-        for pattern in \
-            "https://github.com/$CODEX_REPO/releases/download/$version/codex-desktop-darwin.zip" \
-            "https://github.com/$CODEX_REPO/releases/download/$version/Codex-desktop.zip" \
-            "https://github.com/$CODEX_REPO/releases/download/$version/codex-macos.zip"; do
-            if curl -fsSL --head "$pattern" 2>/dev/null | grep -q "200\|302"; then
-                download_url="$pattern"
-                log_info "Found: $download_url"
-                break
-            fi
-        done
+        download_url="$(echo "$release_info" | jq -r --arg name "$asset_name" \
+            '.assets[] | select(.name==$name) | .browser_download_url // empty' 2>/dev/null | head -1)"
+        asset_digest="$(echo "$release_info" | jq -r --arg name "$asset_name" \
+            '.assets[] | select(.name==$name) | .digest // empty' 2>/dev/null | head -1)"
+        asset_digest="${asset_digest#sha256:}"
     fi
 
     if [ -z "$download_url" ]; then
@@ -267,6 +253,20 @@ download_codex_desktop() {
         return 1
     fi
 
+    if [[ ! "$asset_digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        log_error "No GitHub SHA256 digest for $asset_name; refusing unverified desktop asset"
+        return 1
+    fi
+    local actual_digest
+    actual_digest="$(sha256sum "$tmpdir/codex-desktop-release" | awk '{print $1}')"
+    if [ "$actual_digest" != "$asset_digest" ]; then
+        log_error "SHA256 mismatch for $asset_name"
+        log_error "Expected: $asset_digest"
+        log_error "Actual:   $actual_digest"
+        return 1
+    fi
+    log_info "SHA256 digest verified for $asset_name"
+
     echo "$tmpdir"
 }
 
@@ -281,15 +281,24 @@ build_electron_wrapper() {
 
     log_step "Building Electron wrapper for Codex Desktop"
 
-    # Clone the codex-desktop-linux wrapper
-    log_info "Cloning codex-desktop-linux wrapper..."
-    if [ ! -d "$wrapper_dir" ]; then
-        git clone --depth 1 --branch "$CODEX_DESKTOP_WRAPPER_BRANCH" \
-            "$CODEX_DESKTOP_WRAPPER_REPO" "$wrapper_dir" || {
-            log_error "Failed to clone codex-desktop-linux wrapper"
-            return 1
-        }
+    # Clone the codex-desktop-linux wrapper and pin it to the resolved commit
+    local wrapper_commit
+    wrapper_commit="$(get_latest_wrapper_commit)"
+    if [ "$wrapper_commit" = "unknown" ]; then
+        log_error "Could not resolve codex-desktop-linux wrapper commit"
+        return 1
     fi
+
+    log_info "Cloning codex-desktop-linux wrapper at $wrapper_commit..."
+    rm -rf "$wrapper_dir"
+    git clone --depth 1 "$CODEX_DESKTOP_WRAPPER_REPO" "$wrapper_dir" || {
+        log_error "Failed to clone codex-desktop-linux wrapper"
+        return 1
+    }
+    (cd "$wrapper_dir" && git fetch --depth 1 origin "$wrapper_commit" && git checkout --detach "$wrapper_commit") || {
+        log_error "Failed to pin codex-desktop-linux wrapper to $wrapper_commit"
+        return 1
+    }
 
     # The wrapper project typically has:
     #   - An Electron main process (main.js or similar)
@@ -544,7 +553,7 @@ main() {
 
     # Update state
     set_current_version "$VERSION"
-    set_current_version "$(get_latest_wrapper_commit)" > "$WRAPPER_VERSION_FILE"
+    get_latest_wrapper_commit > "$WRAPPER_VERSION_FILE"
 
     # Verify
     verify_installation

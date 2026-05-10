@@ -13,7 +13,7 @@ OnBootSec=5min
 # Allow missed timers to run on next boot
 Persistent=true
 # Collect all missed runs and run them once (don't queue)
-AccurateSec=60s
+AccuracySec=60s
 
 [Install]
 WantedBy=timers.target

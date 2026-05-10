@@ -7,7 +7,7 @@ ConditionPathExists=/etc/codex-auto-update.conf
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/codex-system-autoupdate
+ExecStart=/usr/local/bin/codex-update
 User=root
 Group=root
 StandardOutput=journal

@@ -224,6 +224,7 @@ setup_codex_auth() {
     log_info "Setting up Codex authentication..."
 
     local auth_file="$CODEX_CONFIG/codex.conf"
+    local existing_key=""
 
     # Check if already configured (safe parse, never source)
     if [ -f "$auth_file" ] && grep -q "OPENAI_API_KEY\|CODEX_AUTH" "$auth_file" 2>/dev/null; then
