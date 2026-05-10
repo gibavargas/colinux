@@ -49,6 +49,11 @@
    the user requests a full system update.
 3. Automatic Codex updates run via cron (default: every 6 hours).
    See `/persist/config/auto-update.conf` for schedule control.
+4. To enable Codex `/goal`, use Codex CLI `0.128.0+`, edit the user-local
+   `~/.codex/config.toml`, and add `goals = true` under the existing
+   `[features]` table. Restart Codex, then type `/goal`. Do not commit the
+   local config file; if `[features]` already exists, do not create a duplicate
+   TOML table.
 
 ## 5. Logging
 
