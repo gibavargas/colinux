@@ -194,9 +194,21 @@ clone_aports() {
     fi
 
     if [ ! -d "$APORTS_DIR" ]; then
-        git clone --depth 1 --branch "$APORTS_BRANCH" \
-            "https://gitlab.alpinelinux.org/alpine/aports.git" \
-            "$APORTS_DIR"
+        local attempt max_attempts=3
+        for attempt in $(seq 1 "$max_attempts"); do
+            if git clone --depth 1 --branch "$APORTS_BRANCH" \
+                "https://gitlab.alpinelinux.org/alpine/aports.git" \
+                "$APORTS_DIR"; then
+                break
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+                log_error "Failed to clone Alpine aports after $max_attempts attempts."
+                exit 1
+            fi
+            log_warn "aports clone failed (attempt $attempt/$max_attempts); retrying..."
+            rm -rf "$APORTS_DIR"
+            sleep $((attempt * 5))
+        done
     fi
 
     log_info "aports ready at $APORTS_DIR"
