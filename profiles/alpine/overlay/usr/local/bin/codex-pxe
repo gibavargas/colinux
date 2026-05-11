@@ -148,18 +148,23 @@ extract_from_iso() {
         umount "$mount_point" 2>/dev/null || true
         rmdir "$mount_point" 2>/dev/null || true
     else
-        # Fallback: extract with bsdtar/7z
+        # Fallback: extract with bsdtar after validating member names.  Do not
+        # use p7zip here: archive path traversal must be rejected before any
+        # writes occur, and bsdtar gives us a portable preflight listing.
         if command -v bsdtar &>/dev/null; then
-            bsdtar -xf "$iso_path" -C "${PXE_BOOT}/iso" boot/ 2>/dev/null || true
-            find "${PXE_BOOT}/iso" -name 'vmlinuz*' -exec cp {} "${PXE_BOOT}/vmlinuz" \;
-            find "${PXE_BOOT}/iso" -name 'initramfs*' -exec cp {} "${PXE_BOOT}/initramfs" \;
-        elif command -v 7z &>/dev/null; then
-            7z x -o"${PXE_BOOT}/iso" "$iso_path" boot/ -y 2>/dev/null || true
-            find "${PXE_BOOT}/iso" -name 'vmlinuz*' -exec cp {} "${PXE_BOOT}/vmlinuz" \;
-            find "${PXE_BOOT}/iso" -name 'initramfs*' -exec cp {} "${PXE_BOOT}/initramfs" \;
+            if bsdtar -tf "$iso_path" boot/ 2>/dev/null \
+                | awk 'BEGIN { bad=0 } /^\// || /(^|\/)\.\.($|\/)/ { bad=1 } END { exit bad ? 0 : 1 }'; then
+                rmdir "$mount_point" 2>/dev/null || true
+                die "ISO contains unsafe boot paths; refusing fallback extraction"
+            fi
+
+            bsdtar --no-same-owner --no-same-permissions \
+                -xf "$iso_path" -C "${PXE_BOOT}/iso" boot/ 2>/dev/null || true
+            find "${PXE_BOOT}/iso" -type f -name 'vmlinuz*' -exec cp {} "${PXE_BOOT}/vmlinuz" \;
+            find "${PXE_BOOT}/iso" -type f -name 'initramfs*' -exec cp {} "${PXE_BOOT}/initramfs" \;
         else
             rmdir "$mount_point" 2>/dev/null || true
-            die "Cannot mount or extract ISO. Install: apk add p7zip or bsdtar"
+            die "Cannot mount or safely extract ISO. Install: apk add libarchive-tools"
         fi
     fi
 

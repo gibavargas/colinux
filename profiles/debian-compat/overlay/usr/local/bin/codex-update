@@ -199,11 +199,8 @@ update_codex() {
     case "$arch" in
         x86_64)  arch="x86_64" ;;
         aarch64) arch="aarch64" ;;
-        armv7l)  arch="armv7" ;;
-        *)
-            echo "WARNING: Unsupported architecture $arch. Attempting x86_64 binary."
-            arch="x86_64"
-            ;;
+        armv7l)  die "Unsupported architecture: armv7l. Only x86_64 and aarch64 are supported." ;;
+        *)        die "Unsupported architecture: $arch" ;;
     esac
 
     # Construct correct artifact name
