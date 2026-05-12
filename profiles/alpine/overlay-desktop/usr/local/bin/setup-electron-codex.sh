@@ -175,7 +175,6 @@ elif [[ -f "$CODEX_DESKTOP_DIR/app.js" ]]; then
     else
         echo "ERROR: electron runtime not found." >&2
         echo "Run: sudo apk add electron  (Alpine)" >&2
-        echo "  or:  sudo npm install -g electron" >&2
         exit 1
     fi
 else
