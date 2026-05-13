@@ -427,9 +427,9 @@ install_privilege_rules() {
         # Append codex-* rules to existing doas.conf
         local rules="
 # CoLinux — codex-* command whitelist
-permit nopass :codex as root cmd /usr/local/bin/codex-wifi-wizard
+permit nopass :codex as root cmd /usr/local/sbin/codex-wifi-wizard
 permit nopass :codex as root cmd /usr/local/sbin/codex-network-stack
-permit nopass :codex as root cmd /usr/local/sbin/install-camoufox
+permit nopass :codex as root cmd /usr/local/sbin/install-camoufox.sh
 "
         echo "$rules" >> "$DEST_DIR/etc/doas.conf"
         debug "  Appended to doas.conf"
@@ -437,9 +437,9 @@ permit nopass :codex as root cmd /usr/local/sbin/install-camoufox
 
     if [[ -d "$DEST_DIR/etc/sudoers.d" ]]; then
         safe_write "$DEST_DIR/etc/sudoers.d/codex-network" "# CoLinux — codex-* command whitelist for sudo
-codex ALL=(root) NOPASSWD: /usr/local/bin/codex-wifi-wizard
+codex ALL=(root) NOPASSWD: /usr/local/sbin/codex-wifi-wizard
 codex ALL=(root) NOPASSWD: /usr/local/sbin/codex-network-stack
-codex ALL=(root) NOPASSWD: /usr/local/sbin/install-camoufox
+codex ALL=(root) NOPASSWD: /usr/local/sbin/install-camoufox.sh
 " 440
         debug "  Created sudoers.d/codex-network"
     fi

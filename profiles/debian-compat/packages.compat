@@ -95,9 +95,8 @@ firmware-realtek
 firmware-zd1211
 
 # --- Boot ---
-grub2
-grub-efi-amd64
-grub-efi-ia32
+# Bootloader binaries are supplied by host-side *-bin packages in build-debian-compat.sh.
+# Do not install mutually-conflicting grub2/grub-efi-* packages into the live chroot.
 efibootmgr
 systemd-boot
 shim-signed

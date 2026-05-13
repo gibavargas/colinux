@@ -64,7 +64,7 @@ start() {
         esac
         cat > "${CRON_LINK}" <<EOF
 # CoLinux Desktop auto-update (Codex CLI + Desktop app)
-0 */${INTERVAL} * * * /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1
+0 */${INTERVAL} * * * root /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1
 EOF
         chmod 0644 "${CRON_LINK}"
     fi

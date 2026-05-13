@@ -14,7 +14,7 @@
 # consume. Functions named profile_*_phase are NOT called by mkimage.sh.
 # =============================================================================
 
-profile_colinux-lite() {
+profile_colinux_lite() {
     profile_base
 
     # ── Identity ──────────────────────────────────────────────────────────────
