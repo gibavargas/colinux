@@ -33,6 +33,7 @@ trap _cleanup EXIT
 INSTALL_DIR="${INSTALL_DIR:-/opt/codex-desktop}"
 CODEX_DESKTOP_WRAPPER_REPO="https://github.com/ilysenko/codex-desktop-linux"
 CODEX_DESKTOP_WRAPPER_BRANCH="main"
+CODEX_DESKTOP_WRAPPER_COMMIT="${CODEX_DESKTOP_WRAPPER_COMMIT:-43c8bd1b5d4ab2eb4be8eb474528d6050c51db9a}"
 CODEX_REPO="openai/codex"
 GITHUB_API="https://api.github.com/repos"
 CHANNEL="${CODEX_DESKTOP_CHANNEL:-stable}"
@@ -144,7 +145,7 @@ install_build_deps() {
             ca-certificates \
             git \
             p7zip-full \
-            7z \
+            7zip \
             jq \
             libarchive-tools \
             xorriso \
@@ -181,15 +182,15 @@ get_latest_codex_release() {
 
 # ── Get latest wrapper version ───────────────────────────────────────────────
 get_latest_wrapper_commit() {
-    local commit
-    commit="$(curl -fsSL --connect-timeout 15 \
-        "$GITHUB_API/ilysenko/codex-desktop-linux/commits/$CODEX_DESKTOP_WRAPPER_BRANCH" \
-        2>/dev/null | jq -r '.sha // empty' 2>/dev/null | head -c 12)" || {
-        log_warn "Could not determine latest wrapper commit"
-        echo "unknown"
-        return 0
-    }
-    echo "${commit:-unknown}"
+    case "$CODEX_DESKTOP_WRAPPER_COMMIT" in
+        [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
+            echo "$CODEX_DESKTOP_WRAPPER_COMMIT"
+            ;;
+        *)
+            log_error "CODEX_DESKTOP_WRAPPER_COMMIT must be a full 40-character commit SHA"
+            return 1
+            ;;
+    esac
 }
 
 # ── Download Codex Desktop (macOS release) ───────────────────────────────────

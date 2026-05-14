@@ -41,7 +41,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     hdparm \
     pciutils \
     usbutils \
-    gparted \
     git \
     curl \
     wget \
@@ -89,7 +88,7 @@ RUN mkdir -p /run/codex \
 # Create codex user
 RUN groupadd -g 1000 codex && \
     useradd -m -u 1000 -g 1000 -s /bin/bash -d /home/codex codex && \
-    echo "codex ALL=(root) NOPASSWD: /usr/local/bin/codex-disk-inventory, /usr/local/bin/codex-network, /usr/local/bin/codex-backup, /usr/local/bin/codex-restore, /usr/local/bin/codex-update, /usr/local/bin/codex-shell, /usr/local/bin/codexctl, /usr/local/bin/codex-logs, /usr/local/bin/codex-mount-rw, /usr/local/bin/codex-mount-ro, /usr/local/bin/codex-usb-persist" > /etc/sudoers.d/codex && \
+    echo "codex ALL=(root) NOPASSWD: /usr/local/bin/codex-disk-inventory, /usr/local/bin/codex-network, /usr/local/bin/codex-backup, /usr/local/bin/codex-update, /usr/local/bin/codexctl, /usr/local/bin/codex-logs, /usr/local/bin/codex-mount-rw, /usr/local/bin/codex-mount-ro, /usr/local/bin/codex-usb-persist" > /etc/sudoers.d/codex && \
     chown -R codex:codex /home/codex /workspace /persist
 
 # Install sudoers rules (restricted)
