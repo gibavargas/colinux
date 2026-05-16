@@ -23,10 +23,8 @@ codex ALL=(root) NOPASSWD: /usr/bin/nmcli connection show
 codex ALL=(root) NOPASSWD: /usr/bin/nmcli general reload
 
 # System info (read-only)
-codex ALL=(root) NOPASSWD: /usr/bin/smartctl -H *
-codex ALL=(root) NOPASSWD: /usr/bin/smartctl -A *
-codex ALL=(root) NOPASSWD: /usr/sbin/hdparm -I *
-codex ALL=(root) NOPASSWD: /usr/sbin/nvme smart-log *
+# Disk health queries must go through codex-disk-inventory rather than sudoers
+# wildcards, because sudoers '*' can match extra arguments.
 codex ALL=(root) NOPASSWD: /sbin/blkid
 
 # Codex Desktop management

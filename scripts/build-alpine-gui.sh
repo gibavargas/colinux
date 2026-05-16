@@ -169,7 +169,6 @@ install_build_deps() {
                 squashfs-tools \
                 xorriso \
                 grub-efi-amd64-bin \
-                grub-efi-arm64-bin \
                 mtools \
                 dosfstools \
                 fdisk \
@@ -179,7 +178,8 @@ install_build_deps() {
                 git \
                 qemu-utils \
                 openssl \
-                sgdisk
+                gdisk
+            apt-get install -y --no-install-recommends grub-efi-arm64-bin || true
             ;;
     esac
 
@@ -278,8 +278,8 @@ run_mkimage() {
     "$mkimage_script" \
         --profile "colinux-lite-gui" \
         --arch "$ARCH" \
-        --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/main" \
-        --repository "${ALPINE_MIRROR}/alpine/v${ALPINE_RELEASE}/community" \
+        --repository "${ALPINE_MIRROR}/v${ALPINE_RELEASE}/main" \
+        --repository "${ALPINE_MIRROR}/v${ALPINE_RELEASE}/community" \
         --outdir "$OUTDIR" \
         --tag "v${ALPINE_RELEASE}" \
         --yaml "$APORTS_DIR/scripts/mkimg.colinux-lite-gui.sh" \

@@ -148,7 +148,8 @@ RUN adduser -D -s /bin/bash -h /home/codex codex && \
     chown -R codex:codex /home/codex /workspace /persist
 
 # ── Install doas config ──────────────────────────────────────────────────────
-RUN echo "permit nopass :codex as root cmd /usr/local/sbin/codex-wifi-wizard" > /etc/doas.conf && \
+COPY profiles/alpine/overlay/etc/doas.conf /etc/doas.conf
+RUN echo "permit nopass :codex as root cmd /usr/local/sbin/codex-wifi-wizard" >> /etc/doas.conf && \
     echo "permit nopass :codex as root cmd /usr/local/sbin/codex-network-stack" >> /etc/doas.conf && \
     echo "permit nopass :codex as root cmd /usr/local/sbin/install-camoufox.sh" >> /etc/doas.conf && \
     chmod 640 /etc/doas.conf

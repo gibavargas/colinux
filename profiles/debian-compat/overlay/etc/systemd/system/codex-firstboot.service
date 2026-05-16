@@ -3,6 +3,7 @@ Description=CoLinux Compat First-Boot Setup
 After=network.target network-online.target
 Wants=network-online.target
 Before=codex-disk-inventory.service codex-auto-update.service
+ConditionPathExists=!/persist/.first-boot-done
 
 [Service]
 Type=oneshot
@@ -11,7 +12,6 @@ RemainAfterExit=yes
 TimeoutStartSec=300
 StandardOutput=journal
 StandardError=journal
-ConditionPathExists=!/persist/.first-boot-done
 
 [Install]
 WantedBy=multi-user.target
