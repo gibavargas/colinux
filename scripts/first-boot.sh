@@ -225,19 +225,26 @@ setup_codex_auth() {
 
     local auth_file="$CODEX_CONFIG/codex.conf"
     local existing_key=""
+    local existing_auth=""
 
-    # Safely extract existing OPENAI_API_KEY value (never source the file)
+    # Safely extract existing authentication values (never source the file)
     if [ -f "$auth_file" ]; then
-        existing_key="$(grep '^export OPENAI_API_KEY=' "$auth_file" 2>/dev/null | head -1 \
-            | sed 's/^export OPENAI_API_KEY=//' | tr -d '"' || true)"
+        existing_key="$(grep -E '^[[:space:]]*(export[[:space:]]+)?OPENAI_API_KEY=' "$auth_file" 2>/dev/null | head -1 \
+            | sed -E 's/^[[:space:]]*(export[[:space:]]+)?OPENAI_API_KEY=//' | tr -d '"' || true)"
+        existing_auth="$(grep -E '^[[:space:]]*(export[[:space:]]+)?CODEX_AUTH=' "$auth_file" 2>/dev/null | head -1 \
+            | sed -E 's/^[[:space:]]*(export[[:space:]]+)?CODEX_AUTH=//' | tr -d '"' || true)"
+
         # Skip if empty or only contained a masked placeholder
         if [ "$existing_key" = "***" ] || [ "$existing_key" = "MASKED" ] || [ -z "$existing_key" ]; then
             existing_key=""
         fi
+        if [ "$existing_auth" = "***" ] || [ "$existing_auth" = "MASKED" ] || [ -z "$existing_auth" ]; then
+            existing_auth=""
+        fi
 
-        # Check if already configured after rejecting masked API key placeholders.
+        # Check if already configured after rejecting masked placeholders.
         # CODEX_AUTH is managed by Codex itself; OPENAI_API_KEY is preserved below.
-        if [ -z "$existing_key" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?CODEX_AUTH=' "$auth_file" 2>/dev/null; then
+        if [ -n "$existing_auth" ]; then
             log_info "Codex authentication already configured."
             return 0
         fi
