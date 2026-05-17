@@ -284,7 +284,10 @@ do_update() {
     }
 
     local binary
-    binary="$(find "$tmpdir" -name 'codex' -type f ! -name '*.tar.gz' | head -1)"
+    binary="$(find "$tmpdir" -name "codex-${arch_triple}" -type f ! -name '*.tar.gz' | head -1)"
+    if [ -z "$binary" ]; then
+        binary="$(find "$tmpdir" -name 'codex' -type f ! -name '*.tar.gz' | head -1)"
+    fi
     if [ -z "$binary" ]; then
         log_error "Binary not found in archive"
         return 1

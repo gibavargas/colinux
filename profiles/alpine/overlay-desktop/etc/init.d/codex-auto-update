@@ -12,8 +12,9 @@ depend() {
     use logger
 }
 
-CRON_DIR="/etc/cron.d"
-CRON_LINK="${CRON_DIR}/codex-auto-update"
+CRON_FILE="/etc/crontabs/root"
+CRON_MARKER_START="# BEGIN CoLinux codex-auto-update"
+CRON_MARKER_END="# END CoLinux codex-auto-update"
 CONFIG_FILE="/persist/config/auto-update.conf"
 LOG_DIR="/persist/logs"
 ENABLED="true"
@@ -41,7 +42,8 @@ start() {
     fi
 
     ebegin "Setting up Codex Desktop auto-update cron job"
-    mkdir -p "${CRON_DIR}" 2>/dev/null
+    mkdir -p "$(dirname "${CRON_FILE}")" 2>/dev/null
+    touch "${CRON_FILE}"
     mkdir -p "${LOG_DIR}" 2>/dev/null
 
     # Install periodic cron job for Codex Desktop
@@ -62,11 +64,21 @@ start() {
                 INTERVAL="6"
                 ;;
         esac
-        cat > "${CRON_LINK}" <<EOF
-# CoLinux Desktop auto-update (Codex CLI + Desktop app)
-0 */${INTERVAL} * * * root /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1
-EOF
-        chmod 0644 "${CRON_LINK}"
+        tmp_cron="$(mktemp)"
+        awk -v start="${CRON_MARKER_START}" -v end="${CRON_MARKER_END}" '
+            $0 == start { skip=1; next }
+            $0 == end { skip=0; next }
+            !skip { print }
+        ' "${CRON_FILE}" > "${tmp_cron}"
+        {
+            cat "${tmp_cron}"
+            echo "${CRON_MARKER_START}"
+            echo "# CoLinux Desktop auto-update (Codex CLI + Desktop app)"
+            echo "0 */${INTERVAL} * * * /usr/local/bin/cron-codex-update >> /persist/logs/codex-auto-update.log 2>&1"
+            echo "${CRON_MARKER_END}"
+        } > "${CRON_FILE}"
+        rm -f "${tmp_cron}"
+        chmod 0600 "${CRON_FILE}"
     fi
 
     eend 0 "Auto-update cron installed (every ${INTERVAL}h)"
@@ -74,6 +86,15 @@ EOF
 
 stop() {
     ebegin "Removing Codex auto-update cron job"
-    rm -f "${CRON_LINK}"
+    if [ -f "${CRON_FILE}" ]; then
+        tmp_cron="$(mktemp)"
+        awk -v start="${CRON_MARKER_START}" -v end="${CRON_MARKER_END}" '
+            $0 == start { skip=1; next }
+            $0 == end { skip=0; next }
+            !skip { print }
+        ' "${CRON_FILE}" > "${tmp_cron}"
+        cat "${tmp_cron}" > "${CRON_FILE}"
+        rm -f "${tmp_cron}"
+    fi
     eend 0 "Auto-update cron removed"
 }

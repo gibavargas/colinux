@@ -257,9 +257,13 @@ update_codex() {
         return 1
     fi
 
-    # Find the binary
-    local extracted_bin
-    extracted_bin="$(find "${tmp_dir}" -name 'codex' -type f -executable 2>/dev/null | head -1 || true)"
+    # Find the binary — Codex release archives name it codex-$arch-unknown-linux-musl
+    local extracted_bin expected_bin_name
+    expected_bin_name="codex-${arch}-unknown-linux-musl"
+    extracted_bin="$(find "${tmp_dir}" -name "$expected_bin_name" -type f 2>/dev/null | head -1 || true)"
+    if [[ -z "$extracted_bin" ]]; then
+        extracted_bin="$(find "${tmp_dir}" -name 'codex' -type f -executable 2>/dev/null | head -1 || true)"
+    fi
     if [[ -z "$extracted_bin" ]]; then
         echo "  ✗ Could not find codex binary in archive."
         log_action "codex_update_fail binary_not_found"

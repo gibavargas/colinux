@@ -17,8 +17,9 @@ depend() {
 }
 
 CRON_TAB="/etc/codex-update-crontab"
-CRON_DIR="/etc/cron.d"
-CRON_LINK="${CRON_DIR}/codex-auto-update"
+CRON_FILE="/etc/crontabs/root"
+CRON_MARKER_START="# BEGIN CoLinux codex-auto-update"
+CRON_MARKER_END="# END CoLinux codex-auto-update"
 CONFIG_FILE="/persist/config/auto-update.conf"
 UPDATE_SCRIPT="/usr/local/bin/cron-codex-update"
 LOG_DIR="/persist/logs"
@@ -49,8 +50,9 @@ start() {
 
     ebegin "Setting up Codex auto-update cron job"
 
-    # Ensure cron directory and log directory exist
-    mkdir -p "${CRON_DIR}" 2>/dev/null
+    # Ensure BusyBox crond root crontab and log directory exist
+    mkdir -p "$(dirname "${CRON_FILE}")" 2>/dev/null
+    touch "${CRON_FILE}"
     mkdir -p "${LOG_DIR}" 2>/dev/null
 
     # Check that the update script exists
@@ -61,14 +63,26 @@ start() {
 
     # Install the crontab
     if [ -f "${CRON_TAB}" ]; then
-        cp "${CRON_TAB}" "${CRON_LINK}"
-        chmod 0644 "${CRON_LINK}"
+        tmp_cron="$(mktemp)"
+        awk -v start="${CRON_MARKER_START}" -v end="${CRON_MARKER_END}" '
+            $0 == start { skip=1; next }
+            $0 == end { skip=0; next }
+            !skip { print }
+        ' "${CRON_FILE}" > "${tmp_cron}"
+        {
+            cat "${tmp_cron}"
+            echo "${CRON_MARKER_START}"
+            cat "${CRON_TAB}"
+            echo "${CRON_MARKER_END}"
+        } > "${CRON_FILE}"
+        rm -f "${tmp_cron}"
+        chmod 0600 "${CRON_FILE}"
 
         # Validate interval
         case "${INTERVAL}" in
             1|2|3|4|6|8|12|24)
                 # Valid interval — update the crontab
-                sed -i "s|^#\?0 \*/[0-9]* \* \* \* \(root \)\?|0 */${INTERVAL} * * * root |" "${CRON_LINK}"
+                sed -i "s|^#\?0 \*/[0-9]* \* \* \* |0 */${INTERVAL} * * * |" "${CRON_FILE}"
                 ;;
             *)
                 ewarn "Invalid INTERVAL=${INTERVAL} in ${CONFIG_FILE}, using default (6)"
@@ -85,8 +99,15 @@ start() {
 stop() {
     ebegin "Removing Codex auto-update cron job"
 
-    if [ -f "${CRON_LINK}" ]; then
-        rm -f "${CRON_LINK}"
+    if [ -f "${CRON_FILE}" ]; then
+        tmp_cron="$(mktemp)"
+        awk -v start="${CRON_MARKER_START}" -v end="${CRON_MARKER_END}" '
+            $0 == start { skip=1; next }
+            $0 == end { skip=0; next }
+            !skip { print }
+        ' "${CRON_FILE}" > "${tmp_cron}"
+        cat "${tmp_cron}" > "${CRON_FILE}"
+        rm -f "${tmp_cron}"
         eend 0 "Auto-update cron removed"
     else
         eend 0 "No auto-update cron to remove"

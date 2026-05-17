@@ -221,9 +221,12 @@ download_codex() {
         exit 1
     }
 
-    # Find the binary
+    # Find the binary — Codex release archives name it codex-$arch_triple
     local binary
-    binary="$(find "$tmpdir" -name 'codex' -type f ! -name '*.tar.gz' | head -1)"
+    binary="$(find "$tmpdir" -name "codex-${arch_triple}" -type f ! -name '*.tar.gz' | head -1)"
+    if [ -z "$binary" ]; then
+        binary="$(find "$tmpdir" -name 'codex' -type f ! -name '*.tar.gz' | head -1)"
+    fi
     if [ -z "$binary" ]; then
         log_error "Could not find codex binary in extracted archive."
         log_error "Archive contents:"

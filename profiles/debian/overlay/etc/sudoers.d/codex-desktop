@@ -8,7 +8,6 @@
 # Disk operations (disk safety model — use codex-* wrappers only)
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-mount-ro
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-backup
-codex ALL=(root) NOPASSWD: /usr/local/bin/codex-restore
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-disk-inventory
 
 # System updates

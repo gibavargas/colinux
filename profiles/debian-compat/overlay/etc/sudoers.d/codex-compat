@@ -16,7 +16,6 @@ codex ALL=(root) NOPASSWD: /usr/local/bin/codex-usb-persist
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-network
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-update
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-backup
-codex ALL=(root) NOPASSWD: /usr/local/bin/codex-restore
 codex ALL=(root) NOPASSWD: /usr/local/bin/codex-logs
 codex ALL=(root) NOPASSWD: /usr/local/bin/codexctl
 codex ALL=(root) NOPASSWD: /usr/local/sbin/codex-wifi-wizard
