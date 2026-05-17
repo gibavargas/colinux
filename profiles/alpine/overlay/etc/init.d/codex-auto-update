@@ -63,6 +63,17 @@ start() {
 
     # Install the crontab
     if [ -f "${CRON_TAB}" ]; then
+        # Validate interval before writing the managed block. Do not run a broad
+        # sed over /etc/crontabs/root; it may contain unrelated hourly jobs.
+        case "${INTERVAL}" in
+            1|2|3|4|6|8|12|24)
+                ;;
+            *)
+                ewarn "Invalid INTERVAL=${INTERVAL} in ${CONFIG_FILE}, using default (6)"
+                INTERVAL="6"
+                ;;
+        esac
+
         tmp_cron="$(mktemp)"
         awk -v start="${CRON_MARKER_START}" -v end="${CRON_MARKER_END}" '
             $0 == start { skip=1; next }
@@ -72,23 +83,11 @@ start() {
         {
             cat "${tmp_cron}"
             echo "${CRON_MARKER_START}"
-            cat "${CRON_TAB}"
+            sed "s|^#\?0 \*/[0-9]* \* \* \* |0 */${INTERVAL} * * * |" "${CRON_TAB}"
             echo "${CRON_MARKER_END}"
         } > "${CRON_FILE}"
         rm -f "${tmp_cron}"
         chmod 0600 "${CRON_FILE}"
-
-        # Validate interval
-        case "${INTERVAL}" in
-            1|2|3|4|6|8|12|24)
-                # Valid interval — update the crontab
-                sed -i "s|^#\?0 \*/[0-9]* \* \* \* |0 */${INTERVAL} * * * |" "${CRON_FILE}"
-                ;;
-            *)
-                ewarn "Invalid INTERVAL=${INTERVAL} in ${CONFIG_FILE}, using default (6)"
-                INTERVAL="6"
-                ;;
-        esac
 
         eend 0 "Auto-update cron installed (every ${INTERVAL}h)"
     else
