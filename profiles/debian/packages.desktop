@@ -201,7 +201,7 @@ shared-mime-info
 mime-support
 desktop-file-utils
 hicolor-icon-theme
-adwaita-icon-theme-full
+adwaita-icon-theme
 gstreamer1.0-plugins-base
 gstreamer1.0-plugins-good
 gstreamer1.0-libav
