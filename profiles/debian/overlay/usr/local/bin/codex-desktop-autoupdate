@@ -110,15 +110,15 @@ load_config() {
             key="$(echo "$key" | xargs)"
             value="$(echo "$value" | xargs)"
             case "$key" in
-                enabled)                ENABLED="$value" ;;
-                interval)               INTERVAL="$value" ;;
-                codex_desktop_channel)  CODEX_DESKTOP_CHANNEL="$value" ;;
-                codex_cli_channel)      CODEX_CLI_CHANNEL="$value" ;;
-                wrapper_branch)         WRAPPER_BRANCH="$value" ;;
-                auto_install)           AUTO_INSTALL="$value" ;;
-                notify)                 NOTIFY="$value" ;;
-                rollback_count)         ROLLBACK_COUNT="$value" ;;
-                api_delay)              API_DELAY="$value" ;;
+                ENABLED|enabled)                                  ENABLED="$value" ;;
+                INTERVAL|interval)                                INTERVAL="$value" ;;
+                CODEX_DESKTOP_CHANNEL|codex_desktop_channel)      CODEX_DESKTOP_CHANNEL="$value" ;;
+                CODEX_CLI_CHANNEL|codex_cli_channel)              CODEX_CLI_CHANNEL="$value" ;;
+                WRAPPER_BRANCH|wrapper_branch)                    WRAPPER_BRANCH="$value" ;;
+                AUTO_INSTALL|auto_install)                        AUTO_INSTALL="$value" ;;
+                NOTIFY|notify)                                    NOTIFY="$value" ;;
+                ROLLBACK_COUNT|rollback_count)                    ROLLBACK_COUNT="$value" ;;
+                API_DELAY|api_delay)                              API_DELAY="$value" ;;
             esac
         done < "$CONFIG_FILE"
         log_debug "Config loaded: enabled=$ENABLED interval=${INTERVAL}h"

@@ -92,10 +92,10 @@ load_config() {
             value="$(echo "$value" | xargs)"
 
             case "$key" in
-                enabled)   ENABLED="$value" ;;
-                interval)  INTERVAL="$value" ;;
-                channel)   CHANNEL="$value" ;;
-                lock_wait) LOCK_WAIT="$value" ;;
+                ENABLED|enabled)     ENABLED="$value" ;;
+                INTERVAL|interval)   INTERVAL="$value" ;;
+                CHANNEL|channel)     CHANNEL="$value" ;;
+                LOCK_WAIT|lock_wait) LOCK_WAIT="$value" ;;
             esac
         done < "$CONFIG_FILE"
         log_debug "Config loaded: enabled=$ENABLED interval=${INTERVAL}h channel=$CHANNEL"

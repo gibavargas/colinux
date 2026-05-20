@@ -3,7 +3,7 @@
 # CoLinux Lite — Codex CLI auto-update service
 #
 # Sets up a cron job that periodically checks for Codex CLI updates.
-# The cron schedule and behavior are controlled by /etc/config/auto-update.conf.
+# The cron schedule and behavior are controlled by /persist/config/auto-update.conf.
 # This service does NOT perform updates itself — it only installs the cron job.
 
 name="codex-auto-update"
@@ -33,9 +33,9 @@ config_load() {
     while IFS='=' read -r key value; do
         case "$key" in
             \#*|"") continue ;;
-            enabled) ENABLED="$(echo "$value" | xargs 2>/dev/null)" ;;
-            interval) INTERVAL="$(echo "$value" | xargs 2>/dev/null)" ;;
-            lock_wait) LOCK_WAIT="$(echo "$value" | xargs 2>/dev/null)" ;;
+            ENABLED|enabled) ENABLED="$(echo "$value" | xargs 2>/dev/null)" ;;
+            INTERVAL|interval) INTERVAL="$(echo "$value" | xargs 2>/dev/null)" ;;
+            LOCK_WAIT|lock_wait) LOCK_WAIT="$(echo "$value" | xargs 2>/dev/null)" ;;
         esac
     done < "${CONFIG_FILE}"
 }
@@ -121,9 +121,9 @@ status() {
         return 0
     fi
 
-    if [ -f "${CRON_LINK}" ]; then
+    if [ -f "${CRON_FILE}" ] && grep -qF "${CRON_MARKER_START}" "${CRON_FILE}"; then
         einfo "Codex auto-update: active (every ${INTERVAL}h)"
-        einfo "Crontab: ${CRON_LINK}"
+        einfo "Crontab: ${CRON_FILE}"
     else
         einfo "Codex auto-update: enabled but cron job not installed"
     fi

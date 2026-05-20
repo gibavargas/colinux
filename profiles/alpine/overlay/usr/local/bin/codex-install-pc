@@ -48,7 +48,8 @@ Options:
   --dual-boot       Preserve existing OS — only add CoLinux partitions
   --efi-size N      Size in MB for EFI partition (default: 512)
   --system-size N   Size in MB for system partition (default: 4096)
-  --no-confirm      Skip interactive confirmation (DANGEROUS)
+  --no-confirm      [REMOVED — unsafe, use --ci with CODXOS_CI_BUILD=1]
+  --ci              CI mode: skip confirmation only if CODXOS_CI_BUILD=1
   --help            Show this help
 
 Examples:
@@ -71,6 +72,14 @@ VOLUME_LABEL="COLINUX"
 DUAL_BOOT=false
 EXTERNAL=false
 NO_CONFIRM=false
+CI_MODE=false
+
+# ── Architecture detection ─────────────────────────────────────────────────
+case "$(uname -m)" in
+    x86_64) GRUB_TARGET="x86_64-efi"; EFI_BOOT="BOOTX64.EFI" ;;
+    aarch64) GRUB_TARGET="arm64-efi"; EFI_BOOT="BOOTAA64.EFI" ;;
+    *) die "Unsupported architecture: $(uname -m)" ;;
+esac
 
 # ── Parse arguments ───────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -102,7 +111,11 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --no-confirm)
-            NO_CONFIRM=true
+            # REMOVED: Refuse to use --no-confirm for safety
+            die "SECURITY: --no-confirm has been removed. Use --ci with CODXOS_CI_BUILD=1 for automated builds."
+            ;;
+        --ci)
+            CI_MODE=true
             shift
             ;;
         --help|-h)
@@ -203,7 +216,12 @@ fi
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 
-if [[ "$NO_CONFIRM" != true ]]; then
+if [[ "$CI_MODE" == true ]]; then
+    if [[ "${CODXOS_CI_BUILD:-}" != "1" ]]; then
+        die "SECURITY: --ci flag requires CODXOS_CI_BUILD=1 environment variable."
+    fi
+    echo "CI mode: skipping serial confirmation (CODXOS_CI_BUILD=1)"
+else
     echo -n "Type the serial number to confirm [${SERIAL}]: "
     read -r CONFIRM_INPUT
     if [[ "$CONFIRM_INPUT" != "$SERIAL" ]]; then
@@ -378,15 +396,15 @@ if [[ -f "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" ]]; then
 fi
 
 # Copy EFI bootloader
-if [[ -f "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
+if [[ -f "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/${EFI_BOOT}" ]]; then
     cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/BOOT/"
 elif command -v grub-install &>/dev/null; then
-    grub-install --target=x86_64-efi --efi-directory="$TEMP_MOUNT" \
+    grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_MOUNT" \
                  --boot-directory="$TEMP_MOUNT" \
                  --bootloader-id="CoLinux" \
                  --recheck "$DEVICE" >/dev/null 2>&1 || {
         echo "  WARNING: grub-install failed, trying --removable fallback..."
-        grub-install --target=x86_64-efi --efi-directory="$TEMP_MOUNT" \
+        grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_MOUNT" \
                      --boot-directory="$TEMP_MOUNT" --removable \
                      --recheck "$DEVICE" >/dev/null 2>&1 || true
     }
@@ -410,7 +428,7 @@ rmdir "$TEMP_MOUNT"
 # ── Install EFI boot entry (NVRAM) ────────────────────────────────────────
 if command -v efibootmgr &>/dev/null && [[ "$DUAL_BOOT" != true ]]; then
     efibootmgr --create --disk "$DEVICE" --part ${P1_NUM} \
-               --loader "/EFI/colinux/BOOTX64.EFI" \
+               --loader "/EFI/colinux/${EFI_BOOT}" \
                --label "CoLinux" \
                --unicode 2>/dev/null || true
     echo "  → Added EFI boot entry"
