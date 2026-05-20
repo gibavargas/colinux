@@ -12,7 +12,8 @@
 #
 # Environment variables:
 #   CODEX_DESKTOP_REPO   — GitHub repo URL (default: nicepkg/codex-desktop)
-#   CODEX_DESKTOP_BRANCH — Git branch (default: main)
+#   CODEX_DESKTOP_BRANCH — Git branch (default: main; used only with CODEX_DESKTOP_COMMIT)
+#   CODEX_DESKTOP_COMMIT — Full 40-char commit SHA required to build external app
 #   NODE_VERSION         — Node.js version (default: 20)
 #   INSTALL_DIR          — Installation directory (default: /opt/codex-desktop)
 # =============================================================================
@@ -22,6 +23,7 @@ set -euo pipefail
 INSTALL_DIR="${INSTALL_DIR:-/opt/codex-desktop}"
 CODEX_DESKTOP_REPO="${CODEX_DESKTOP_REPO:-https://github.com/nicepkg/codex-desktop}"
 CODEX_DESKTOP_BRANCH="${CODEX_DESKTOP_BRANCH:-main}"
+CODEX_DESKTOP_COMMIT="${CODEX_DESKTOP_COMMIT:-}"
 NODE_VERSION="${NODE_VERSION:-20}"
 LOG_DIR="/persist/logs"
 LOG_FILE="${LOG_DIR}/electron-codex-install.log"
@@ -131,22 +133,54 @@ install_electron_deps() {
 
 # ── Step 3: Clone and build Electron app ──────────────────────────────────
 clone_and_build() {
-    log "Cloning codex-desktop from $CODEX_DESKTOP_REPO..."
+    if [[ -z "$CODEX_DESKTOP_COMMIT" ]]; then
+        warn "Refusing to clone mutable branch '$CODEX_DESKTOP_BRANCH' as root without CODEX_DESKTOP_COMMIT."
+        warn "Installing the local fallback wrapper instead."
+        create_fallback_wrapper
+        return 0
+    fi
+    if [[ ! "$CODEX_DESKTOP_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        error "CODEX_DESKTOP_COMMIT must be a full 40-character hexadecimal commit SHA."
+        return 1
+    fi
+
+    log "Cloning pinned codex-desktop commit $CODEX_DESKTOP_COMMIT from $CODEX_DESKTOP_REPO..."
 
     local build_dir
     build_dir="$(mktemp -d)"
 
-    if ! git clone --depth 1 --branch "$CODEX_DESKTOP_BRANCH" \
-            "$CODEX_DESKTOP_REPO" "$build_dir/codex-desktop" 2>/dev/null; then
+    if ! git clone --no-checkout --branch "$CODEX_DESKTOP_BRANCH"             "$CODEX_DESKTOP_REPO" "$build_dir/codex-desktop" 2>/dev/null; then
         error "Failed to clone repository: $CODEX_DESKTOP_REPO"
         rm -rf "$build_dir"
         return 1
     fi
 
     cd "$build_dir/codex-desktop"
+    git fetch --depth 1 origin "$CODEX_DESKTOP_COMMIT" 2>/dev/null || {
+        error "Failed to fetch pinned commit: $CODEX_DESKTOP_COMMIT"
+        rm -rf "$build_dir"
+        return 1
+    }
+    git checkout --detach "$CODEX_DESKTOP_COMMIT" 2>/dev/null || {
+        error "Failed to checkout pinned commit: $CODEX_DESKTOP_COMMIT"
+        rm -rf "$build_dir"
+        return 1
+    }
 
-    log "Installing npm dependencies..."
-    npm install --no-audit --no-fund 2>&1 | tee -a "$LOG_FILE" || true
+    if [[ ! -f package-lock.json ]]; then
+        warn "Pinned app has no package-lock.json; refusing unpinned npm install as root."
+        create_fallback_wrapper
+        rm -rf "$build_dir"
+        return 0
+    fi
+
+    log "Installing npm dependencies from package-lock.json..."
+    npm ci --no-audit --no-fund 2>&1 | tee -a "$LOG_FILE" || {
+        warn "npm ci failed — creating fallback wrapper."
+        create_fallback_wrapper
+        rm -rf "$build_dir"
+        return 0
+    }
 
     log "Building Electron Codex Desktop..."
     npm run build 2>&1 | tee -a "$LOG_FILE" || {
@@ -285,7 +319,7 @@ MAINJS
 </html>
 HTML
 
-    (cd "$INSTALL_DIR/app" && npm install --no-audit --no-fund 2>/dev/null) || true
+    # Do not run npm install for the fallback wrapper; use distro-provided Electron.
 }
 
 # ── Step 5: Create .desktop file ─────────────────────────────────────────
@@ -329,9 +363,8 @@ setup_auto_update() {
 #!/bin/sh
 LOG="/persist/logs/codex-desktop-update.log"
 mkdir -p /persist/logs
-echo "=== Codex Desktop update check: $(date) ===" >> "$LOG"
-cd /opt/codex-desktop/app 2>/dev/null && npm update --no-audit >> "$LOG" 2>&1 || echo "  update failed" >> "$LOG"
-echo "" >> "$LOG"
+printf '%s
+' "=== Codex Desktop update check: $(date) ==="     "  npm auto-update disabled: external Electron app updates require a pinned CODEX_DESKTOP_COMMIT"     "" >> "$LOG"
 CRON
         chmod 755 /etc/periodic/6h/codex-desktop-update
     else
@@ -355,14 +388,14 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'cd /opt/codex-desktop/app && npm update --no-audit'
+ExecStart=/bin/sh -c 'echo "Codex Desktop npm auto-update disabled; use setup-electron-codex.sh with a pinned CODEX_DESKTOP_COMMIT"'
 SVC
 
         systemctl daemon-reload 2>/dev/null || true
         systemctl enable codex-desktop-update.timer 2>/dev/null || true
     fi
 
-    log "Auto-update configured."
+    log "Auto-update configured (npm updates disabled)."
 }
 
 # ── Uninstall ─────────────────────────────────────────────────────────────

@@ -4,8 +4,8 @@
 #
 # This script:
 #   1. Installs Node.js and build dependencies
-#   2. Clones the codex-desktop-linux repository
-#   3. Builds the Linux Electron wrapper
+#   2. Optionally clones a pinned codex-desktop commit
+#   3. Builds the Linux Electron wrapper only from locked dependencies
 #   4. Installs to /opt/codex-desktop/
 #   5. Creates .desktop file for GNOME integration
 #   6. Sets up auto-update for the Electron app
@@ -19,6 +19,7 @@ set -euo pipefail
 INSTALL_DIR="/opt/codex-desktop"
 CODEX_DESKTOP_REPO="${CODEX_DESKTOP_REPO:-https://github.com/nicepkg/codex-desktop}"
 CODEX_DESKTOP_BRANCH="${CODEX_DESKTOP_BRANCH:-main}"
+CODEX_DESKTOP_COMMIT="${CODEX_DESKTOP_COMMIT:-}"
 NODE_VERSION="${NODE_VERSION:-20}"
 LOG_DIR="/persist/logs"
 LOG_FILE="$LOG_DIR/electron-codex-install.log"
@@ -93,52 +94,72 @@ install_build_deps() {
             libsoup3 \
             webkit2gtk-4.1 \
             2>/dev/null || {
-            # If electron package not available, install from npm later
-            warn "Some Alpine packages not available. Will install Electron via npm."
+            warn "Some Alpine packages were not available; using distro packages only."
         }
     fi
 }
 
 # ── Step 3: Clone and build ──────────────────────────────────────────────
 clone_and_build() {
-    log "Cloning codex-desktop from $CODEX_DESKTOP_REPO..."
+    if [[ -z "$CODEX_DESKTOP_COMMIT" ]]; then
+        warn "Refusing to clone mutable branch '$CODEX_DESKTOP_BRANCH' as root without CODEX_DESKTOP_COMMIT."
+        warn "Installing the local fallback wrapper instead."
+        install_prebuilt_electron
+        return 0
+    fi
+    if [[ ! "$CODEX_DESKTOP_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        error "CODEX_DESKTOP_COMMIT must be a full 40-character hexadecimal commit SHA."
+        return 1
+    fi
+
+    log "Cloning pinned codex-desktop commit $CODEX_DESKTOP_COMMIT from $CODEX_DESKTOP_REPO..."
 
     local build_dir
     build_dir="$(mktemp -d)"
 
-    git clone --depth 1 --branch "$CODEX_DESKTOP_BRANCH" \
-        "$CODEX_DESKTOP_REPO" "$build_dir/codex-desktop" 2>/dev/null || {
-        error "Failed to clone codex-desktop repository."
-        error "  Repo: $CODEX_DESKTOP_REPO"
-        error "  Branch: $CODEX_DESKTOP_BRANCH"
+    if ! git clone --no-checkout --branch "$CODEX_DESKTOP_BRANCH"             "$CODEX_DESKTOP_REPO" "$build_dir/codex-desktop" 2>/dev/null; then
+        error "Failed to clone repository: $CODEX_DESKTOP_REPO"
+        rm -rf "$build_dir"
+        return 1
+    fi
+
+    cd "$build_dir/codex-desktop"
+    git fetch --depth 1 origin "$CODEX_DESKTOP_COMMIT" 2>/dev/null || {
+        error "Failed to fetch pinned commit: $CODEX_DESKTOP_COMMIT"
+        rm -rf "$build_dir"
+        return 1
+    }
+    git checkout --detach "$CODEX_DESKTOP_COMMIT" 2>/dev/null || {
+        error "Failed to checkout pinned commit: $CODEX_DESKTOP_COMMIT"
         rm -rf "$build_dir"
         return 1
     }
 
-    cd "$build_dir/codex-desktop"
+    if [[ ! -f package-lock.json ]]; then
+        warn "Pinned app has no package-lock.json; refusing unpinned npm install as root."
+        install_prebuilt_electron
+        rm -rf "$build_dir"
+        return 0
+    fi
 
-    # Install npm dependencies
-    log "Installing npm dependencies..."
-    npm install --no-audit --no-fund 2>&1 | tee -a "$LOG_FILE" || {
-        warn "npm install had issues. Attempting to continue..."
-    }
-
-    # Build the Electron app
-    log "Building Electron Codex Desktop..."
-    npm run build 2>&1 | tee -a "$LOG_FILE" || {
-        warn "Build failed. Attempting Electron binary installation..."
-        # Fallback: try to get pre-built binary
+    log "Installing npm dependencies from package-lock.json..."
+    npm ci --no-audit --no-fund 2>&1 | tee -a "$LOG_FILE" || {
+        warn "npm ci failed. Installing fallback launcher."
         install_prebuilt_electron
         rm -rf "$build_dir"
         return 0
     }
 
-    # Package the app
-    if npm run package -- --linux 2>/dev/null; then
-        log "Package created successfully."
-    else
-        warn "Packaging failed. Installing from source..."
-    fi
+    log "Building Electron Codex Desktop..."
+    npm run build 2>&1 | tee -a "$LOG_FILE" || {
+        warn "Build failed. Installing fallback launcher."
+        install_prebuilt_electron
+        rm -rf "$build_dir"
+        return 0
+    }
+
+    # Try packaging
+    npm run package -- --linux 2>/dev/null || true
 
     rm -rf "$build_dir"
 }
@@ -299,10 +320,8 @@ To use Codex CLI: open a terminal and type 'codex'</div>
 </html>
 HTML
 
-        # Install electron dependency
-        npm install --no-audit --no-fund 2>&1 | tee -a "$LOG_FILE" || {
-            warn "npm install failed. Electron runtime required separately."
-        }
+        # Do not install Electron from npm as root; use the distro Electron package.
+        warn "Fallback launcher created; Electron runtime must come from distro packages."
     fi
 
     log "Codex Desktop installed to $INSTALL_DIR"
@@ -349,40 +368,18 @@ setup_auto_update() {
 
     cat > /etc/periodic/6h/codex-desktop-update <<'CRONSCRIPT'
 #!/bin/sh
-# CoLinux Desktop — Auto-update Codex Desktop Electron app
-# Runs every 6 hours via cron
+# CoLinux Desktop — Electron app npm auto-update intentionally disabled.
+# External app updates must be installed from a pinned CODEX_DESKTOP_COMMIT.
 
 LOG="/persist/logs/codex-desktop-update.log"
-INSTALL_DIR="/opt/codex-desktop"
-
 mkdir -p /persist/logs
-
-echo "=== Codex Desktop auto-update check: $(date) ===" >> "$LOG"
-
-if [ -f "$INSTALL_DIR/config/config.json" ]; then
-    AUTO_UPDATE="$(grep -o '"autoUpdate"[[:space:]]*:[[:space:]]*[^,}]*' "$INSTALL_DIR/config/config.json" | grep -o 'true' || echo 'false')"
-else
-    AUTO_UPDATE="true"
-fi
-
-if [ "$AUTO_UPDATE" = "true" ]; then
-    echo "  Auto-update: enabled" >> "$LOG"
-    cd "$INSTALL_DIR/app" 2>/dev/null && {
-        # WARNING: Supply-chain risk — npm update fetches latest from registry without
-    # integrity verification. Pin versions in package-lock.json when possible.
-    npm update --no-audit --no-fund >> "$LOG" 2>&1 || \
-            echo "  WARNING: npm update failed" >> "$LOG"
-    }
-else
-    echo "  Auto-update: disabled in config" >> "$LOG"
-fi
-
-echo "" >> "$LOG"
+printf '%s
+' "=== Codex Desktop update check: $(date) ==="     "  npm auto-update disabled; run setup-electron-codex.sh with a pinned CODEX_DESKTOP_COMMIT"     "" >> "$LOG"
 CRONSCRIPT
 
     chmod 755 /etc/periodic/6h/codex-desktop-update
 
-    log "Auto-update cron job installed."
+    log "Auto-update placeholder installed (npm updates disabled)."
 }
 
 # ── Fallback: install prebuilt Electron ───────────────────────────────────
