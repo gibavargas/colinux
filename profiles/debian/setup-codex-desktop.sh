@@ -314,16 +314,21 @@ build_electron_wrapper() {
             return 1
         }
     elif [ -f "$wrapper_dir/package.json" ]; then
-        log_info "Building wrapper via npm..."
-        (cd "$wrapper_dir" && npm install --production 2>/dev/null) || {
-            log_warn "npm install failed, attempting manual setup"
+        log_info "Building wrapper via npm lockfile..."
+        if [ ! -f "$wrapper_dir/package-lock.json" ]; then
+            log_error "Pinned wrapper has no package-lock.json; refusing unpinned npm install as root"
+            return 1
+        fi
+        (cd "$wrapper_dir" && npm ci --omit=dev --no-audit --no-fund 2>/dev/null) || {
+            log_error "npm ci failed; refusing unpinned fallback install"
+            return 1
         }
 
         # If there's an Electron app, copy it
         if [ -f "$wrapper_dir/main.js" ] || [ -f "$wrapper_dir/src/main.js" ]; then
             log_info "Assembling Electron app..."
             mkdir -p "$output_dir"
-            cp -a "$wrapper_dir"/{main.js,package.json,*.html,*.css,assets,src,resources} \
+            cp -a "$wrapper_dir"/{main.js,package.json,package-lock.json,node_modules,*.html,*.css,assets,src,resources} \
                 "$output_dir"/ 2>/dev/null || true
 
             # Copy the Codex binary from the release
@@ -334,20 +339,6 @@ build_electron_wrapper() {
                 cp "$codex_bin" "$output_dir/bin/codex"
                 chmod 755 "$output_dir/bin/codex"
                 log_info "Codex binary installed to $output_dir/bin/codex"
-            fi
-
-            # Install Electron if not present
-            if [ -f "$wrapper_dir/package.json" ]; then
-                local electron_version
-                electron_version="$(jq -r '.dependencies.electron // .devDependencies.electron // "latest"' \
-                    "$wrapper_dir/package.json" 2>/dev/null)"
-                if [ -n "$electron_version" ] && [ "$electron_version" != "null" ]; then
-                    (cd "$wrapper_dir" && npm install "electron@$electron_version" 2>/dev/null) || true
-                    # Copy node_modules
-                    if [ -d "$wrapper_dir/node_modules/electron" ]; then
-                        cp -a "$wrapper_dir/node_modules" "$output_dir/" 2>/dev/null || true
-                    fi
-                fi
             fi
         else
             log_error "No main.js found in wrapper — cannot build Electron app"
