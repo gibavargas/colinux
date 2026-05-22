@@ -40,6 +40,32 @@ die() {
     exit 1
 }
 
+validate_tar_archive() {
+    local archive="$1" member listing
+
+    listing="$(tar tzf "$archive")" || {
+        echo "  ✗ Failed to list archive contents."
+        log_action "codex_update_fail archive_list_failed"
+        return 1
+    }
+
+    while IFS= read -r member; do
+        case "$member" in
+            ""|/*|../*|*/../*|*/..|..)
+                echo "  ✗ Unsafe archive member path: $member"
+                log_action "codex_update_fail unsafe_archive_member"
+                return 1
+                ;;
+        esac
+    done <<< "$listing"
+
+    if ! tar tvzf "$archive" | awk '{ type=substr($1,1,1); if (type == "l" || type == "h") exit 1 }'; then
+        echo "  ✗ Archive contains symlink or hardlink entries."
+        log_action "codex_update_fail unsafe_archive_link"
+        return 1
+    fi
+}
+
 # ── Load config (safe parse) ───────────────────────────────────────────────
 AUTO_INSTALL=false
 PINNED_TAG=""
@@ -249,7 +275,11 @@ update_codex() {
         return 1
     fi
 
-    # Extract tarball
+    # Validate archive metadata before extraction, then extract tarball.
+    if ! validate_tar_archive "${tmp_dir}/${tarball_name}"; then
+        rm -rf "$tmp_dir"
+        return 1
+    fi
     if ! tar xzf "${tmp_dir}/${tarball_name}" -C "${tmp_dir}" 2>/dev/null; then
         echo "  ✗ Failed to extract tarball."
         log_action "codex_update_fail extraction_failed"

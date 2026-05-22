@@ -60,6 +60,29 @@ fi
 log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
+validate_tar_archive() {
+    local archive="$1" member listing
+
+    listing="$(tar tzf "$archive")" || {
+        log_error "Failed to list archive contents."
+        return 1
+    }
+
+    while IFS= read -r member; do
+        case "$member" in
+            ""|/*|../*|*/../*|*/..|..)
+                log_error "Unsafe archive member path: $member"
+                return 1
+                ;;
+        esac
+    done <<< "$listing"
+
+    if ! tar tvzf "$archive" | awk '{ type=substr($1,1,1); if (type == "l" || type == "h") exit 1 }'; then
+        log_error "Archive contains symlink or hardlink entries."
+        return 1
+    fi
+}
 log_step()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}\n"; }
 
 get_latest_codex_version() {
@@ -129,8 +152,9 @@ check_root() {
 
 check_arch() {
     case "$ARCH" in
-        amd64|i386) ;;
-        *) log_error "Unsupported architecture: $ARCH (use amd64 or i386)"; exit 1 ;;
+        amd64) ;;
+        i386) log_error "Unsupported architecture: i386 (OpenAI Codex publishes no i386 Linux binary)"; exit 1 ;;
+        *) log_error "Unsupported architecture: $ARCH (use amd64)"; exit 1 ;;
     esac
 }
 
@@ -287,9 +311,13 @@ copy_overlay() {
         chmod 755 "$chroot/home/codex"
         chown -R 1000:1000 "$chroot/home/codex"
 
-        # Ensure scripts are executable
-        find "$chroot/usr/local/bin" -type f -name 'codex-*' -exec chmod 755 {} \;
-        find "$chroot/usr/local/sbin" -type f -exec chmod 755 {} \;
+        # Ensure scripts are executable; some overlays do not ship /usr/local/sbin.
+        if [[ -d "$chroot/usr/local/bin" ]]; then
+            find "$chroot/usr/local/bin" -type f -name 'codex-*' -exec chmod 755 {} \;
+        fi
+        if [[ -d "$chroot/usr/local/sbin" ]]; then
+            find "$chroot/usr/local/sbin" -type f -exec chmod 755 {} \;
+        fi
 
         log_info "Overlay copied."
     else
@@ -354,7 +382,11 @@ inject_codex() {
 
     if curl -fsSL --retry 3 --retry-delay 5 -o "$tmpdir/$codex_filename" "$download_url" 2>/dev/null; then
         verify_codex_archive_digest "$tmpdir/$codex_filename" "$codex_tag" "$codex_filename"
-        tar xzf "$tmpdir/$codex_filename" -C "$tmpdir" 2>/dev/null || true
+        if validate_tar_archive "$tmpdir/$codex_filename"; then
+            tar xzf "$tmpdir/$codex_filename" -C "$tmpdir" 2>/dev/null || true
+        else
+            log_warn "Codex CLI archive metadata was unsafe. Will install on first boot."
+        fi
         local codex_bin
         codex_bin="$(find "$tmpdir" -name "codex-${codex_arch}" -type f -executable | head -1)"
         if [[ -z "$codex_bin" ]]; then

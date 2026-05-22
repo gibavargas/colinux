@@ -47,6 +47,29 @@ fi
 log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
+validate_tar_archive() {
+    local archive="$1" member listing
+
+    listing="$(tar tzf "$archive")" || {
+        log_error "Failed to list archive contents."
+        return 1
+    }
+
+    while IFS= read -r member; do
+        case "$member" in
+            ""|/*|../*|*/../*|*/..|..)
+                log_error "Unsafe archive member path: $member"
+                return 1
+                ;;
+        esac
+    done <<< "$listing"
+
+    if ! tar tvzf "$archive" | awk '{ type=substr($1,1,1); if (type == "l" || type == "h") exit 1 }'; then
+        log_error "Archive contains symlink or hardlink entries."
+        return 1
+    fi
+}
 log_step()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}\n"; }
 
 get_latest_codex_version() {
@@ -341,7 +364,8 @@ inject_codex() {
     }
     verify_codex_archive_digest "$tmpdir/$codex_filename" "$codex_tag" "$codex_filename"
 
-    # Extract
+    # Validate archive metadata before extraction, then extract.
+    validate_tar_archive "$tmpdir/$codex_filename" || exit 1
     tar xzf "$tmpdir/$codex_filename" -C "$tmpdir" || {
         log_error "Failed to extract Codex CLI archive."
         exit 1

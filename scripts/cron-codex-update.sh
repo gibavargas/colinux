@@ -61,6 +61,29 @@ log_warn()  { log "WARN"  "$@"; }
 log_error() { log "ERROR" "$@"; }
 log_debug() { [ "${DEBUG:-0}" = "1" ] && log "DEBUG" "$@" || true; }
 
+validate_tar_archive() {
+    local archive="$1" member listing
+
+    listing="$(tar tzf "$archive")" || {
+        log_error "Failed to list archive contents."
+        return 1
+    }
+
+    while IFS= read -r member; do
+        case "$member" in
+            ""|/*|../*|*/../*|*/..|..)
+                log_error "Unsafe archive member path: $member"
+                return 1
+                ;;
+        esac
+    done <<< "$listing"
+
+    if ! tar tvzf "$archive" | awk '{ type=substr($1,1,1); if (type == "l" || type == "h") exit 1 }'; then
+        log_error "Archive contains symlink or hardlink entries."
+        return 1
+    fi
+}
+
 # ── Argument parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -277,7 +300,8 @@ do_update() {
     fi
     verify_download_digest "$tmpdir/$filename" "$new_version" "$filename" || return 1
 
-    # Extract and install
+    # Validate archive metadata before extraction, then extract and install.
+    validate_tar_archive "$tmpdir/$filename" || return 1
     tar xzf "$tmpdir/$filename" -C "$tmpdir" 2>/dev/null || {
         log_error "Extraction failed"
         return 1
