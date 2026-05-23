@@ -197,6 +197,13 @@ get_latest_codex_release() {
     github_api "$api_url" | jq -r '.tag_name // empty' 2>/dev/null
 }
 
+normalize_codex_version() {
+    local version="$1"
+    version="${version#rust-v}"
+    version="${version#v}"
+    printf '%s\n' "$version"
+}
+
 get_codex_asset_digest() {
     local tag="$1"
     local asset_name="$2"
@@ -235,16 +242,18 @@ get_latest_wrapper_commit() {
 update_codex_cli() {
     log_info "Checking Codex CLI binary..."
 
-    local current latest
+    local current latest current_norm latest_norm
     current="$(get_current_codex_version)"
     latest="$(get_latest_codex_release)" || {
         log_warn "Could not check latest Codex CLI version"
         return 1
     }
+    current_norm="$(normalize_codex_version "$current")"
+    latest_norm="$(normalize_codex_version "$latest")"
 
     log_info "Codex CLI: current=${current:-none} latest=$latest"
 
-    if [ "$current" = "$latest" ] && [ "$FORCE" != "true" ]; then
+    if [ -n "$current_norm" ] && [ "$current_norm" = "$latest_norm" ] && [ "$FORCE" != "true" ]; then
         log_info "Codex CLI binary is up to date"
         return 0
     fi

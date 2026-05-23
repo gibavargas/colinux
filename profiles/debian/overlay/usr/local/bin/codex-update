@@ -13,21 +13,40 @@ set -euo pipefail
 
 CMD="${1:-}"
 
+run_both() {
+    local status=0 rc
+
+    set +e
+    /usr/local/bin/codex-system-autoupdate "$@" 2>&1
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+        status=$rc
+    fi
+
+    /usr/local/bin/codex-desktop-autoupdate "$@" 2>&1
+    rc=$?
+    if [[ $status -eq 0 && $rc -ne 0 ]]; then
+        status=$rc
+    elif [[ $rc -ne 0 && $rc -ne 100 ]]; then
+        status=$rc
+    fi
+    set -e
+
+    return "$status"
+}
+
 case "$CMD" in
     --check|-c)
-        /usr/local/bin/codex-system-autoupdate --check 2>&1
-        /usr/local/bin/codex-desktop-autoupdate --check 2>&1
+        run_both --check
         ;;
     --force|-f)
-        /usr/local/bin/codex-system-autoupdate --force 2>&1
-        /usr/local/bin/codex-desktop-autoupdate --force 2>&1
+        run_both --force
         ;;
     --help|-h)
         echo "Usage: codex-update [--check] [--force]"
         ;;
     "")
-        /usr/local/bin/codex-system-autoupdate 2>&1
-        /usr/local/bin/codex-desktop-autoupdate 2>&1
+        run_both
         ;;
     *)
         echo "Unknown option: $CMD" >&2

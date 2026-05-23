@@ -260,13 +260,25 @@ fi
 
 # ── Dual-boot: find the first partition number we can use ─────────────────
 FIRST_PART=1
+EFI_PART=""
 if [[ "$DUAL_BOOT" == true ]]; then
-    # Find highest partition number
-    LAST_PART="$(sgdisk -p "$DEVICE" 2>/dev/null | tail -1 | awk '{print $1}' | tr -d '.')"
+    # Reuse the existing EFI System Partition (type EF00) instead of assuming
+    # the next free partition number is also the boot partition.
+    EFI_PART_NUM="$(sgdisk -p "$DEVICE" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ && $6 == "EF00" {print $1; exit}')"
+    if [[ -z "$EFI_PART_NUM" ]]; then
+        die "Dual-boot mode requires an existing EFI System Partition (GPT type EF00) on $DEVICE."
+    fi
+    EFI_PART="${DEVICE}${PART_SUFFIX}${EFI_PART_NUM}"
+    if [[ ! -b "$EFI_PART" ]]; then
+        die "Existing EFI partition $EFI_PART was not found. Check disk state with lsblk."
+    fi
+
+    # Find highest partition number, then append CoLinux system/persistence.
+    LAST_PART="$(sgdisk -p "$DEVICE" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ {last=$1} END {print last}')"
     if [[ -n "$LAST_PART" ]] && [[ "$LAST_PART" =~ ^[0-9]+$ ]]; then
         FIRST_PART=$((LAST_PART + 1))
     fi
-    echo "Dual-boot: adding partitions starting at ${FIRST_PART}"
+    echo "Dual-boot: reusing EFI partition ${EFI_PART}; adding CoLinux partitions starting at ${FIRST_PART}"
 fi
 
 # ── Wipe/create partition table (replace mode) ───────────────────────────
@@ -284,9 +296,15 @@ fi
 # ── Create partitions ─────────────────────────────────────────────────────
 echo "[3/7] Creating partitions..."
 
-P1_NUM=$FIRST_PART
-P2_NUM=$((FIRST_PART + 1))
-P3_NUM=$((FIRST_PART + 2))
+if [[ "$DUAL_BOOT" == true ]]; then
+    P1_NUM=""
+    P2_NUM=$FIRST_PART
+    P3_NUM=$((FIRST_PART + 1))
+else
+    P1_NUM=$FIRST_PART
+    P2_NUM=$((FIRST_PART + 1))
+    P3_NUM=$((FIRST_PART + 2))
+fi
 
 # EFI partition
 if [[ "$DUAL_BOOT" != true ]]; then
@@ -306,7 +324,11 @@ sleep 2
 partprobe "$DEVICE" 2>/dev/null || true
 sleep 1
 
-PART1="${DEVICE}${PART_SUFFIX}${P1_NUM}"
+if [[ "$DUAL_BOOT" == true ]]; then
+    PART1="$EFI_PART"
+else
+    PART1="${DEVICE}${PART_SUFFIX}${P1_NUM}"
+fi
 PART2="${DEVICE}${PART_SUFFIX}${P2_NUM}"
 PART3="${DEVICE}${PART_SUFFIX}${P3_NUM}"
 

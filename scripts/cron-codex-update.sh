@@ -385,7 +385,7 @@ main() {
 
     # Check mode: report and exit
     if $CHECK_ONLY; then
-        if [ "$current" = "$latest" ]; then
+        if [ "$current" = "$latest" ] || version_gte "$current" "$latest"; then
             echo "STATUS: up-to-date ($latest)"
             exit 0
         else

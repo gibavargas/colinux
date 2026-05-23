@@ -455,10 +455,12 @@ network={
 EOF
 
     if [[ -n "$password" ]]; then
-        # Use wpa_passphrase to hash the password
+        # Use wpa_passphrase to hash the password. Feed the passphrase on
+        # stdin so it is not exposed in the process list, and keep only the
+        # hashed PSK line (wpa_passphrase also emits a commented plaintext PSK).
         if command -v wpa_passphrase &>/dev/null; then
             local hashed
-            hashed="$(wpa_passphrase "$ssid" "$password" 2>/dev/null | grep 'psk=')"
+            hashed="$(printf '%s\n' "$password" | wpa_passphrase "$ssid" 2>/dev/null | grep '^[[:space:]]*psk=')"
             if [[ -n "$hashed" ]]; then
                 echo "$hashed" >> "$wpa_conf"
             else
@@ -499,10 +501,10 @@ network={
 }
 PSKEOF
             local hashed_psk
-            hashed_psk="$(wpa_passphrase -f "$tmp_psk_conf" 2>/dev/null | grep 'psk=' | head -1 | sed 's/^[[:space:]]*//' | cut -d= -f2-)"
+            hashed_psk="$(wpa_passphrase -f "$tmp_psk_conf" 2>/dev/null | grep '^[[:space:]]*psk=' | head -1 | sed 's/^[[:space:]]*//' | cut -d= -f2-)"
             rm -f "$tmp_psk_conf"
             if [[ -n "$hashed_psk" ]]; then
-                wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 psk "\"$hashed_psk\"" 2>/dev/null
+                wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 psk "$hashed_psk" 2>/dev/null
             fi
         else
             wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 key_mgmt NONE 2>/dev/null

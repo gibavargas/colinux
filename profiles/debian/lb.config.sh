@@ -231,8 +231,17 @@ apt-get install -y --no-install-recommends \
 
 # Add NodeSource repository
 mkdir -p /etc/apt/keyrings
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-    | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg 2>/dev/null
+key_tmp="$(mktemp)"
+trap 'rm -f "$key_tmp"' EXIT
+curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$key_tmp"
+key_fingerprint="$(gpg --show-keys --with-colons "$key_tmp" 2>/dev/null | awk -F: '$1 == "fpr" {print $10; exit}')"
+if [ "$key_fingerprint" != "6F71F525282841EEDAF851B42F59B5F99B1BE0B4" ]; then
+    echo "E: unexpected NodeSource signing key fingerprint: ${key_fingerprint:-missing}" >&2
+    exit 1
+fi
+gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg "$key_tmp" 2>/dev/null
+rm -f "$key_tmp"
+trap - EXIT
 
 echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list

@@ -368,6 +368,26 @@ setup_cron() {
     fi
 }
 
+# ── Install Codex CLI if build-time injection did not include it ──────────────
+install_codex_if_missing() {
+    if command -v codex >/dev/null 2>&1; then
+        log_info "Codex CLI already installed."
+        return 0
+    fi
+
+    if [ ! -x /usr/local/bin/setup-codex ]; then
+        log_warn "Codex CLI is missing and /usr/local/bin/setup-codex is not available."
+        return 0
+    fi
+
+    log_info "Codex CLI missing; running setup-codex fallback..."
+    if /usr/local/bin/setup-codex >> "$LOGFILE" 2>&1; then
+        log_info "Codex CLI installed by first-boot fallback."
+    else
+        log_warn "setup-codex fallback failed; cron-codex-update may retry later."
+    fi
+}
+
 # ── Mark first boot complete ─────────────────────────────────────────────────
 mark_complete() {
     mkdir -p "$(dirname "$FIRST_BOOT_FLAG")"
@@ -388,6 +408,7 @@ main() {
     generate_disk_inventory
     setup_persistence
     setup_network
+    install_codex_if_missing
     setup_codex_auth
     setup_agents_md
     setup_cron
