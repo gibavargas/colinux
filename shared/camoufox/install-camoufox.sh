@@ -28,6 +28,10 @@ FORCE_INSTALL="${FORCE_INSTALL:-0}"
 CODEX_EDITION="${CODEX_EDITION:-auto}"   # lite|lite-gui|compat|desktop|auto
 LOG_TAG="camoufox-install"
 PERSIST_LOG="/persist/logs/network.log"
+CAMOUFOX_PIP_VERSION="${CAMOUFOX_PIP_VERSION:-26.1.1}"
+CAMOUFOX_SETUPTOOLS_VERSION="${CAMOUFOX_SETUPTOOLS_VERSION:-82.0.1}"
+CAMOUFOX_WHEEL_VERSION="${CAMOUFOX_WHEEL_VERSION:-0.47.0}"
+CAMOUFOX_PACKAGE_VERSION="${CAMOUFOX_PACKAGE_VERSION:-0.4.11}"
 
 # Colors for terminal output
 if [[ -t 1 ]]; then
@@ -204,11 +208,14 @@ install_camoufox_python() {
 
     source "$venv_dir/bin/activate"
 
-    # Upgrade pip first
-    pip install --upgrade pip setuptools wheel 2>&1 | tail -5
+    # Install pinned Python tooling and Camoufox versions to avoid mutable root installs
+    pip install --upgrade \
+        "pip==${CAMOUFOX_PIP_VERSION}" \
+        "setuptools==${CAMOUFOX_SETUPTOOLS_VERSION}" \
+        "wheel==${CAMOUFOX_WHEEL_VERSION}" 2>&1 | tail -5
 
-    # Install camoufox
-    if ! pip install 'camoufox>=0.4,<2.0' 2>&1; then
+    # Install Camoufox from an exact package version
+    if ! pip install "camoufox==${CAMOUFOX_PACKAGE_VERSION}" 2>&1; then
         error "pip install camoufox failed!"
         error "This may be due to missing system dependencies or network issues."
         error "Check the output above for details."

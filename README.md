@@ -353,7 +353,7 @@ For a bootable ISO instead:
 # Build the Alpine ISO
 docker run -it --rm -v "$PWD/dist:/dist" -w /build \
   alpine:3.21 \
-  sh -c "apk add --no-cache bash curl git ca-certificates squashfs-tools xorriso grub-efi e2fsprogs dosfstools mtools qemu-utils openssl sgdisk && \
+  sh -c "apk add --no-cache bash curl git ca-certificates squashfs-tools xorriso grub-efi e2fsprogs dosfstools mtools qemu-img openssl gptfdisk && \
           ./scripts/build-alpine.sh --outdir /dist"
 ```
 

@@ -18,9 +18,9 @@
 set -euo pipefail
 
 # ── Cleanup ──────────────────────────────────────────────────────────────────
-_CLEANUP_DIRS=""
+_CLEANUP_DIRS=()
 _cleanup() {
-    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf "${_CLEANUP_DIRS}" 2>/dev/null || true
+    [ ${#_CLEANUP_DIRS[@]} -gt 0 ] && rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
 }
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ PROFILE_DIR="$PROJECT_ROOT/profiles/alpine"
 
 ARCH="${ARCH:-x86_64}"
 ALPINE_RELEASE="${ALPINE_RELEASE:-3.21}"
-ALPINE_MIRROR="${ALPINE_MIRROR:-http://dl-cdn.alpinelinux.org/alpine}"
+ALPINE_MIRROR="${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/dist}"
 APORTS_BRANCH="v${ALPINE_RELEASE}.0"
 APORTS_DIR="/tmp/aports-colinux"
@@ -309,7 +309,6 @@ run_mkimage() {
         --arch "$ARCH" \
         --repository "${ALPINE_MIRROR}/v${ALPINE_RELEASE}/main" \
         --repository "${ALPINE_MIRROR}/v${ALPINE_RELEASE}/community" \
-        --repository "${ALPINE_MIRROR}/edge/main" \
         --outdir "$OUTDIR" \
         --tag "v${ALPINE_RELEASE}" \
         || {
@@ -354,7 +353,7 @@ inject_codex() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
+    _CLEANUP_DIRS+=("$tmpdir")
     trap _cleanup EXIT
 
     # Download and verify integrity using GitHub release asset digest.
@@ -397,7 +396,7 @@ inject_codex() {
 
     local iso_staging
     iso_staging="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $iso_staging"
+    _CLEANUP_DIRS+=("$iso_staging")
 
     # Extract ISO contents using xorriso (handles ISO 9660 properly)
     if command -v xorriso &>/dev/null; then

@@ -21,9 +21,9 @@
 set -euo pipefail
 
 # ── Cleanup ──────────────────────────────────────────────────────────────────
-_CLEANUP_DIRS=""
+_CLEANUP_DIRS=()
 _cleanup() {
-    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf "${_CLEANUP_DIRS}" 2>/dev/null || true
+    [ ${#_CLEANUP_DIRS[@]} -gt 0 ] && rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
 }
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -282,7 +282,7 @@ do_update() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
+    _CLEANUP_DIRS+=("$tmpdir")
     trap _cleanup EXIT
 
     # Download

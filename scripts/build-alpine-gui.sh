@@ -34,7 +34,7 @@ SHARED_DIR="$PROJECT_ROOT/shared"
 
 ARCH="${ARCH:-x86_64}"
 ALPINE_RELEASE="${ALPINE_RELEASE:-3.21}"
-ALPINE_MIRROR="${ALPINE_MIRROR:-http://dl-cdn.alpinelinux.org/alpine}"
+ALPINE_MIRROR="${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/dist}"
 APORTS_BRANCH="v${ALPINE_RELEASE}.0"
 APORTS_DIR="/tmp/aports-colinux-gui"

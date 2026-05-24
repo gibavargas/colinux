@@ -14,9 +14,9 @@
 set -euo pipefail
 
 # ── Cleanup ──────────────────────────────────────────────────────────────────
-_CLEANUP_DIRS=""
+_CLEANUP_DIRS=()
 _cleanup() {
-    [ -n "${_CLEANUP_DIRS:-}" ] && rm -rf "${_CLEANUP_DIRS}" 2>/dev/null || true
+    [ ${#_CLEANUP_DIRS[@]} -gt 0 ] && rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
 }
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -95,6 +95,13 @@ detect_arch() {
     esac
 }
 
+normalize_codex_version() {
+    local version="$1"
+    version="${version#rust-v}"
+    version="${version#v}"
+    echo "$version"
+}
+
 # ── Check if already installed and current ───────────────────────────────────
 check_existing() {
     if [ "$FORCE" = "true" ]; then
@@ -115,7 +122,7 @@ check_existing() {
         return 1
     fi
 
-    if [ "$current_ver" = "$CODEX_VERSION" ]; then
+    if [ "$(normalize_codex_version "$current_ver")" = "$(normalize_codex_version "$CODEX_VERSION")" ]; then
         log_info "Codex CLI $current_ver is already installed. Use --force to reinstall."
         return 0
     fi
@@ -204,7 +211,7 @@ download_codex() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    _CLEANUP_DIRS="${_CLEANUP_DIRS:-} $tmpdir"
+    _CLEANUP_DIRS+=("$tmpdir")
     trap _cleanup EXIT
 
     # Download with retry

@@ -360,6 +360,11 @@ setup_cron() {
     log_info "Setting up cron jobs..."
 
     if [ -x /usr/local/bin/cron-codex-update ]; then
+        if [ -x /etc/init.d/codex-auto-update ]; then
+            log_info "Skipping generic user crontab; codex-auto-update OpenRC service manages the schedule."
+            return 0
+        fi
+
         # Install cron job for automatic Codex updates (every 6 hours)
         (crontab -l 2>/dev/null | grep -v 'cron-codex-update'; echo "0 */6 * * * /usr/local/bin/cron-codex-update") | crontab - 2>/dev/null || {
             log_warn "Failed to install cron job (crond may not be running)"
@@ -388,6 +393,30 @@ install_codex_if_missing() {
     fi
 }
 
+# ── Run packaged postinstall hooks ───────────────────────────────────────────
+run_postinstall_hooks() {
+    local hook_dir="/persist/config/postinstall"
+    local failed=0
+
+    if [ ! -d "$hook_dir" ]; then
+        return 0
+    fi
+
+    log_info "Running postinstall hooks..."
+    while IFS= read -r hook; do
+        log_info "Running postinstall hook: $(basename "$hook")"
+        if "$hook" >> "$LOGFILE" 2>&1; then
+            rm -f "$hook"
+            log_info "Postinstall hook completed: $(basename "$hook")"
+        else
+            failed=1
+            log_warn "Postinstall hook failed and will be retried on next first-boot run: $(basename "$hook")"
+        fi
+    done < <(find "$hook_dir" -maxdepth 1 -type f -perm /111 -print | sort)
+
+    return "$failed"
+}
+
 # ── Mark first boot complete ─────────────────────────────────────────────────
 mark_complete() {
     mkdir -p "$(dirname "$FIRST_BOOT_FLAG")"
@@ -412,6 +441,7 @@ main() {
     setup_codex_auth
     setup_agents_md
     setup_cron
+    run_postinstall_hooks
     mark_complete
 
     log_info "=== First boot complete ==="

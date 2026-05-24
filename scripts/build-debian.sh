@@ -36,6 +36,8 @@ RUN_TEST=false
 CLEAN_ONLY=false
 FORCE=false
 CODEX_DESKTOP_VERSION=""
+CODEX_DESKTOP_REPO="${CODEX_DESKTOP_REPO:-https://github.com/ilysenko/codex-desktop-linux.git}"
+CODEX_DESKTOP_COMMIT="${CODEX_DESKTOP_COMMIT:-}"
 
 # Colors
 RED='\033[0;31m'
@@ -135,15 +137,26 @@ download_codex_desktop() {
     local cache_dir="$BUILD_DIR/codex-desktop-cache"
     mkdir -p "$cache_dir"
 
-    log "Cloning codex-desktop-linux repository..."
-    if [ ! -d "$cache_dir/codex-desktop-linux" ]; then
-        git clone --depth 1 https://github.com/ilysenko/codex-desktop-linux.git \
-            "$cache_dir/codex-desktop-linux" 2>&1 || {
-            warn "Clone failed — will retry during build"
-            return 0
-        }
+    if [ -z "$CODEX_DESKTOP_COMMIT" ]; then
+        warn "Skipping codex-desktop-linux prefetch: CODEX_DESKTOP_COMMIT is not set."
+        warn "Refusing to clone a mutable branch during a root build; the installer will use its local fallback unless a pinned commit is provided."
+    elif [[ ! "$CODEX_DESKTOP_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        warn "Skipping codex-desktop-linux prefetch: CODEX_DESKTOP_COMMIT must be a full 40-character SHA."
     else
-        (cd "$cache_dir/codex-desktop-linux" && git pull 2>/dev/null) || true
+        log "Cloning pinned codex-desktop-linux commit $CODEX_DESKTOP_COMMIT..."
+        rm -rf "$cache_dir/codex-desktop-linux"
+        if git clone --no-checkout "$CODEX_DESKTOP_REPO" "$cache_dir/codex-desktop-linux" 2>&1; then
+            (
+                cd "$cache_dir/codex-desktop-linux"
+                git fetch --depth 1 origin "$CODEX_DESKTOP_COMMIT"
+                git checkout --detach "$CODEX_DESKTOP_COMMIT"
+            ) 2>&1 || {
+                warn "Pinned codex-desktop-linux checkout failed — will use fallback during build"
+                rm -rf "$cache_dir/codex-desktop-linux"
+            }
+        else
+            warn "Clone failed — will use fallback during build"
+        fi
     fi
 
     # Download latest Codex release (for the binary)
