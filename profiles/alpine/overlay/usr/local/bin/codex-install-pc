@@ -417,18 +417,26 @@ if [[ -f "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" ]]; then
     echo "  → Copied initramfs"
 fi
 
-# Copy EFI bootloader
+# Copy EFI bootloader. In dual-boot mode, do not overwrite the existing
+# ESP fallback loader at EFI/BOOT/BOOT*.EFI; install only under EFI/colinux.
 if [[ -f "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/${EFI_BOOT}" ]]; then
-    cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/BOOT/"
+    cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/colinux/"
+    if [[ "$DUAL_BOOT" != true ]]; then
+        cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/BOOT/"
+    fi
 elif command -v grub-install &>/dev/null; then
     grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_MOUNT" \
                  --boot-directory="$TEMP_MOUNT" \
-                 --bootloader-id="CoLinux" \
+                 --bootloader-id="colinux" \
                  --recheck "$DEVICE" >/dev/null 2>&1 || {
-        echo "  WARNING: grub-install failed, trying --removable fallback..."
-        grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_MOUNT" \
-                     --boot-directory="$TEMP_MOUNT" --removable \
-                     --recheck "$DEVICE" >/dev/null 2>&1 || true
+        if [[ "$DUAL_BOOT" != true ]]; then
+            echo "  WARNING: grub-install failed, trying --removable fallback..."
+            grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_MOUNT" \
+                         --boot-directory="$TEMP_MOUNT" --removable \
+                         --recheck "$DEVICE" >/dev/null 2>&1 || true
+        else
+            echo "  WARNING: grub-install failed; not touching EFI/BOOT in dual-boot mode."
+        fi
     }
 fi
 
@@ -448,8 +456,12 @@ umount "$TEMP_MOUNT"
 rmdir "$TEMP_MOUNT"
 
 # ── Install EFI boot entry (NVRAM) ────────────────────────────────────────
-if command -v efibootmgr &>/dev/null && [[ "$DUAL_BOOT" != true ]]; then
-    efibootmgr --create --disk "$DEVICE" --part ${P1_NUM} \
+if command -v efibootmgr &>/dev/null; then
+    BOOT_ENTRY_PART="$P1_NUM"
+    if [[ "$DUAL_BOOT" == true ]]; then
+        BOOT_ENTRY_PART="$EFI_PART_NUM"
+    fi
+    efibootmgr --create --disk "$DEVICE" --part ${BOOT_ENTRY_PART} \
                --loader "/EFI/colinux/${EFI_BOOT}" \
                --label "CoLinux" \
                --unicode 2>/dev/null || true
