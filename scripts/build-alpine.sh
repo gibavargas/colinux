@@ -65,7 +65,7 @@ validate_tar_archive() {
         esac
     done <<< "$listing"
 
-    if ! tar tvzf "$archive" | awk '{ type=substr($1,1,1); if (type == "l" || type == "h") exit 1 }'; then
+    if ! tar tvzf "$archive" | awk '{ type=substr($1,1,1); if (type == "l" || type == "h" || $0 ~ / link to / || $0 ~ / -> /) exit 1 }'; then
         log_error "Archive contains symlink or hardlink entries."
         return 1
     fi
