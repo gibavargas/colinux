@@ -84,24 +84,34 @@ See [`docs/EDITIONS.md`](docs/EDITIONS.md) for a detailed comparison.
 
 ## Quick Start
 
-### 1. Build the image
+### 1. Build the ISO
 
 ```bash
-# On an Alpine Linux host:
-cd ~/CoLinux/colinux
-sudo ./build.sh
+# Using Docker (works on any host):
+git clone https://github.com/gibavargas/colinux.git
+cd colinux
+docker run --rm -v "$(pwd):/src" -e ARCH=x86_64 -e OUTDIR=/src/dist \
+  alpine:3.21 sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl \
+  ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi \
+  efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine.sh"
 ```
 
-### 2. Test with QEMU
+Or on an Alpine Linux host: `sudo bash scripts/build-alpine.sh --arch x86_64`
+
+### 2. Smoke-test with QEMU
 
 ```bash
-./scripts/qemu-test.sh dist/colinux-lite.iso
+# Automated smoke tests (boot + codex + disk inventory + network):
+./scripts/test-iso.sh --iso dist/colinux-lite-x86_64-*.iso
+
+# Or boot interactively:
+./scripts/build-qemu.sh --iso dist/colinux-lite-x86_64-*.iso --boot --no-gui
 ```
 
 ### 3. Write to a USB drive
 
 ```bash
-sudo dd if=dist/colinux-lite.iso of=/dev/sdX bs=4M status=progress && sync
+sudo dd if=dist/colinux-lite-x86_64-*.iso of=/dev/sdX bs=4M status=progress && sync
 ```
 
 > ⚠️ Replace `/dev/sdX` with your actual USB device. **This will erase all data on the target drive.**
@@ -131,96 +141,85 @@ Insert the USB, boot from it, and you'll be dropped into a Codex CLI session. St
 ```
 colinux/
 ├── README.md                          # This file
-├── LICENSE                            # MIT License
-├── .gitignore                         # Git ignore rules
-├── Makefile                           # Top-level build orchestration
-├── build.sh                           # Main build script
+├── LICENSE                            # GPLv2 License
+├── .github/workflows/                 # CI/CD (Docker, Alpine ISO, Debian ISO, release)
 ├── profiles/
-│   ├── alpine/
-│   │   ├── packages.list              # Alpine packages to install
-│   │   ├── mkimg.conf                 # mkimage profile config
-│   │   └── overlay/                   # Overlay filesystem
-│   │       ├── etc/
-│   │       │   ├── init.d/            # OpenRC init scripts
-│   │       │   │   ├── codex-firstboot
-│   │       │   │   ├── codex-disk-inventory
-│   │       │   │   └── codex-auto-update
-│   │       │   ├── config/            # Configuration files
-│   │       │   │   └── auto-update.conf
-│   │       │   ├── codex-update-crontab
-│   │       │   └── doas.conf          # doas privilege rules
-│       ├── usr/
-│       │   ├── local/bin/         # codex-* command wrappers
-│       │   │   ├── codexctl       # Codex control surface
-│       │   │   ├── codex-backup   # Workspace persistence backups
-│       │   │   ├── codex-restore  # Restore from backups
-│       │   │   ├── codex-disk-inventory  # Disk inventory (JSON + Markdown)
-│       │   │   ├── codex-mount-ro / codex-mount-rw  # Safe mount wrappers
-│       │   │   ├── codex-network  # Network configuration
-│       │   │   ├── codex-update   # Codex CLI updater
-│       │   │   ├── codex-shell    # Safe shell escalation
-│       │   │   ├── codex-usb-persist  # USB persistence setup
-│       │   │   ├── codex-install-usb / codex-install-pc  # Installers
-│       │   │   ├── codex-recover  # File recovery (testdisk/photorec)
-│       │   │   ├── codex-clone    # Disk cloning (ddrescue + SHA-256)
-│       │   │   ├── codex-remote   # Remote access (SSH, tunnels, QR)
-│       │   │   ├── codex-snapshot # Portable state snapshots
-│       │   │   ├── codex-hw-check # Hardware diagnostics
-│       │   │   ├── codex-benchmark # Quick benchmarks (CPU/disk/net)
-│       │   │   ├── codex-pxe      # Network boot server (PXE)
-│       │   │   └── codex-logs     # Log viewer
-│       │   └── share/colinux/     # Shared resources
-│   │       │       └── safety-phrases # Safety phrase bank
-│   │       └── var/                   # Runtime state
-│   └── debian/                        # Debian-based compat profile
+│   ├── alpine/                        # colinux-lite, colinux-lite-gui, colinux-desktop
+│   │   ├── packages.x86_64           # Alpine packages (x86_64)
+│   │   ├── packages.aarch64          # Alpine packages (aarch64)
+│   │   ├── overlay/                   # Headless TTY overlay
+│   │   │   ├── etc/
+│   │   │   │   ├── init.d/            # OpenRC init scripts
+│   │   │   │   │   ├── codex-firstboot
+│   │   │   │   │   ├── codex-auto-update
+│   │   │   │   │   └── ...
+│   │   │   │   ├── doas.conf          # doas privilege rules
+│   │   │   │   └── codex-update-crontab
+│   │   │   └── usr/local/bin/         # codex-* command wrappers
+│   │   │       ├── codexctl           # Codex control surface
+│   │   │       ├── codex-backup       # Workspace persistence backups
+│   │   │       ├── codex-restore      # Restore from backups
+│   │   │       ├── codex-disk-inventory # Disk inventory (JSON + Markdown)
+│   │   │       ├── codex-mount-ro / codex-mount-rw # Safe mount wrappers
+│   │   │       ├── codex-network      # Network configuration
+│   │   │       ├── codex-update       # Codex CLI updater
+│   │   │       ├── codex-shell        # Safe shell escalation
+│   │   │       ├── codex-install-usb / codex-install-pc # Installers
+│   │   │       └── ...                # (16 more codex-* commands)
+│   │   ├── overlay-gui/              # GUI (cage/sway) additions
+│   │   └── overlay-desktop/          # Desktop (GNOME) additions
+│   ├── debian/                        # Debian desktop profile
+│   └── debian-compat/                 # Debian compat (minimal) profile
+├── shared/                            # Shared infra (Camoufox, WiFi wizard, network)
 ├── scripts/
-│   ├── qemu-test.sh                   # QEMU test runner
-│   ├── usb-write.sh                   # Safe USB imaging script
-│   └── create-persistence.sh          # LUKS persistence setup
+│   ├── build-alpine.sh                # Alpine ISO build (lite)
+│   ├── build-alpine-gui.sh            # Alpine ISO build (GUI)
+│   ├── build-alpine-desktop.sh        # Alpine ISO build (desktop)
+│   ├── build-debian-compat.sh         # Debian compat ISO build
+│   ├── build-debian.sh                # Debian desktop ISO build
+│   ├── test-iso.sh                    # QEMU smoke tests
+│   ├── build-qemu.sh                  # QEMU interactive boot
+│   ├── first-boot.sh                  # First-boot setup
+│   └── setup-codex.sh                # Codex CLI setup/update
+├── installer/                         # Canonical installer scripts
 ├── docs/
+│   ├── BUILD.md                       # Build instructions
 │   ├── SECURITY.md                    # Security documentation
 │   ├── DISK_SAFETY.md                 # Disk safety model
-│   ├── BUILD.md                       # Build instructions
-│   └── EDITIONS.md                    # Edition comparison
-└── tests/
-    ├── disk-safety.bats               # Disk safety tests
-    └── integration.bats               # Integration test suite
+│   ├── EDITIONS.md                    # Edition comparison
+│   └── GUIDE_DESKTOP.md               # Desktop edition guide
+└── AGENTS.md                          # Codex agent operating rules
 ```
 
 ## Building from Source
 
-See [`docs/BUILD.md`](docs/BUILD.md) for the full build guide. Here's the short version:
+See [`docs/BUILD.md`](docs/BUILD.md) for the full build guide. Quick summary:
 
 ```bash
 # Clone the repository
 git clone https://github.com/gibavargas/colinux.git
 cd colinux
 
-# Build the default edition
-sudo ./build.sh
+# Build the lite ISO (Docker, any host)
+docker run --rm -v "$(pwd):/src" -e ARCH=x86_64 -e OUTDIR=/src/dist \
+  alpine:3.21 sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl \
+  ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi \
+  efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine.sh"
 
-# Build a specific edition
-sudo ./build.sh --edition colinux-lite-gui
-
-# Build with custom config
-sudo ./build.sh --config my-build.conf
-
-# The output image will be at dist/colinux-lite.iso
+# Or on Alpine Linux host
+sudo bash scripts/build-alpine.sh --arch x86_64
 ```
 
 ### Build configuration
 
-Create a `build.conf` file in the project root to override defaults:
+Set environment variables to override defaults:
 
-```bash
-# build.conf
-EDITION="colinux-lite"
-OUTPUT_DIR="dist"
-ENABLE_PERSISTENCE="true"
-CODEX_VERSION="latest"
-COMPRESSION="xz"
-EXTRA_PACKAGES="vim htop tmux"
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ARCH` | `x86_64` | Target architecture (`x86_64` or `aarch64`) |
+| `CODEX_VERSION` | `latest` | Codex CLI version to bundle |
+| `ALPINE_RELEASE` | `3.21` | Alpine version |
+| `OUTDIR` | `./dist` | Output directory |
 
 ## Installation
 
@@ -231,20 +230,32 @@ EXTRA_PACKAGES="vim htop tmux"
 lsblk
 
 # Write the image
-sudo ./scripts/usb-write.sh /dev/sdX
+sudo dd if=dist/colinux-lite-x86_64-*.iso of=/dev/sdX bs=4M status=progress && sync
+```
 
-# (Optional) Create encrypted persistence partition
-sudo ./scripts/create-persistence.sh /dev/sdX
+### USB Installation
+
+Use `codex-install-usb` from a running CoLinux session:
+
+```bash
+doas codex-install-usb /dev/sdX
 ```
 
 ### PC Installation
 
-CoLinux Lite is designed as a *live appliance* — it runs entirely from USB without touching the host machine's disks. There is no "install to disk" flow.
+Use `codex-install-pc` to install CoLinux to an internal disk:
 
-If you want persistent local storage:
+```bash
+doas codex-install-pc /dev/nvme0n1          # full disk
+doas codex-install-pc /dev/sda --dual-boot  # dual-boot with existing OS
+```
+
+### Persistence
+
+CoLinux runs as a live appliance. To persist data across reboots:
 
 1. Boot from the USB drive.
-2. Run `sudo setup-persistence` to create an encrypted LUKS partition on a designated drive.
+2. Run `doas codex-usb-persist /dev/sdX` to create an encrypted persistence partition.
 3. Your Codex config, session history, and logs will persist across reboots.
 
 > 🔒 Persistence uses LUKS2 with AES-256-XTS. You'll set a passphrase on first setup.
@@ -331,30 +342,25 @@ To **build** from source, you also need:
 - Docker (easiest) or an Alpine Linux 3.19+ host
 - ~2 GB of free disk space
 
-### Quick Start — Build with Docker in 3 Commands
+### Quick Start — Docker Validate
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/gibavargas/colinux.git
-cd colinux
-
-# 2. Build the Docker image (this IS CoLinux — a full environment)
-docker build -t colinux-lite .
-
-# 3. Launch it
-docker run -it --rm colinux-lite
+# Build and validate the Docker environment (quick syntax + deps check)
+docker build -t colinux-lite:test .
+docker run --rm --entrypoint bash colinux-lite:test -c "codexctl status"
 ```
 
-That's it. You're inside CoLinux with all the disk tools, codexctl, and a shell. Run `codexctl status` to see system info.
-
-For a bootable ISO instead:
+### Quick Start — Full ISO Build
 
 ```bash
-# Build the Alpine ISO
-docker run -it --rm -v "$PWD/dist:/dist" -w /build \
-  alpine:3.21 \
-  sh -c "apk add --no-cache bash curl git ca-certificates squashfs-tools xorriso grub-efi e2fsprogs dosfstools mtools qemu-img openssl gptfdisk && \
-          ./scripts/build-alpine.sh --outdir /dist"
+# Build the Alpine ISO in a Docker container
+docker run --rm -v "$(pwd):/src" -e ARCH=x86_64 -e OUTDIR=/src/dist \
+  alpine:3.21 sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl \
+  ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi \
+  efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine.sh"
+
+# Smoke-test the ISO with QEMU
+./scripts/test-iso.sh
 ```
 
 ### Creating a Bootable USB
@@ -367,9 +373,6 @@ lsblk
 
 # Write the image (REPLACE /dev/sdX WITH YOUR DEVICE)
 sudo dd if=dist/colinux-lite-x86_64-*.iso of=/dev/sdX bs=4M status=progress && sync
-
-# Or use the safe helper script
-sudo ./scripts/usb-write.sh /dev/sdX
 ```
 
 > ⚠️ **This will erase all data on the target drive.** Double-check the device name.

@@ -49,9 +49,14 @@ The default and recommended edition. A headless TTY appliance that boots directl
 ### Build
 
 ```bash
-sudo ./build.sh
-# or explicitly:
-sudo ./build.sh --edition colinux-lite
+# Docker (recommended)
+docker run --rm -v "$(pwd):/src" -e ARCH=x86_64 -e OUTDIR=/src/dist \
+  alpine:3.21 sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl \
+  ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi \
+  efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine.sh"
+
+# Or on Alpine Linux host
+sudo bash scripts/build-alpine.sh --arch x86_64
 ```
 
 ### First boot
@@ -99,7 +104,11 @@ An experimental edition that adds a minimal graphical interface on top of the TT
 ### Build
 
 ```bash
-sudo ./build.sh --edition colinux-lite-gui
+# Docker
+docker run --rm -v "$(pwd):/src" -e ARCH=x86_64 -e OUTDIR=/src/dist \
+  alpine:3.21 sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl \
+  ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi \
+  efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine-gui.sh"
 ```
 
 ### Known issues
@@ -149,7 +158,7 @@ Some hardware — particularly certain Wi-Fi adapters, Thunderbolt controllers, 
 ### Build
 
 ```bash
-sudo ./build.sh --edition colinux-compat
+sudo bash scripts/build-debian-compat.sh --arch amd64
 ```
 
 ### Notes

@@ -1,465 +1,248 @@
-# Building CoLinux Lite
+# Building CoLinux
 
-This document describes how to build CoLinux Lite from source.
+This document describes how to build CoLinux editions from source.
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
-- [Quick Build](#quick-build)
-- [Step-by-Step Build Instructions](#step-by-step-build-instructions)
-- [Build Configuration](#build-configuration)
+- [Quick Build (colinux-lite)](#quick-build-colinux-lite)
+- [Building Other Editions](#building-other-editions)
+- [Build Script Reference](#build-script-reference)
+- [QEMU Testing & Smoke Tests](#qemu-testing--smoke-tests)
+- [Environment Variables](#environment-variables)
 - [Cross-Compilation for ARM64](#cross-compilation-for-arm64)
-- [QEMU Testing](#qemu-testing)
 - [Debugging Build Failures](#debugging-build-failures)
-- [Custom Package Selection](#custom-package-selection)
 
 ---
 
 ## Prerequisites
 
-### Option A: Alpine Linux Build Host (Recommended)
+### Option A: Docker (recommended, works on any host)
 
-An Alpine Linux 3.19+ system (physical, VM, or container) provides the most compatible build environment.
-
-```bash
-# Install build dependencies
-sudo apk add \
-    alpine-sdk \
-    apk-tools \
-    mkinitfs \
-    syslinux \
-    xorriso \
-    squashfs-tools \
-    cryptsetup \
-    e2fsprogs \
-    dosfstools \
-    mtools \
-    sfdisk \
-    qemu-system-x86_64  # optional, for testing
-```
-
-### Option B: Docker
-
-If you don't have Alpine available, use Docker:
+Docker is the easiest way to build. The Alpine ISO build runs entirely inside an `alpine:3.21` container.
 
 ```bash
-# Pull the Alpine build image
-docker pull alpine:3.19
-
-# Run the build in a container
-docker run --rm -it \
-    --privileged \
-    -v $(pwd):/workspace \
-    alpine:3.19 \
-    sh -c "cd /workspace && apk add alpine-sdk apk-tools mkinitfs syslinux xorriso squashfs-tools cryptsetup && ./build.sh"
+# No host dependencies beyond Docker itself
+docker pull alpine:3.21
 ```
 
-> Note: `--privileged` is required for `mkinitfs` and `losetup` operations inside the container.
+### Option B: Alpine Linux host
 
-### Option C: Other Linux Distributions
+An Alpine Linux 3.21+ system (physical, VM, or LXC) can run the build natively.
 
-Builds may work on other distributions but are not officially supported. You will need equivalents for:
-- `apk-tools` (Alpine package manager)
-- `mkinitfs` (Alpine initramfs generator)
-- `xorriso` (ISO creation)
-- `squashfs-tools` (squashfs creation)
+```bash
+sudo apk add alpine-sdk apk-tools alpine-conf bash curl ca-certificates \
+    git xorriso squashfs-tools mtools dosfstools grub grub-efi efibootmgr \
+    e2fsprogs qemu-img openssl
+```
 
 ---
 
-## Quick Build
+## Quick Build (colinux-lite)
+
+### Using Docker
 
 ```bash
 git clone https://github.com/gibavargas/colinux.git
 cd colinux
-sudo ./build.sh
+
+docker run --rm \
+  -v "$(pwd):/src" \
+  -e ARCH=x86_64 \
+  -e OUTDIR=/src/dist \
+  alpine:3.21 \
+  sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl \
+    ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi \
+    efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine.sh"
 ```
 
-Output: `dist/colinux-lite.iso` (~120 MB)
+Output: `dist/colinux-lite-x86_64-*.iso`
 
----
-
-## Step-by-Step Build Instructions
-
-### 1. Clone the repository
+### On Alpine Linux host
 
 ```bash
-git clone https://github.com/gibavargas/colinux.git
 cd colinux
+sudo bash scripts/build-alpine.sh --arch x86_64
 ```
 
-### 2. Review the configuration
+### Validate the ISO with QEMU
 
 ```bash
-cat profiles/alpine/packages.list   # packages to install
-cat build.sh                         # main build script
+# Run automated smoke tests (boot + codex binary + disk inventory + network)
+./scripts/test-iso.sh --iso dist/colinux-lite-x86_64-*.iso
+
+# Or boot interactively for manual testing
+./scripts/build-qemu.sh --iso dist/colinux-lite-x86_64-*.iso --boot --no-gui
 ```
 
-### 3. (Optional) Create a build config
+### Write to USB
 
 ```bash
-cp build.conf.example build.conf
-# Edit build.conf to customize
-```
-
-### 4. Run the build
-
-```bash
-sudo ./build.sh
-```
-
-### 5. The build process
-
-The `build.sh` script performs the following steps:
-
-```
-1. Load configuration (build.conf or defaults)
-2. Set up build directory (.build/)
-3. Install Alpine packages to a temporary root
-4. Apply overlay files (init scripts, configs, custom scripts)
-5. Generate initramfs with mkinitfs
-6. Build the squashfs root filesystem
-7. Create the ISO with xorriso and syslinux
-8. Generate SHA-256 checksum
-9. Copy output to dist/
-10. Clean up temporary files
-```
-
-Build log: `.build/build.log`
-
-### 6. Verify the output
-
-```bash
-ls -lh dist/
-# colinux-lite.iso     120M
-# colinux-lite.iso.sha256  65B
-
-# Verify checksum
-sha256sum -c dist/colinux-lite.iso.sha256
+lsblk                          # find your USB device
+sudo dd if=dist/colinux-lite-x86_64-*.iso of=/dev/sdX bs=4M status=progress && sync
 ```
 
 ---
 
-## Build Configuration
+## Building Other Editions
 
-Create a `build.conf` file in the project root to override defaults:
-
-```bash
-# build.conf — CoLinux Lite build configuration
-
-# Edition to build
-EDITION="colinux-lite"
-# Options: colinux-lite, colinux-lite-gui, colinux-compat
-
-# Output directory
-OUTPUT_DIR="dist"
-
-# Compression algorithm for squashfs
-# Options: xz (default, best), gzip (fast), lzo (fastest), zstd (balanced)
-COMPRESSION="xz"
-
-# Enable encrypted persistence support
-ENABLE_PERSISTENCE="true"
-
-# Codex CLI version to bundle
-# Options: latest, stable, or a specific version tag
-CODEX_VERSION="latest"
-
-# Extra Alpine packages beyond the default list
-# Space-separated
-EXTRA_PACKAGES=""
-
-# Packages to exclude from the default list
-# Space-separated
-EXCLUDE_PACKAGES=""
-
-# Kernel version (Alpine kernel package)
-KERNEL_VERSION="lts"
-
-# ISO volume label
-VOLUME_ID="COLINUX"
-
-# Build verbosity
-# Options: quiet, normal, verbose
-VERBOSE="normal"
-```
-
-### Command-line overrides
+### colinux-lite-gui (Alpine, Wayland kiosk)
 
 ```bash
-# Override specific options from the command line
-sudo ./build.sh --edition colinux-lite-gui --verbose
-sudo ./build.sh --compression gzip --output my-output/
-sudo ./build.sh --kernel-lts --extra-packages "vim tmux htop"
+# Docker build
+docker run --rm -v "$(pwd):/src" -e ARCH=x86_64 -e OUTDIR=/src/dist \
+  alpine:3.21 sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl \
+    ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi \
+    efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine-gui.sh"
+
+# Or native Alpine
+sudo bash scripts/build-alpine-gui.sh --arch x86_64
 ```
+
+### colinux-compat (Debian minimal)
+
+```bash
+sudo bash scripts/build-debian-compat.sh --arch amd64
+```
+
+See `.github/workflows/build-debian.yml` for CI-based Debian builds, which require
+specific live-build workarounds for Ubuntu runners.
+
+### colinux-desktop (Alpine + GNOME + Electron)
+
+```bash
+# Docker build
+docker run --rm -v "$(pwd):/src" -e ARCH=x86_64 -e OUTDIR=/src/dist \
+  alpine:3.21 sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl \
+    ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi \
+    efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine-desktop.sh"
+```
+
+### Docker environment validation
+
+Each edition has a Dockerfile for quick syntax and dependency validation:
+
+```bash
+docker build -t colinux-lite:test .                              # colinux-lite
+docker build -t colinux-lite-gui:test -f Dockerfile-gui .        # colinux-lite-gui
+docker build -t colinux-compat:test -f Dockerfile-compat .       # colinux-compat
+docker build -t colinux-desktop:test -f Dockerfile-desktop .     # colinux-desktop
+```
+
+---
+
+## Build Script Reference
+
+| Script | Edition | Notes |
+|--------|---------|-------|
+| `scripts/build-alpine.sh` | colinux-lite | Alpine mkimage-based ISO |
+| `scripts/build-alpine-gui.sh` | colinux-lite-gui | Same base + GUI packages |
+| `scripts/build-alpine-desktop.sh` | colinux-desktop | Same base + GNOME + Electron |
+| `scripts/build-debian-compat.sh` | colinux-compat | live-build-based Debian ISO |
+| `scripts/build-debian.sh` | colinux-desktop (Debian) | live-build Debian Desktop ISO |
+| `scripts/test-iso.sh` | All | QEMU smoke tests |
+| `scripts/build-qemu.sh` | All | Create QCOW2 + interactive QEMU boot |
+
+### Build script options
+
+```bash
+scripts/build-alpine.sh [--arch x86_64|aarch64] [--release 3.21] [--outdir ./dist]
+scripts/build-debian-compat.sh [--arch amd64]
+```
+
+---
+
+## QEMU Testing & Smoke Tests
+
+### Automated smoke tests
+
+```bash
+# Test a specific ISO
+./scripts/test-iso.sh --iso dist/colinux-lite-x86_64-v3.21.iso
+
+# Auto-find the latest ISO in dist/
+./scripts/test-iso.sh
+
+# Custom timeout and memory
+./scripts/test-iso.sh --iso dist/colinux-lite-x86_64-v3.21.iso --timeout 300 --memory 2048
+```
+
+The smoke test boots the ISO in QEMU and validates:
+1. Boot completes (kernel + init → login prompt)
+2. Codex binary exists and is executable
+3. `codex-disk-inventory` runs without error
+4. Network interface is present
+5. Persistence partition detection works
+
+### Interactive QEMU boot
+
+```bash
+# Boot with serial console (headless)
+./scripts/build-qemu.sh --iso dist/colinux-lite-x86_64-v3.21.iso --boot --no-gui
+
+# Boot with graphical display
+./scripts/build-qemu.sh --iso dist/colinux-lite-x86_64-v3.21.iso --boot
+
+# From a raw disk image
+./scripts/build-qemu.sh --raw dist/colinux-lite-x86_64.raw.img --boot --no-gui
+```
+
+SSH forwarding: `localhost:2222` → guest port 22
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ARCH` | `x86_64` | Target architecture |
+| `ALPINE_RELEASE` | `3.21` | Alpine version |
+| `ALPINE_MIRROR` | `http://dl-cdn.alpinelinux.org/alpine` | Alpine package mirror |
+| `CODEX_VERSION` | `latest` | Codex CLI version to bundle |
+| `OUTDIR` | `./dist` | Output directory |
 
 ---
 
 ## Cross-Compilation for ARM64
 
-CoLinux Lite can be built for ARM64 (aarch64) devices such as Raspberry Pi 4/5 and other single-board computers.
-
-### Prerequisites
-
 ```bash
-# On x86_64 build host, install cross-compilation tools
-sudo apk add gcc-aarch64 musl-aarch64 binutils-aarch64
-
-# Or install the cross-compile toolchain
-sudo apk add aarch64-none-elf-gcc
+# Build aarch64 ISO in Docker
+docker run --rm -v "$(pwd):/src" -e ARCH=aarch64 -e OUTDIR=/src/dist \
+  alpine:3.21 sh -c "apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl \
+    ca-certificates git xorriso squashfs-tools mtools dosfstools grub grub-efi \
+    efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine.sh"
 ```
 
-### Build for ARM64
-
-```bash
-sudo ./build.sh --arch aarch64 --edition colinux-lite
-```
-
-### ARM64-specific configuration
-
-```bash
-# build.conf
-ARCH="aarch64"
-KERNEL_VERSION="lts"
-KERNEL_FLAVOR="lts"          # or "rpi" for Raspberry Pi
-EXTRA_PACKAGES="u-boot-rpiarm64"  # for Raspberry Pi
-```
-
-### Flashing ARM64 images
-
-ARM64 builds produce a raw disk image (not an ISO):
-
-```bash
-# For Raspberry Pi
-sudo dd if=dist/colinux-lite-aarch64.raw of=/dev/sdX bs=4M status=progress && sync
-```
-
-### Current ARM64 status
-
-| Platform | Boot method | Status |
-|---|---|---|
-| Raspberry Pi 4/5 | u-boot + EFI | 🧪 Experimental |
-| Generic aarch64 (UEFI) | GRUB EFI | 📋 Planned |
-| Rockchip (RK3588) | u-boot | 📋 Planned |
-
----
-
-## QEMU Testing
-
-Test your build without writing to physical media:
-
-```bash
-# Basic test (TTY edition)
-./scripts/qemu-test.sh dist/colinux-lite.iso
-
-# With more RAM
-./scripts/qemu-test.sh dist/colinux-lite.iso --ram 4096
-
-# With a test disk attached (for disk safety testing)
-./scripts/qemu-test.sh dist/colinux-lite.iso --disk test-disk.qcow2
-
-# With network access
-./scripts/qemu-test.sh dist/colinux-lite.iso --network
-
-# Serial console (for headless testing)
-./scripts/qemu-test.sh dist/colinux-lite.iso --serial
-```
-
-### QEMU script details
-
-The `qemu-test.sh` script wraps `qemu-system-x86_64` with sensible defaults:
-
-```bash
-#!/bin/sh
-# Default QEMU options:
-# -m 2048                    # 2 GB RAM
-# -smp 2                     # 2 CPU cores
-# -cdrom "$ISO"              # Boot from ISO
-# -boot d                    # Boot from CD-ROM
-# -netdev user,id=net0       # User-mode networking
-# -device virtio-net-pci     # Virtio network adapter
-# -display none              # No graphical output (use serial)
-# -serial stdio              # Serial console on stdio
-```
-
-### Creating a test disk image
-
-```bash
-# Create a 1 GB test disk
-qemu-img create -f qcow2 test-disk.qcow2 1G
-
-# Partition and format it (inside QEMU or with guestfish)
-guestfish -a test-disk.qcow2 <<EOF
-run
-part-disk /dev/sda mbr
-mkfs ext4 /dev/sda1
-EOF
-```
+Note: aarch64 ISO does not include syslinux/isohybrid (x86-only). Boot via EFI.
 
 ---
 
 ## Debugging Build Failures
 
-### Common issues
+### Alpine build: "Images generated" but empty output
 
-#### "mkinitfs: unable to find kernel"
+The `arch` variable in the Alpine mkimage profile must be set. If missing, the profile is silently skipped. Verify `profiles/alpine/` contains `arch="x86_64 aarch64"`.
 
-```bash
-# Verify the kernel is installed
-apk info -e linux-lts
+### Alpine build: `update-kernel` errors
 
-# Check kernel modules directory
-ls /lib/modules/
+Non-fatal `depmod` and BusyBox `install` warnings during kernel extraction are expected. The build script patches these to `|| true`.
 
-# Reinstall kernel
-sudo apk add linux-lts linux-lts-dev
-```
+### Docker build fails on a specific Dockerfile
 
-#### "xorriso: failure: cannot write"
+Common causes:
+- Wrong package names for the distro (Alpine uses `apk`, Debian uses `apt`)
+- Stale `COPY` paths referencing files that were moved or renamed
+- Dockerfile backslash continuation doubled by patch tools
 
-```bash
-# Check available disk space
-df -h .
-
-# Clean previous build
-rm -rf .build/ dist/
-```
-
-#### "Permission denied" during build
+### Syntax check all shell scripts
 
 ```bash
-# The build must run as root (for mkinitfs, losetup, mount)
-sudo ./build.sh
-
-# Or add yourself to the appropriate groups (not recommended)
+find . -name "*.sh" -not -path "*/.git/*" | xargs -I{} bash -n {} 2>&1
 ```
 
-#### "squashfs: compressor not available"
+### CI build logs
 
 ```bash
-# Install compression support
-sudo apk add xz zstd lzo
-
-# Or switch to gzip (always available)
-COMPRESSION="gzip" sudo ./build.sh
+gh run list --repo gibavargas/colinux --limit 5
+gh run view <run-id> --log-failed
 ```
-
-### Verbose build
-
-```bash
-# Run with verbose logging
-sudo ./build.sh --verbose
-
-# Or set environment variable
-VERBOSE=1 sudo ./build.sh
-```
-
-### Build log
-
-The full build log is saved at `.build/build.log`:
-
-```bash
-# Tail the log during build
-sudo ./build.sh && tail -f .build/build.log
-
-# Search for errors
-grep -i error .build/build.log
-grep -i fatal .build/build.log
-```
-
-### Interactive debug shell
-
-```bash
-# The build script supports dropping into a shell at key stages
-sudo ./build.sh --debug-shell-after rootfs
-# You'll get a shell inside the built rootfs for inspection
-```
-
----
-
-## Custom Package Selection
-
-### Default package list
-
-The default packages are defined in `profiles/alpine/packages.list`:
-
-```
-# Core system
-alpine-base
-linux-lts
-linux-firmware-none
-
-# Disk tools
-lsblk
-parted
-fdisk
-e2fsprogs
-dosfstools
-ntfs-3g
-cryptsetup
-mdadm
-lvm2
-testdisk
-
-# Networking
-dhcpcd
-iwd
-openssh
-curl
-wget
-
-# Utilities
-jq
-less
-htop
-vim
-
-# Codex runtime
-nodejs
-npm
-```
-
-### Adding packages
-
-**Method 1: Edit packages.list**
-
-```bash
-echo "git" >> profiles/alpine/packages.list
-echo "tmux" >> profiles/alpine/packages.list
-```
-
-**Method 2: build.conf**
-
-```bash
-EXTRA_PACKAGES="git tmux strace tcpdump"
-```
-
-**Method 3: Command line**
-
-```bash
-sudo ./build.sh --extra-packages "git tmux strace"
-```
-
-### Removing packages
-
-```bash
-# In build.conf
-EXCLUDE_PACKAGES="htop vim"
-```
-
-### Package notes
-
-| Package | Notes |
-|---|---|
-| `linux-firmware-none` | Minimal firmware; add `linux-firmware-bnx2` etc. as needed for specific NICs |
-| `nodejs` | Required for Codex CLI; ~80 MB of the image |
-| `ntfs-3g` | Large; exclude if you don't need NTFS support |
-| `testdisk` | Useful for recovery; ~5 MB |
-| `cryptsetup` | Required for persistence; ~3 MB |
-
-### Image size targets
-
-| Edition | Target size | With persistence |
-|---|---|---|
-| `colinux-lite` | ~120 MB | +64 MB (LUKS headers + config) |
-| `colinux-lite-gui` | ~180 MB | +64 MB |
-| `colinux-compat` | ~350 MB | +64 MB |
