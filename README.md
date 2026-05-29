@@ -345,9 +345,8 @@ To **build** from source, you also need:
 ### Quick Start — Docker Validate
 
 ```bash
-# Build and validate the Docker environment (quick syntax + deps check)
-docker build -t colinux-lite:test .
-docker run --rm --entrypoint bash colinux-lite:test -c "codexctl status"
+# Build and validate the Docker environment (syntax + deps + codexctl)
+./scripts/smoke-test.sh --docker
 ```
 
 ### Quick Start — Full ISO Build
@@ -360,7 +359,10 @@ docker run --rm -v "$(pwd):/src" -e ARCH=x86_64 -e OUTDIR=/src/dist \
   efibootmgr e2fsprogs qemu-img openssl && cd /src && bash scripts/build-alpine.sh"
 
 # Smoke-test the ISO with QEMU
-./scripts/test-iso.sh
+./scripts/smoke-test.sh --iso
+
+# Or the full pipeline (Docker validate + ISO boot):
+# ./scripts/smoke-test.sh --all
 ```
 
 ### Creating a Bootable USB
@@ -733,28 +735,17 @@ CODEX_VERSION=v0.1.0 ARCH=x86_64 bash scripts/build-alpine.sh
 ### Testing in CI/CD
 
 ```bash
-# Run the test suite
-make test
+# Quick Docker validation (build + codexctl + syntax + doas check)
+./scripts/smoke-test.sh --docker
 
-# Or directly with bats
-bats tests/disk-safety.bats
-bats tests/integration.bats
+# QEMU boot test (requires a built ISO)
+./scripts/smoke-test.sh --iso
 
-# Quick smoke test in Docker
-docker run --rm colinux-lite codexctl version
-docker run --rm colinux-lite codexctl status --json
+# Full pipeline
+./scripts/smoke-test.sh --all
 
-# Test ISO in QEMU (headless)
-qemu-system-x86_64 \
-  -m 1024 \
-  -nographic \
-  -cdrom dist/colinux-lite-x86_64-*.iso \
-  -boot d \
-  -net nic \
-  -net user &
-sleep 30
-# ... run tests against booted system ...
-kill %1
+# Manual QEMU boot for interactive testing
+./scripts/build-qemu.sh --iso dist/colinux-lite-x86_64-*.iso --boot --no-gui
 ```
 
 ### Integration Patterns
@@ -809,7 +800,7 @@ docker run -it --rm \
 Contributions are welcome! Please follow these guidelines:
 
 1. **Fork** the repository and create a feature branch.
-2. **Test** your changes — run the test suite (`make test`) and verify with QEMU.
+2. **Test** your changes — run `./scripts/smoke-test.sh --docker` and verify with QEMU if applicable.
 3. **Document** — update docs for any behavioral changes.
 4. **Keep it minimal** — this is a tiny appliance. Every byte counts. Justify new dependencies.
 5. **Respect the safety model** — never bypass disk safety checks without explicit, documented rationale.
@@ -832,9 +823,9 @@ Open a GitHub issue with:
 
 ## License
 
-CoLinux Lite is released under the [MIT License](LICENSE).
+CoLinux Lite is released under the [GNU General Public License v2](LICENSE).
 
-Copyright © 2025 CoLinux Project.
+Copyright © 2025–2026 CoLinux Project.
 
 ## Links
 

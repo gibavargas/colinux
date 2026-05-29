@@ -209,7 +209,7 @@ EXPECT_SCRIPT
     if expect "$expect_script" "$TIMEOUT" "$SERIAL_LOG" "$qemu_bin" "$ISO_PATH" "$ARCH" "$MEMORY" 2>&1 | tee "$TEST_LOG"; then
         log_info "All tests passed via expect."
     else
-        log_warn "Some tests failed or timed out — check $SERIAL_LOG"
+        log_info "Some tests failed or timed out — check $SERIAL_LOG"
     fi
 
     rm -f "$expect_script"
