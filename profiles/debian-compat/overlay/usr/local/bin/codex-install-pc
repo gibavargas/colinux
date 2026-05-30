@@ -8,6 +8,7 @@
 #   --replace     Wipe entire disk and install (default for non-external)
 #   --external    Install to external SSD (sets removable flag in config)
 #   --dual-boot   Preserve existing EFI partition for dual-boot
+#   --dry-run     Simulate installation without modifying any disk
 #
 # Partition layout:
 #   1: EFI System Partition (FAT32, 512MB)
@@ -21,12 +22,12 @@ LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/disk-actions.log"
 COLINUX_IMAGE_DIR="${COLINUX_IMAGE_DIR:-/opt/colinux}"
 
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
 
 log_action() {
     local ts
     ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
-    echo "[$ts] install-pc: $*" >> "$LOGFILE"
+    { echo "[$ts] install-pc: $*" >> "$LOGFILE" 2>/dev/null; } || true
     echo "[$ts] install-pc: $*"
 }
 
@@ -50,6 +51,7 @@ Options:
   --system-size N   Size in MB for system partition (default: 4096)
   --no-confirm      [REMOVED — unsafe, use --ci with COLINUX_CI_BUILD=1]
   --ci              CI mode: skip confirmation only if COLINUX_CI_BUILD=1
+  --dry-run         Simulate the full install without touching any disk
   --help            Show this help
 
 Examples:
@@ -73,6 +75,7 @@ DUAL_BOOT=false
 EXTERNAL=false
 NO_CONFIRM=false
 CI_MODE=false
+DRY_RUN=false
 
 # ── Architecture detection ─────────────────────────────────────────────────
 case "$(uname -m)" in
@@ -118,6 +121,10 @@ while [[ $# -gt 0 ]]; do
             CI_MODE=true
             shift
             ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
         --help|-h)
             usage
             ;;
@@ -139,52 +146,76 @@ if [[ -z "$DEVICE" ]]; then
     die "No device specified. Usage: codex-install-pc /dev/nvmeXnX"
 fi
 
-if [[ ! -b "$DEVICE" ]]; then
+if [[ "$DRY_RUN" == true ]]; then
+    # In dry-run mode, allow simulated device paths like /dev/sim-nvme0n1
+    if [[ "$DEVICE" == /dev/sim-* ]]; then
+        DEVNAME="${DEVICE##*/}"
+        DEVNAME="${DEVNAME#sim-}"
+        echo "[DRY-RUN] Using simulated device: $DEVICE (mapped to $DEVNAME)"
+    elif [[ ! -b "$DEVICE" ]]; then
+        DEVNAME="${DEVICE##*/}"
+        echo "[DRY-RUN] $DEVICE is not a block device — using as simulated target"
+    else
+        DEVNAME="${DEVICE##*/}"
+    fi
+elif [[ ! -b "$DEVICE" ]]; then
     die "$DEVICE is not a valid block device."
+else
+    DEVNAME="${DEVICE##*/}"
 fi
 
-DEVNAME="${DEVICE##*/}"
-
 # Determine partition suffix
-if [[ "$DEVICE" == /dev/nvme* ]]; then
+if [[ "$DEVICE" == /dev/nvme* ]] || [[ "$DEVICE" == /dev/sim-nvme* ]]; then
     PART_SUFFIX="p"
-elif [[ "$DEVICE" == /dev/mmcblk* ]]; then
+elif [[ "$DEVICE" == /dev/mmcblk* ]] || [[ "$DEVICE" == /dev/sim-mmcblk* ]]; then
     PART_SUFFIX="p"
 else
     PART_SUFFIX=""
 fi
 
 # ── Check if currently booted from this device ────────────────────────────
-BOOT_DEV=""
-if [[ -f /proc/cmdline ]]; then
-    cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
-    if [[ "$cmdline_root" == /dev/* ]]; then
-        BOOT_DEV="${cmdline_root%%[0-9]*}"
+if [[ "$DRY_RUN" != true ]]; then
+    BOOT_DEV=""
+    if [[ -f /proc/cmdline ]]; then
+        cmdline_root="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
+        if [[ "$cmdline_root" == /dev/* ]]; then
+            BOOT_DEV="${cmdline_root%%[0-9]*}"
+            BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
+        fi
+    fi
+    if [[ -z "$BOOT_DEV" ]]; then
+        BOOT_DEV="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
+        BOOT_DEV="${BOOT_DEV%%[0-9]*}"
         BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
     fi
-fi
-if [[ -z "$BOOT_DEV" ]]; then
-    BOOT_DEV="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
-    BOOT_DEV="${BOOT_DEV%%[0-9]*}"
-    BOOT_DEV="${BOOT_DEV%%p[0-9]*}"
-fi
 
-if [[ "$DEVICE" == "$BOOT_DEV" ]]; then
-    die "Cannot install to the currently booted device ($DEVICE). Boot from USB first."
-fi
+    if [[ "$DEVICE" == "$BOOT_DEV" ]]; then
+        die "Cannot install to the currently booted device ($DEVICE). Boot from USB first."
+    fi
 
-# ── Check mounted partitions ──────────────────────────────────────────────
-if lsblk -n -o MOUNTPOINT "$DEVICE" 2>/dev/null | grep -q .; then
-    die "Device $DEVICE has mounted partitions. Unmount all partitions first."
+    # ── Check mounted partitions ──────────────────────────────────────────────
+    if lsblk -n -o MOUNTPOINT "$DEVICE" 2>/dev/null | grep -q .; then
+        die "Device $DEVICE has mounted partitions. Unmount all partitions first."
+    fi
 fi
 
 # ── Gather device info ────────────────────────────────────────────────────
-SIZE_BYTES="$(lsblk -d -b -n -o SIZE "$DEVICE" 2>/dev/null || echo 0)"
-SIZE_GB="$(echo "$SIZE_BYTES" | awk '{printf "%.1f", $1/1024/1024/1024}')"
-MODEL="$(lsblk -d -n -o MODEL "$DEVICE" 2>/dev/null | xargs || echo "Unknown")"
-SERIAL="$(lsblk -d -n -o SERIAL "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
-TRANSPORT="$(lsblk -d -n -o TRAN "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
-ROTATIONAL="$(lsblk -d -n -o ROTA "$DEVICE" 2>/dev/null | xargs || echo "1")"
+if [[ "$DRY_RUN" == true ]] && [[ ! -b "$DEVICE" ]]; then
+    # Simulated device for dry-run
+    SIZE_BYTES=$((32 * 1024 * 1024 * 1024))  # 32 GB simulated
+    SIZE_GB="32.0"
+    MODEL="Simulated Disk"
+    SERIAL="DRY-RUN"
+    TRANSPORT="simulated"
+    ROTATIONAL="0"
+else
+    SIZE_BYTES="$(lsblk -d -b -n -o SIZE "$DEVICE" 2>/dev/null || echo 0)"
+    SIZE_GB="$(echo "$SIZE_BYTES" | awk '{printf "%.1f", $1/1024/1024/1024}')"
+    MODEL="$(lsblk -d -n -o MODEL "$DEVICE" 2>/dev/null | xargs || echo "Unknown")"
+    SERIAL="$(lsblk -d -n -o SERIAL "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
+    TRANSPORT="$(lsblk -d -n -o TRAN "$DEVICE" 2>/dev/null | xargs || echo "N/A")"
+    ROTATIONAL="$(lsblk -d -n -o ROTA "$DEVICE" 2>/dev/null | xargs || echo "1")"
+fi
 
 # Minimum size: 16GB for PC install
 MIN_SIZE=$((16 * 1024 * 1024 * 1024))
@@ -214,9 +245,15 @@ if [[ "$DUAL_BOOT" != true ]]; then
 echo "║  ⚠  ALL DATA ON THIS DEVICE WILL BE DESTROYED        ║"
 fi
 echo "╚══════════════════════════════════════════════════════╝"
+if [[ "$DRY_RUN" == true ]]; then
+echo ""
+echo "  🔶 DRY-RUN MODE — no disk changes will be made"
+fi
 echo ""
 
-if [[ "$CI_MODE" == true ]]; then
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Skipping serial confirmation"
+elif [[ "$CI_MODE" == true ]]; then
     if [[ "${COLINUX_CI_BUILD:-}" != "1" ]]; then
         die "SECURITY: --ci flag requires COLINUX_CI_BUILD=1 environment variable."
     fi
@@ -245,50 +282,79 @@ else
     fi
 fi
 
-log_action "START mode=$MODE device=$DEVICE serial=$SERIAL size=${SIZE_GB}GB external=$EXTERNAL"
+log_action "START mode=$MODE device=$DEVICE serial=$SERIAL size=${SIZE_GB}GB external=$EXTERNAL dry_run=$DRY_RUN"
 
 # ── Check dependencies ────────────────────────────────────────────────────
-for cmd in sgdisk mkfs.vfat mkfs.ext4; do
-    if ! command -v "$cmd" &>/dev/null; then
-        die "Required command not found: $cmd. Install with: apt install gdisk dosfstools e2fsprogs"
-    fi
-done
+if [[ "$DRY_RUN" == true ]]; then
+    for cmd in sgdisk mkfs.vfat mkfs.ext4 cryptsetup; do
+        if command -v "$cmd" &>/dev/null; then
+            echo "[DRY-RUN] Dependency OK: $cmd"
+        else
+            echo "[DRY-RUN] Dependency MISSING: $cmd (would fail in real install)"
+        fi
+    done
+else
+    for cmd in sgdisk mkfs.vfat mkfs.ext4; do
+        if ! command -v "$cmd" &>/dev/null; then
+            die "Required command not found: $cmd. Install with: apt install gdisk dosfstools e2fsprogs"
+        fi
+    done
 
-if ! command -v cryptsetup &>/dev/null; then
-    die "Required command not found: cryptsetup. Install with: apt install cryptsetup"
+    if ! command -v cryptsetup &>/dev/null; then
+        die "Required command not found: cryptsetup. Install with: apt install cryptsetup"
+    fi
 fi
 
 # ── Dual-boot: find the first partition number we can use ─────────────────
 FIRST_PART=1
 EFI_PART=""
 if [[ "$DUAL_BOOT" == true ]]; then
-    # Reuse the existing EFI System Partition (type EF00) instead of assuming
-    # the next free partition number is also the boot partition.
-    EFI_PART_NUM="$(sgdisk -p "$DEVICE" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ && $6 == "EF00" {print $1; exit}')"
-    if [[ -z "$EFI_PART_NUM" ]]; then
-        die "Dual-boot mode requires an existing EFI System Partition (GPT type EF00) on $DEVICE."
-    fi
-    EFI_PART="${DEVICE}${PART_SUFFIX}${EFI_PART_NUM}"
-    if [[ ! -b "$EFI_PART" ]]; then
-        die "Existing EFI partition $EFI_PART was not found. Check disk state with lsblk."
-    fi
-
-    # Find highest partition number, then append CoLinux system/persistence.
-    LAST_PART="$(sgdisk -p "$DEVICE" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ {last=$1} END {print last}')"
-    if [[ -n "$LAST_PART" ]] && [[ "$LAST_PART" =~ ^[0-9]+$ ]]; then
+    if [[ "$DRY_RUN" == true ]] && [[ ! -b "$DEVICE" ]]; then
+        # Simulate dual-boot ESP discovery
+        EFI_PART_NUM="1"
+        EFI_PART="${DEVICE}${PART_SUFFIX}${EFI_PART_NUM}"
+        LAST_PART="3"
         FIRST_PART=$((LAST_PART + 1))
+        echo "[DRY-RUN] Dual-boot: simulated ESP at ${EFI_PART} (partition 1, type EF00)"
+        echo "[DRY-RUN] Dual-boot: CoLinux partitions would start at ${FIRST_PART}"
+    else
+        # Reuse the existing EFI System Partition (type EF00) instead of assuming
+        # the next free partition number is also the boot partition.
+        EFI_PART_NUM="$(sgdisk -p "$DEVICE" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ && $6 == "EF00" {print $1; exit}')"
+        if [[ -z "$EFI_PART_NUM" ]]; then
+            die "Dual-boot mode requires an existing EFI System Partition (GPT type EF00) on $DEVICE."
+        fi
+        EFI_PART="${DEVICE}${PART_SUFFIX}${EFI_PART_NUM}"
+        if [[ ! -b "$EFI_PART" ]]; then
+            die "Existing EFI partition $EFI_PART was not found. Check disk state with lsblk."
+        fi
+
+        # Find highest partition number, then append CoLinux system/persistence.
+        LAST_PART="$(sgdisk -p "$DEVICE" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ {last=$1} END {print last}')"
+        if [[ -n "$LAST_PART" ]] && [[ "$LAST_PART" =~ ^[0-9]+$ ]]; then
+            FIRST_PART=$((LAST_PART + 1))
+        fi
+        echo "Dual-boot: reusing EFI partition ${EFI_PART}; adding CoLinux partitions starting at ${FIRST_PART}"
     fi
-    echo "Dual-boot: reusing EFI partition ${EFI_PART}; adding CoLinux partitions starting at ${FIRST_PART}"
 fi
 
 # ── Wipe/create partition table (replace mode) ───────────────────────────
 if [[ "$DUAL_BOOT" != true ]]; then
     echo "[1/7] Wiping partition table..."
-    sgdisk --zap-all "$DEVICE" 2>/dev/null || true
-    dd if=/dev/zero of="$DEVICE" bs=1M count=1 conv=fsync 2>/dev/null || true
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would run: sgdisk --zap-all $DEVICE"
+        echo "[DRY-RUN] Would run: dd if=/dev/zero of=$DEVICE bs=1M count=1"
+    else
+        sgdisk --zap-all "$DEVICE" 2>/dev/null || true
+        dd if=/dev/zero of="$DEVICE" bs=1M count=1 conv=fsync 2>/dev/null || true
+    fi
 
     echo "[2/7] Creating GPT partition table..."
-    sgdisk --clear --mbrtogpt "$DEVICE" >/dev/null 2>&1 || sgdisk --clear "$DEVICE" >/dev/null 2>&1
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would run: sgdisk --clear --mbrtogpt $DEVICE"
+    else
+        sgdisk --clear --mbrtogpt "$DEVICE" >/dev/null 2>&1 || sgdisk --clear "$DEVICE" >/dev/null 2>&1
+    fi
 else
     echo "[1/7] Preserving existing partition table (dual-boot)..."
 fi
@@ -308,21 +374,35 @@ fi
 
 # EFI partition
 if [[ "$DUAL_BOOT" != true ]]; then
-    sgdisk -n ${P1_NUM}:0:+"${EFI_SIZE}M" -t ${P1_NUM}:EF00 -c ${P1_NUM}:"EFI System" "$DEVICE" >/dev/null 2>&1
-    sgdisk -A ${P1_NUM}:set:2 "$DEVICE" >/dev/null 2>&1
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would create EFI partition: ${P1_NUM} size=+${EFI_SIZE}M type=EF00"
+    else
+        sgdisk -n ${P1_NUM}:0:+"${EFI_SIZE}M" -t ${P1_NUM}:EF00 -c ${P1_NUM}:"EFI System" "$DEVICE" >/dev/null 2>&1
+        sgdisk -A ${P1_NUM}:set:2 "$DEVICE" >/dev/null 2>&1
+    fi
 fi
 
 # System partition
-sfdisk_part_end="+${SYSTEM_SIZE}M"
-sgdisk -n ${P2_NUM}:0:+"${SYSTEM_SIZE}M" -t ${P2_NUM}:8300 -c ${P2_NUM}:"CoLinux System" "$DEVICE" >/dev/null 2>&1
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Would create System partition: ${P2_NUM} size=+${SYSTEM_SIZE}M type=8300"
+else
+    sfdisk_part_end="+${SYSTEM_SIZE}M"
+    sgdisk -n ${P2_NUM}:0:+"${SYSTEM_SIZE}M" -t ${P2_NUM}:8300 -c ${P2_NUM}:"CoLinux System" "$DEVICE" >/dev/null 2>&1
+fi
 
 # Persistence partition (LUKS)
-sgdisk -n ${P3_NUM}:0:0 -t ${P3_NUM}:8300 -c ${P3_NUM}:"CoLinux Persistence" "$DEVICE" >/dev/null 2>&1
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Would create Persist partition: ${P3_NUM} size=remaining type=8300"
+else
+    sgdisk -n ${P3_NUM}:0:0 -t ${P3_NUM}:8300 -c ${P3_NUM}:"CoLinux Persistence" "$DEVICE" >/dev/null 2>&1
+fi
 
 # Wait for kernel to re-read partition table
-sleep 2
-partprobe "$DEVICE" 2>/dev/null || true
-sleep 1
+if [[ "$DRY_RUN" != true ]]; then
+    sleep 2
+    partprobe "$DEVICE" 2>/dev/null || true
+    sleep 1
+fi
 
 if [[ "$DUAL_BOOT" == true ]]; then
     PART1="$EFI_PART"
@@ -333,134 +413,205 @@ PART2="${DEVICE}${PART_SUFFIX}${P2_NUM}"
 PART3="${DEVICE}${PART_SUFFIX}${P3_NUM}"
 
 # Verify partitions exist
-for p in "$PART1" "$PART2" "$PART3"; do
-    if [[ ! -b "$p" ]]; then
-        die "Partition $p was not created. Check disk state with lsblk."
-    fi
-done
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Simulated partition layout:"
+    echo "  PART1 (EFI):    $PART1"
+    echo "  PART2 (System): $PART2"
+    echo "  PART3 (Persist): $PART3"
+else
+    for p in "$PART1" "$PART2" "$PART3"; do
+        if [[ ! -b "$p" ]]; then
+            die "Partition $p was not created. Check disk state with lsblk."
+        fi
+    done
+fi
 
 # ── Format partitions ─────────────────────────────────────────────────────
 echo "[4/7] Formatting partitions..."
 
 # EFI partition (skip if dual-boot — reuse existing)
 if [[ "$DUAL_BOOT" != true ]]; then
-    mkfs.vfat -F 32 -n "$VOLUME_LABEL" "$PART1" >/dev/null 2>&1
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would format: mkfs.vfat -F 32 -n $VOLUME_LABEL $PART1"
+    else
+        mkfs.vfat -F 32 -n "$VOLUME_LABEL" "$PART1" >/dev/null 2>&1
+    fi
     echo "  → $PART1 formatted as FAT32 (EFI)"
 else
     echo "  → Reusing existing EFI partition ($PART1)"
 fi
 
 # System partition
-mkfs.ext4 -F -L "codex-system" "$PART2" >/dev/null 2>&1
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Would format: mkfs.ext4 -F -L codex-system $PART2"
+else
+    mkfs.ext4 -F -L "codex-system" "$PART2" >/dev/null 2>&1
+fi
 echo "  → $PART2 formatted as ext4 (system)"
 
 # ── LUKS persistence ──────────────────────────────────────────────────────
 echo "[5/7] Setting up LUKS persistence partition..."
-echo -n "Enter LUKS passphrase for persistence: "
-read -rs LUKS_PASSPHRASE
-echo ""
-if [[ -z "$LUKS_PASSPHRASE" ]]; then
-    die "Passphrase cannot be empty."
-fi
-echo -n "Confirm passphrase: "
-read -rs LUKS_CONFIRM
-echo ""
-if [[ "$LUKS_PASSPHRASE" != "$LUKS_CONFIRM" ]]; then
-    die "Passphrases do not match."
-fi
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Would prompt for LUKS passphrase"
+    echo "[DRY-RUN] Would run: cryptsetup luksFormat --type luks2 $PART3"
+    echo "[DRY-RUN] Would run: cryptsetup open $PART3 codex-persist-install"
+    echo "[DRY-RUN] Would run: mkfs.ext4 -F -L codex-persist /dev/mapper/codex-persist-install"
+    echo "[DRY-RUN] Would run: cryptsetup close codex-persist-install"
+    echo "  → $PART3 LUKS-encrypted ext4 (persistence) [simulated]"
+else
+    echo -n "Enter LUKS passphrase for persistence: "
+    read -rs LUKS_PASSPHRASE
+    echo ""
+    if [[ -z "$LUKS_PASSPHRASE" ]]; then
+        die "Passphrase cannot be empty."
+    fi
+    echo -n "Confirm passphrase: "
+    read -rs LUKS_CONFIRM
+    echo ""
+    if [[ "$LUKS_PASSPHRASE" != "$LUKS_CONFIRM" ]]; then
+        die "Passphrases do not match."
+    fi
 
-echo -n "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 \
-    --pbkdf argon2id --pbkdf-force-iterations 5 \
-    "$PART3" -q -
-echo -n "$LUKS_PASSPHRASE" | cryptsetup open "$PART3" codex-persist-install -
+    echo -n "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 \
+        --pbkdf argon2id --pbkdf-force-iterations 5 \
+        "$PART3" -q -
+    echo -n "$LUKS_PASSPHRASE" | cryptsetup open "$PART3" codex-persist-install -
 
-mkfs.ext4 -F -L "codex-persist" /dev/mapper/codex-persist-install >/dev/null 2>&1
-cryptsetup close codex-persist-install
-echo "  → $PART3 LUKS-encrypted ext4 (persistence)"
-unset LUKS_PASSPHRASE LUKS_CONFIRM
+    mkfs.ext4 -F -L "codex-persist" /dev/mapper/codex-persist-install >/dev/null 2>&1
+    cryptsetup close codex-persist-install
+    echo "  → $PART3 LUKS-encrypted ext4 (persistence)"
+    unset LUKS_PASSPHRASE LUKS_CONFIRM
+fi
 
 # ── Copy system files ─────────────────────────────────────────────────────
 echo "[6/7] Copying system files..."
 
 TEMP_MOUNT="$(mktemp -d)"
 
-# Copy system image
-mount "$PART2" "$TEMP_MOUNT"
-if [[ -f "${COLINUX_IMAGE_DIR}/system.squashfs" ]]; then
-    cp "${COLINUX_IMAGE_DIR}/system.squashfs" "$TEMP_MOUNT/"
-    echo "  → Copied system.squashfs"
-elif [[ -d "${COLINUX_IMAGE_DIR}/rootfs" ]]; then
-    cp -a "${COLINUX_IMAGE_DIR}/rootfs/"* "$TEMP_MOUNT/"
-    echo "  → Copied root filesystem"
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Would mount $PART2 → $TEMP_MOUNT"
+    if [[ -f "${COLINUX_IMAGE_DIR}/system.squashfs" ]]; then
+        echo "[DRY-RUN] Would copy: ${COLINUX_IMAGE_DIR}/system.squashfs → $TEMP_MOUNT/"
+    elif [[ -d "${COLINUX_IMAGE_DIR}/rootfs" ]]; then
+        echo "[DRY-RUN] Would copy: ${COLINUX_IMAGE_DIR}/rootfs/* → $TEMP_MOUNT/"
+    else
+        echo "[DRY-RUN] WARNING: No system image at ${COLINUX_IMAGE_DIR}/"
+    fi
+    echo "[DRY-RUN] Would unmount $TEMP_MOUNT"
 else
-    echo "  WARNING: No system image found at ${COLINUX_IMAGE_DIR}/"
-    echo "  System partition is prepared but empty."
+    # Copy system image
+    mount "$PART2" "$TEMP_MOUNT"
+    if [[ -f "${COLINUX_IMAGE_DIR}/system.squashfs" ]]; then
+        cp "${COLINUX_IMAGE_DIR}/system.squashfs" "$TEMP_MOUNT/"
+        echo "  → Copied system.squashfs"
+    elif [[ -d "${COLINUX_IMAGE_DIR}/rootfs" ]]; then
+        cp -a "${COLINUX_IMAGE_DIR}/rootfs/"* "$TEMP_MOUNT/"
+        echo "  → Copied root filesystem"
+    else
+        echo "  WARNING: No system image found at ${COLINUX_IMAGE_DIR}/"
+        echo "  System partition is prepared but empty."
+    fi
+    umount "$TEMP_MOUNT"
 fi
-umount "$TEMP_MOUNT"
 
 # ── Install bootloader ────────────────────────────────────────────────────
 echo "[7/7] Installing bootloader..."
 
-mount "$PART1" "$TEMP_MOUNT"
-
-# Create EFI directory structure
-mkdir -p "$TEMP_MOUNT/EFI/BOOT"
-mkdir -p "$TEMP_MOUNT/EFI/colinux"
-
-# Copy kernel and initramfs
-if [[ -f "${COLINUX_IMAGE_DIR}/boot/vmlinuz-lts" ]]; then
-    cp "${COLINUX_IMAGE_DIR}/boot/vmlinuz-lts" "$TEMP_MOUNT/"
-    echo "  → Copied kernel"
-fi
-if [[ -f "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" ]]; then
-    cp "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" "$TEMP_MOUNT/"
-    echo "  → Copied initramfs"
-fi
-
-# Copy EFI bootloader. In dual-boot mode, do not overwrite the existing
-# ESP fallback loader at EFI/BOOT/BOOT*.EFI; install only under EFI/colinux.
-EFI_LOADER="/EFI/colinux/${EFI_BOOT}"
-if [[ -f "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/${EFI_BOOT}" ]]; then
-    cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/colinux/"
-    if [[ "$DUAL_BOOT" != true ]]; then
-        cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/BOOT/"
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Would mount $PART1 → $TEMP_MOUNT"
+    echo "[DRY-RUN] Would create: $TEMP_MOUNT/EFI/BOOT/ $TEMP_MOUNT/EFI/colinux/"
+    if [[ -f "${COLINUX_IMAGE_DIR}/boot/vmlinuz-lts" ]]; then
+        echo "[DRY-RUN] Would copy kernel → $TEMP_MOUNT/"
     fi
-elif command -v grub-install &>/dev/null; then
-    grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_MOUNT" \
-                 --boot-directory="$TEMP_MOUNT" \
-                 --bootloader-id="colinux" \
-                 --recheck "$DEVICE" >/dev/null 2>&1 || {
+    if [[ -f "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" ]]; then
+        echo "[DRY-RUN] Would copy initramfs → $TEMP_MOUNT/"
+    fi
+
+    EFI_LOADER="/EFI/colinux/${EFI_BOOT}"
+    if [[ -f "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/${EFI_BOOT}" ]]; then
+        echo "[DRY-RUN] Would copy EFI bootloader from ${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/ → $TEMP_MOUNT/EFI/colinux/"
         if [[ "$DUAL_BOOT" != true ]]; then
-            echo "  WARNING: grub-install failed, trying --removable fallback..."
-            grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_MOUNT" \
-                         --boot-directory="$TEMP_MOUNT" --removable \
-                         --recheck "$DEVICE" >/dev/null 2>&1 || true
+            echo "[DRY-RUN] Would copy EFI bootloader → $TEMP_MOUNT/EFI/BOOT/ (fallback)"
         else
-            die "grub-install failed; refusing to touch EFI/BOOT fallback in dual-boot mode."
+            echo "[DRY-RUN] Dual-boot: would NOT overwrite EFI/BOOT fallback"
         fi
-    }
-    if [[ -f "$TEMP_MOUNT/EFI/colinux/${GRUB_EFI}" ]]; then
-        EFI_LOADER="/EFI/colinux/${GRUB_EFI}"
+    else
+        echo "[DRY-RUN] Would run: grub-install --target=${GRUB_TARGET} --efi-directory=$TEMP_MOUNT --bootloader-id=colinux $DEVICE"
     fi
-fi
 
-# Generate boot configuration
-PARTUUID_SYSTEM="$(blkid -s PARTUUID -o value "$PART2" 2>/dev/null || echo "unknown")"
-PARTUUID_PERSIST="$(blkid -s PARTUUID -o value "$PART3" 2>/dev/null || echo "unknown")"
+    echo "[DRY-RUN] Would create boot config: $TEMP_MOUNT/EFI/colinux/colinux.conf"
+    echo "[DRY-RUN] Boot config content:"
+    echo "  title CoLinux Lite"
+    echo "  linux /vmlinuz-lts"
+    echo "  initrd /initramfs-lts"
+    echo "  options quiet splash root=PARTUUID=<simulated> ro cryptroot=PARTUUID=<simulated>"
+    echo "  → Created boot configuration [simulated]"
+    echo "[DRY-RUN] Would unmount $TEMP_MOUNT"
+else
+    mount "$PART1" "$TEMP_MOUNT"
 
-cat > "$TEMP_MOUNT/EFI/colinux/colinux.conf" <<BOOTCFG
+    # Create EFI directory structure
+    mkdir -p "$TEMP_MOUNT/EFI/BOOT"
+    mkdir -p "$TEMP_MOUNT/EFI/colinux"
+
+    # Copy kernel and initramfs
+    if [[ -f "${COLINUX_IMAGE_DIR}/boot/vmlinuz-lts" ]]; then
+        cp "${COLINUX_IMAGE_DIR}/boot/vmlinuz-lts" "$TEMP_MOUNT/"
+        echo "  → Copied kernel"
+    fi
+    if [[ -f "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" ]]; then
+        cp "${COLINUX_IMAGE_DIR}/boot/initramfs-lts" "$TEMP_MOUNT/"
+        echo "  → Copied initramfs"
+    fi
+
+    # Copy EFI bootloader. In dual-boot mode, do not overwrite the existing
+    # ESP fallback loader at EFI/BOOT/BOOT*.EFI; install only under EFI/colinux.
+    EFI_LOADER="/EFI/colinux/${EFI_BOOT}"
+    if [[ -f "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/${EFI_BOOT}" ]]; then
+        cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/colinux/"
+        if [[ "$DUAL_BOOT" != true ]]; then
+            cp -a "${COLINUX_IMAGE_DIR}/boot/EFI/BOOT/"* "$TEMP_MOUNT/EFI/BOOT/"
+        fi
+    elif command -v grub-install &>/dev/null; then
+        grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_MOUNT" \
+                     --boot-directory="$TEMP_MOUNT" \
+                     --bootloader-id="colinux" \
+                     --recheck "$DEVICE" >/dev/null 2>&1 || {
+            if [[ "$DUAL_BOOT" != true ]]; then
+                echo "  WARNING: grub-install failed, trying --removable fallback..."
+                grub-install --target="${GRUB_TARGET}" --efi-directory="$TEMP_MOUNT" \
+                             --boot-directory="$TEMP_MOUNT" --removable \
+                             --recheck "$DEVICE" >/dev/null 2>&1 || true
+            else
+                die "grub-install failed; refusing to touch EFI/BOOT fallback in dual-boot mode."
+            fi
+        }
+        if [[ -f "$TEMP_MOUNT/EFI/colinux/${GRUB_EFI}" ]]; then
+            EFI_LOADER="/EFI/colinux/${GRUB_EFI}"
+        fi
+    fi
+
+    # Generate boot configuration
+    PARTUUID_SYSTEM="$(blkid -s PARTUUID -o value "$PART2" 2>/dev/null || echo "unknown")"
+    PARTUUID_PERSIST="$(blkid -s PARTUUID -o value "$PART3" 2>/dev/null || echo "unknown")"
+
+    cat > "$TEMP_MOUNT/EFI/colinux/colinux.conf" <<BOOTCFG
 title CoLinux Lite
 linux /vmlinuz-lts
 initrd /initramfs-lts
 options quiet splash root=PARTUUID=${PARTUUID_SYSTEM} ro cryptroot=PARTUUID=${PARTUUID_PERSIST}
 BOOTCFG
 
-echo "  → Created boot configuration"
-umount "$TEMP_MOUNT"
+    echo "  → Created boot configuration"
+    umount "$TEMP_MOUNT"
+fi
 rmdir "$TEMP_MOUNT"
 
 # ── Install EFI boot entry (NVRAM) ────────────────────────────────────────
-if command -v efibootmgr &>/dev/null; then
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Would add EFI boot entry via efibootmgr"
+    echo "[DRY-RUN] Would run: efibootmgr --create --disk $DEVICE --label CoLinux --loader $EFI_LOADER"
+elif command -v efibootmgr &>/dev/null; then
     BOOT_ENTRY_PART="$P1_NUM"
     if [[ "$DUAL_BOOT" == true ]]; then
         BOOT_ENTRY_PART="$EFI_PART_NUM"
@@ -480,29 +631,53 @@ elif [[ "$DUAL_BOOT" == true ]]; then
 fi
 
 # ── Finalize ──────────────────────────────────────────────────────────────
-sync
+if [[ "$DRY_RUN" != true ]]; then
+    sync
+fi
 
 # Write install metadata
-mkdir -p "/persist"
-cat > "/persist/install-info" <<META
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Would write install metadata to /persist/install-info:"
+    echo "  codex_install_device=$DEVICE"
+    echo "  codex_install_serial=$SERIAL"
+    echo "  codex_install_mode=$MODE"
+    echo "  codex_install_date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "  codex_install_external=$EXTERNAL"
+else
+    mkdir -p "/persist"
+    cat > "/persist/install-info" <<META
 codex_install_device=$DEVICE
 codex_install_serial=$SERIAL
 codex_install_mode=$MODE
 codex_install_date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 codex_install_external=$EXTERNAL
 META
-
-echo ""
-echo "✓ CoLinux PC installation complete!"
-echo "  Device:  $DEVICE ($MODEL, $SERIAL)"
-echo "  Mode:    $MODE"
-if [[ "$EXTERNAL" == true ]]; then
-    echo "  Target:  External SSD"
 fi
-echo ""
-echo "  Partitions:"
-sgdisk -p "$DEVICE" 2>/dev/null || lsblk "$DEVICE"
-echo ""
-echo "Reboot to start CoLinux from this disk."
 
-log_action "COMPLETE mode=$MODE device=$DEVICE serial=$SERIAL external=$EXTERNAL"
+echo ""
+if [[ "$DRY_RUN" == true ]]; then
+    echo "✓ CoLinux PC installation DRY-RUN complete!"
+    echo "  Device:  $DEVICE ($MODEL, $SERIAL)"
+    echo "  Mode:    $MODE"
+    echo ""
+    echo "  Simulated partition layout:"
+    echo "    $PART1  EFI System (FAT32, ${EFI_SIZE}MB)"
+    echo "    $PART2  CoLinux System (ext4, ${SYSTEM_SIZE}MB)"
+    echo "    $PART3  CoLinux Persistence (LUKS, remaining)"
+    echo ""
+    echo "  No disk changes were made. Re-run without --dry-run to install."
+else
+    echo "✓ CoLinux PC installation complete!"
+    echo "  Device:  $DEVICE ($MODEL, $SERIAL)"
+    echo "  Mode:    $MODE"
+    if [[ "$EXTERNAL" == true ]]; then
+        echo "  Target:  External SSD"
+    fi
+    echo ""
+    echo "  Partitions:"
+    sgdisk -p "$DEVICE" 2>/dev/null || lsblk "$DEVICE"
+    echo ""
+    echo "Reboot to start CoLinux from this disk."
+fi
+
+log_action "COMPLETE mode=$MODE device=$DEVICE serial=$SERIAL external=$EXTERNAL dry_run=$DRY_RUN"

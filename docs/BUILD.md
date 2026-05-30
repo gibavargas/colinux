@@ -174,6 +174,26 @@ The smoke test boots the ISO in QEMU and validates:
 4. Network interface is present
 5. Persistence partition detection works
 
+### Installer dry-run (no disk changes)
+
+```bash
+# Simulate a full PC install to a virtual device (no real disk needed)
+codex-install-pc --dry-run /dev/sim-nvme0n1
+
+# Simulate dual-boot install
+codex-install-pc --dry-run --dual-boot /dev/sim-nvme0n1
+
+# Simulate with custom partition sizes
+codex-install-pc --dry-run --efi-size 256 --system-size 2048 /dev/sim-nvme0n1
+
+# Dry-run against a real device (uses actual disk info but still no changes)
+codex-install-pc --dry-run /dev/sda
+```
+
+The dry-run validates the full installer critical path: device detection, partition
+layout, ESP selection (dual-boot), dependency checks, formatting plan, LUKS setup,
+bootloader install, and EFI NVRAM entry — all without touching any disk.
+
 ### Interactive QEMU boot
 
 ```bash
