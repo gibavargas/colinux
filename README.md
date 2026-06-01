@@ -101,10 +101,14 @@ Or on an Alpine Linux host: `sudo bash scripts/build-alpine.sh --arch x86_64`
 ### 2. Smoke-test with QEMU
 
 ```bash
-# Automated smoke tests (boot + codex + disk inventory + network):
-./scripts/test-iso.sh --iso dist/colinux-lite-x86_64-*.iso
+# Automated smoke tests (build → codexctl + QEMU boot + disk inventory):
+./scripts/smoke-test.sh --all
 
-# Or boot interactively:
+# Or run stages individually:
+./scripts/smoke-test.sh --docker                   # Docker build + codexctl validate
+./scripts/smoke-test.sh --iso                      # QEMU boot test (auto-finds ISO)
+
+# Boot interactively in QEMU:
 ./scripts/build-qemu.sh --iso dist/colinux-lite-x86_64-*.iso --boot --no-gui
 ```
 
@@ -177,7 +181,8 @@ colinux/
 │   ├── build-alpine-desktop.sh        # Alpine ISO build (desktop)
 │   ├── build-debian-compat.sh         # Debian compat ISO build
 │   ├── build-debian.sh                # Debian desktop ISO build
-│   ├── test-iso.sh                    # QEMU smoke tests
+│   ├── smoke-test.sh               # Unified smoke test (Docker + ISO)
+│   ├── test-iso.sh                    # QEMU ISO boot test (detailed)
 │   ├── build-qemu.sh                  # QEMU interactive boot
 │   ├── first-boot.sh                  # First-boot setup
 │   └── setup-codex.sh                # Codex CLI setup/update
@@ -246,6 +251,10 @@ doas codex-install-usb /dev/sdX
 Use `codex-install-pc` to install CoLinux to an internal disk:
 
 ```bash
+# Simulate first (no disk changes):
+doas codex-install-pc /dev/nvme0n1 --dry-run
+
+# Install for real:
 doas codex-install-pc /dev/nvme0n1          # full disk
 doas codex-install-pc /dev/sda --dual-boot  # dual-boot with existing OS
 ```
