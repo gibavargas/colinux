@@ -107,6 +107,7 @@ Or on an Alpine Linux host: `sudo bash scripts/build-alpine.sh --arch x86_64`
 # Or run stages individually:
 ./scripts/smoke-test.sh --docker                   # Docker build + codexctl validate
 ./scripts/smoke-test.sh --iso                      # QEMU boot test (auto-finds ISO)
+./scripts/smoke-test.sh --first-boot               # Simulate first-boot hook execution in Docker
 
 # Boot interactively in QEMU:
 ./scripts/build-qemu.sh --iso dist/colinux-lite-x86_64-*.iso --boot --no-gui
@@ -749,6 +750,9 @@ CODEX_VERSION=v0.1.0 ARCH=x86_64 bash scripts/build-alpine.sh
 
 # QEMU boot test (requires a built ISO)
 ./scripts/smoke-test.sh --iso
+
+# First-boot hook simulation (runs in Docker, no real disk/network)
+./scripts/smoke-test.sh --first-boot
 
 # Full pipeline
 ./scripts/smoke-test.sh --all

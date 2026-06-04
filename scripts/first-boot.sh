@@ -13,19 +13,63 @@
 #
 # This script is designed to run as root during early boot (OpenRC service)
 # and should be idempotent — safe to run on every boot.
+#
+# Dry-run / simulation mode:
+#   first-boot.sh --dry-run
+# Redirects $CODEX_PERSIST to a tmp directory and skips destructive or
+# host-disrupting steps (persistence mount, DHCP networking, Codex download,
+# interactive auth, cron install). Still runs: runtime dir setup, disk
+# inventory, AGENTS.md copy, postinstall hooks, first-boot marker write.
+# Use this from smoke-test.sh --first-boot to validate the hook execution
+# path without requiring a real boot or root device access.
 # =============================================================================
 set -euo pipefail
+
+DRY_RUN=false
+
+# ── Argument parsing (dry-run aware) ─────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run|--simulate)
+            DRY_RUN=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [--dry-run]"
+            echo ""
+            echo "  --dry-run   Simulate first boot using a tmp directory for /persist."
+            echo "              Skips disk mount, network DHCP, Codex download, auth, and cron."
+            echo "              Postinstall hooks still execute, and the first-boot marker is written."
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+done
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 CODEX_HOME="/home/codex"
 CODEX_WORKSPACE="/workspace"
 CODEX_PERSIST="/persist"
 CODEX_RUNTIME="/run/codex"
+
+# In dry-run mode, redirect persist-derived paths to an isolated tmp area so
+# we never touch a real /persist mount or write outside the simulated scope.
+if [[ "$DRY_RUN" == true ]]; then
+    CODEX_PERSIST="${CODEX_PERSIST_SIM:-/tmp/colinux-firstboot-sim}"
+    # CODEX_RUNTIME must also live under the simulated persist tree so that
+    # non-root / CI containers (where /run/codex is not writable) can run the
+    # dry-run path without spurious permission errors.
+    CODEX_RUNTIME="$CODEX_PERSIST/run"
+fi
+
 CODEX_CONFIG="$CODEX_PERSIST/config"
 CODEX_LOGS="$CODEX_PERSIST/logs"
 LOGFILE="$CODEX_LOGS/first-boot.log"
 CODEX_DATA="$CODEX_PERSIST/data"
-FIRST_BOOT_FLAG="/persist/.first-boot-done"
+FIRST_BOOT_FLAG="$CODEX_PERSIST/.first-boot-done"
 MOTD_FILE="/etc/motd"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -69,6 +113,14 @@ generate_disk_inventory() {
     log_info "Generating disk inventory..."
 
     local inventory_file="$CODEX_RUNTIME/disks.json"
+
+    # In dry-run mode, skip the codex-disk-inventory wrapper because it writes
+    # to a hardcoded /persist/logs path that bypasses our simulated persist.
+    if [[ "$DRY_RUN" == true ]]; then
+        generate_disk_inventory_manual
+        log_info "Disk inventory saved to $inventory_file"
+        return 0
+    fi
 
     if command -v codex-disk-inventory >/dev/null 2>&1; then
         codex-disk-inventory > "$inventory_file" 2>&1 || {
@@ -396,7 +448,7 @@ install_codex_if_missing() {
 
 # ── Run packaged postinstall hooks ───────────────────────────────────────────
 run_postinstall_hooks() {
-    local hook_dir="/persist/config/postinstall"
+    local hook_dir="$CODEX_CONFIG/postinstall"
     local failed=0
 
     if [ ! -d "$hook_dir" ]; then
@@ -422,8 +474,11 @@ run_postinstall_hooks() {
 mark_complete() {
     mkdir -p "$(dirname "$FIRST_BOOT_FLAG")"
     date -Iseconds > "$FIRST_BOOT_FLAG"
-    chown root:root "$FIRST_BOOT_FLAG"
-    chmod 644 "$FIRST_BOOT_FLAG"
+    # chown/chmod are best-effort; they may fail when running as non-root
+    # (e.g., inside Docker during --dry-run smoke tests). The flag file is
+    # still created, which is what callers check.
+    chown root:root "$FIRST_BOOT_FLAG" 2>/dev/null || true
+    chmod 644 "$FIRST_BOOT_FLAG" 2>/dev/null || true
     log_info "First boot initialization complete."
 }
 
@@ -433,15 +488,29 @@ main() {
     log_info "Kernel: $(uname -r)"
     log_info "Arch:   $(uname -m)"
     log_info "Date:   $(date)"
+    if [[ "$DRY_RUN" == true ]]; then
+        log_info "DRY-RUN MODE — using $CODEX_PERSIST"
+        log_info "Skipping: persistence mount, network DHCP, Codex download, auth, cron."
+    fi
 
     setup_runtime_dirs
     generate_disk_inventory
-    setup_persistence
-    setup_network
-    install_codex_if_missing
-    setup_codex_auth
+
+    if [[ "$DRY_RUN" != true ]]; then
+        setup_persistence
+        setup_network
+        install_codex_if_missing
+        setup_codex_auth
+        setup_cron
+    else
+        log_info "DRY-RUN: skipping setup_persistence (no mount/cryptsetup)."
+        log_info "DRY-RUN: skipping setup_network (no DHCP/host disruption)."
+        log_info "DRY-RUN: skipping install_codex_if_missing (no network download)."
+        log_info "DRY-RUN: skipping setup_codex_auth (no TTY prompt)."
+        log_info "DRY-RUN: skipping setup_cron (no host crontab write)."
+    fi
+
     setup_agents_md
-    setup_cron
     run_postinstall_hooks
     mark_complete
 
