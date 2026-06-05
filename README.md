@@ -19,6 +19,7 @@
   <a href="#installation">Install</a> •
   <a href="docs/DISK_SAFETY.md">Disk Safety</a> •
   <a href="docs/SECURITY.md">Security</a> •
+  <a href="docs/RELEASE.md">Release</a> •
   <a href="LICENSE">License</a>
 </p>
 
@@ -193,6 +194,7 @@ colinux/
 │   ├── SECURITY.md                    # Security documentation
 │   ├── DISK_SAFETY.md                 # Disk safety model
 │   ├── EDITIONS.md                    # Edition comparison
+│   ├── RELEASE.md                     # v0.2 release checklist & MVP exit criteria
 │   └── GUIDE_DESKTOP.md               # Desktop edition guide
 └── AGENTS.md                          # Codex agent operating rules
 ```
@@ -226,6 +228,14 @@ Set environment variables to override defaults:
 | `CODEX_VERSION` | `latest` | Codex CLI version to bundle |
 | `ALPINE_RELEASE` | `3.21` | Alpine version |
 | `OUTDIR` | `./dist` | Output directory |
+
+### Releasing
+
+To cut a `v0.2` (or later) release — build artifacts, generate checksums +
+manifest, sign, and publish — follow the checklist in
+[`docs/RELEASE.md`](docs/RELEASE.md). It covers MVP exit criteria,
+pre-release checks, artifact generation with `scripts/release.sh`, and
+post-release verification.
 
 ## Installation
 
