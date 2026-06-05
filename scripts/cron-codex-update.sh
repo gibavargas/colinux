@@ -23,7 +23,9 @@ set -euo pipefail
 # ── Cleanup ──────────────────────────────────────────────────────────────────
 _CLEANUP_DIRS=()
 _cleanup() {
-    [ ${#_CLEANUP_DIRS[@]} -gt 0 ] && rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
+    if [ ${#_CLEANUP_DIRS[@]} -gt 0 ]; then
+        rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
+    fi
 }
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -59,7 +61,11 @@ log() {
 log_info()  { log "INFO"  "$@"; }
 log_warn()  { log "WARN"  "$@"; }
 log_error() { log "ERROR" "$@"; }
-log_debug() { [ "${DEBUG:-0}" = "1" ] && log "DEBUG" "$@" || true; }
+log_debug() {
+    if [ "${DEBUG:-0}" = "1" ]; then
+        log "DEBUG" "$@"
+    fi
+}
 
 validate_tar_archive() {
     local archive="$1" member listing
@@ -332,7 +338,15 @@ do_update() {
     log_info "Codex CLI updated to: $new_ver"
 
     # Cleanup old backups (keep last 3)
-    ls -t "${CODEX_BIN}".bak.* 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
+    local backups=()
+    local backup
+    for backup in "${CODEX_BIN}".bak.*; do
+        [ -e "$backup" ] || continue
+        backups+=("$backup")
+    done
+    if [ ${#backups[@]} -gt 3 ]; then
+        rm -f "${backups[@]:0:${#backups[@]}-3}" 2>/dev/null || true
+    fi
 
     return 0
 }

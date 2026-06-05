@@ -27,7 +27,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROFILE_DIR="$PROJECT_DIR/profiles/debian"
 BUILD_DIR="$PROJECT_DIR/work/debian-build"
-WORK_DIR="$BUILD_DIR/work"
 OUTPUT_DIR="$BUILD_DIR/output"
 
 # Build options
@@ -128,6 +127,10 @@ setup_build_dir() {
 # ── Download Codex Desktop ───────────────────────────────────────────────────
 download_codex_desktop() {
     step "Downloading Codex Desktop (Electron)"
+
+    if [ -n "$CODEX_DESKTOP_VERSION" ]; then
+        warn "--version is accepted for compatibility but Codex Desktop builds are pinned by CODEX_DESKTOP_COMMIT."
+    fi
 
     if $QUICK && [ -d "$BUILD_DIR/codex-desktop-cache" ]; then
         log "Using cached Codex Desktop (--quick)"

@@ -50,7 +50,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-CODEX_HOME="/home/codex"
 CODEX_WORKSPACE="/workspace"
 CODEX_PERSIST="/persist"
 CODEX_RUNTIME="/run/codex"
@@ -70,7 +69,6 @@ CODEX_LOGS="$CODEX_PERSIST/logs"
 LOGFILE="$CODEX_LOGS/first-boot.log"
 CODEX_DATA="$CODEX_PERSIST/data"
 FIRST_BOOT_FLAG="$CODEX_PERSIST/.first-boot-done"
-MOTD_FILE="/etc/motd"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 log() {
@@ -256,9 +254,13 @@ setup_network() {
             dhcpcd -q 2>/dev/null || true
         elif command -v udhcpc >/dev/null 2>&1; then
             for iface in /sys/class/net/eth* /sys/class/net/en*; do
-                [ -d "$iface" ] && udhcpc -i "$(basename "$iface")" -q -s /usr/share/udhcpc/default.script 2>/dev/null || true
+                if [ -d "$iface" ]; then
+                    udhcpc -i "$(basename "$iface")" -q -s /usr/share/udhcpc/default.script 2>/dev/null || true
+                fi
             done
         fi
+    elif $has_wifi; then
+        log_info "WiFi interface detected; configure credentials manually if ethernet is unavailable."
     fi
 
     # Check connectivity

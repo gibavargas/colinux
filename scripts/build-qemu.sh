@@ -180,7 +180,9 @@ boot_qemu() {
         echo "    KVM acceleration: not available (software emulation)"
     fi
 
-    # User-mode networking with port forwarding for SSH
+    # User-mode networking with port forwarding for SSH.
+    # The comma-separated -netdev value is a single QEMU argument, not an array separator.
+    # shellcheck disable=SC2054
     qemu_args+=(
         -netdev user,id=net0,hostfwd=tcp::2222-:22
         -device virtio-net-pci,netdev=net0

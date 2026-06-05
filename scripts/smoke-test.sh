@@ -26,7 +26,7 @@ DIST_DIR="$PROJECT_ROOT/dist"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
 STAGE_DOCKER=false
 STAGE_ISO=false
@@ -41,6 +41,7 @@ log_pass()  { echo -e "  ${GREEN}[PASS]${NC}  $*"; }
 log_fail()  { echo -e "  ${RED}[FAIL]${NC}  $*"; }
 log_info()  { echo -e "  ${BLUE}[INFO]${NC}  $*"; }
 log_skip()  { echo -e "  ${YELLOW}[SKIP]${NC}  $*"; }
+indent_output() { sed 's/^/    /'; }
 
 PASS=0
 FAIL=0
@@ -122,7 +123,7 @@ run_docker_stage() {
         PASS=$((PASS+1))
     else
         log_fail "Syntax errors in container scripts:"
-        echo "$syntax_errors" | sed 's/^/    /'
+        echo "$syntax_errors" | indent_output
         FAIL=$((FAIL+1))
     fi
 
@@ -144,7 +145,7 @@ run_docker_stage() {
         PASS=$((PASS+1))
     else
         log_fail "Missing doas.conf commands:"
-        echo "$doas_check" | sed 's/^/    /'
+        echo "$doas_check" | indent_output
         FAIL=$((FAIL+1))
     fi
 }
@@ -284,7 +285,7 @@ grep -q "DRY-RUN MODE" "$SIM_PERSIST/logs/first-boot.log" && echo "DRY_RUN_LOG_O
     # Evaluate results
     if echo "$fb_output" | grep -q '^FIRST_BOOT_FAILED$'; then
         log_fail "first-boot.sh --dry-run exited non-zero"
-        echo "$fb_output" | sed 's/^/    /'
+        echo "$fb_output" | indent_output
         FAIL=$((FAIL+1))
         return 1
     fi
@@ -296,7 +297,7 @@ grep -q "DRY-RUN MODE" "$SIM_PERSIST/logs/first-boot.log" && echo "DRY_RUN_LOG_O
         PASS=$((PASS+1))
     else
         log_fail "Postinstall hook did not write marker"
-        echo "$fb_output" | sed 's/^/    /'
+        echo "$fb_output" | indent_output
         FAIL=$((FAIL+1))
     fi
 
@@ -305,7 +306,7 @@ grep -q "DRY-RUN MODE" "$SIM_PERSIST/logs/first-boot.log" && echo "DRY_RUN_LOG_O
         PASS=$((PASS+1))
     else
         log_fail "Hook was not removed after successful execution"
-        echo "$fb_output" | sed 's/^/    /'
+        echo "$fb_output" | indent_output
         FAIL=$((FAIL+1))
     fi
 
@@ -314,7 +315,7 @@ grep -q "DRY-RUN MODE" "$SIM_PERSIST/logs/first-boot.log" && echo "DRY_RUN_LOG_O
         PASS=$((PASS+1))
     else
         log_fail "First-boot marker missing"
-        echo "$fb_output" | sed 's/^/    /'
+        echo "$fb_output" | indent_output
         FAIL=$((FAIL+1))
     fi
 

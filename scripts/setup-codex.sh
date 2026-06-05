@@ -16,7 +16,9 @@ set -euo pipefail
 # ── Cleanup ──────────────────────────────────────────────────────────────────
 _CLEANUP_DIRS=()
 _cleanup() {
-    [ ${#_CLEANUP_DIRS[@]} -gt 0 ] && rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
+    if [ ${#_CLEANUP_DIRS[@]} -gt 0 ]; then
+        rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
+    fi
 }
 
 # ── Configuration ─────────────────────────────────────────────────────────────

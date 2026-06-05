@@ -265,14 +265,14 @@ install_packages() {
     chroot "$chroot" apt-get update
 
     # Read package list and install (skip comments and blank lines)
-    local packages
-    packages=$(grep -v '^\s*#' "$PACKAGE_LIST" | grep -v '^\s*$' | tr '\n' ' ')
+    local packages=()
+    mapfile -t packages < <(grep -v '^\s*#' "$PACKAGE_LIST" | grep -v '^\s*$')
 
-    log_info "Installing $(echo "$packages" | wc -w) packages..."
+    log_info "Installing ${#packages[@]} packages..."
 
     # Set DEBIAN_FRONTEND to avoid interactive prompts
     chroot "$chroot" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        $packages
+        "${packages[@]}"
 
     log_info "Packages installed."
 }
@@ -512,10 +512,14 @@ generate_iso() {
     local kernel_initrd_dir="$chroot/boot"
     local f
     for f in "$kernel_initrd_dir"/vmlinuz*; do
-        [ -f "$f" ] && cp "$f" "$iso_staging/boot/vmlinuz" 2>/dev/null || true
+        if [ -f "$f" ]; then
+            cp "$f" "$iso_staging/boot/vmlinuz" 2>/dev/null || true
+        fi
     done
     for f in "$kernel_initrd_dir"/initrd*; do
-        [ -f "$f" ] && cp "$f" "$iso_staging/boot/initrd.img" 2>/dev/null || true
+        if [ -f "$f" ]; then
+            cp "$f" "$iso_staging/boot/initrd.img" 2>/dev/null || true
+        fi
     done
 
     # Create GRUB configuration

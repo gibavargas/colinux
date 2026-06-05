@@ -20,7 +20,9 @@ set -euo pipefail
 # ── Cleanup ──────────────────────────────────────────────────────────────────
 _CLEANUP_DIRS=()
 _cleanup() {
-    [ ${#_CLEANUP_DIRS[@]} -gt 0 ] && rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
+    if [ ${#_CLEANUP_DIRS[@]} -gt 0 ]; then
+        rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
+    fi
 }
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
@@ -296,13 +298,15 @@ run_mkimage() {
     # --outdir:      Where to put the result
     # Set PACKAGER_PUBKEY so mkimage.sh can inject APK signing keys
     # (without it, cp "" fails inside the aports build framework)
-    export PACKAGER_PUBKEY="${PACKAGER_PUBKEY:-$(ls /usr/share/apk/keys/*.rsa.pub 2>/dev/null | head -1)}"
+    export PACKAGER_PUBKEY="${PACKAGER_PUBKEY:-$(find /usr/share/apk/keys -maxdepth 1 -type f -name '*.rsa.pub' 2>/dev/null | sort | head -1)}"
 
     # The aports mkimage.sh calls git status to detect a -dirty suffix.
     # Inside the Docker container, git discovers the mounted /src/.git
     # (colinux repo) instead of the aports repo and fails.
     # alpine-sdk depends on git so `apk del` fails; move the binary instead.
-    command -v git >/dev/null 2>&1 && mv "$(command -v git)" /tmp/git.disabled || true
+    if command -v git >/dev/null 2>&1; then
+        mv "$(command -v git)" /tmp/git.disabled || true
+    fi
 
     "$mkimage_script" \
         --profile "colinux-lite" \
