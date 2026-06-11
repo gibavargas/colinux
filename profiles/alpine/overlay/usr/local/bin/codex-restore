@@ -148,7 +148,7 @@ echo "Validating archive metadata..."
 validate_archive_members "$RESTORE_FILE"
 
 echo "Extracting to staging directory..."
-tar xzf "$RESTORE_FILE" -C "$STAGING_DIR" 2>&1 || {
+tar xzf "$RESTORE_FILE" -C "$STAGING_DIR" --no-absolute-filenames --anchored 2>&1 || {
     die "Failed to extract backup archive."
 }
 

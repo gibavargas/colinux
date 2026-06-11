@@ -119,7 +119,7 @@ install_hooks() {
 set -e
 echo "Setting up additional repositories..."
 
-# Node.js 20.x (LTS)
+# Node.js 22.x (LTS)
 if [ ! -f /etc/apt/sources.list.d/nodesource.list ]; then
     key_tmp="$(mktemp)"
     trap 'rm -f "$key_tmp"' EXIT
@@ -132,7 +132,7 @@ if [ ! -f /etc/apt/sources.list.d/nodesource.list ]; then
     gpg --dearmor -o /usr/share/keyrings/nodesource.gpg "$key_tmp" 2>/dev/null
     rm -f "$key_tmp"
     trap - EXIT
-    echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+    echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list
 fi
 HOOK
