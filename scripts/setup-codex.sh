@@ -143,7 +143,7 @@ get_latest_version() {
     fi
 
     local version
-    version="$(curl -fsSL "$url" 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^ "]+"' | sed 's/.*"//;s/"$//' | head -1)"
+    version="$(curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "$url" 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^ "]+"' | sed 's/.*"//;s/"$//' | head -1)"
 
     if [ -z "$version" ]; then
         log_error "Could not determine latest version from GitHub API."
@@ -164,7 +164,7 @@ get_asset_digest_sha256() {
         return 1
     fi
 
-    digest="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${version}"         | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .digest // empty' 2>/dev/null         | head -1)" || true
+    digest="$(curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${version}"         | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .digest // empty' 2>/dev/null         | head -1)" || true
     digest="${digest#sha256:}"
     if [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
         echo "$digest"
@@ -222,7 +222,7 @@ download_codex() {
 
     while [ $attempts -lt $max_attempts ]; do
         attempts=$((attempts + 1))
-        if curl -fsSL --retry-connrefused --retry-delay 3 \
+        if curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
             --connect-timeout 30 \
             -o "$tmpdir/$filename" "$download_url"; then
             break

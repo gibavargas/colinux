@@ -208,8 +208,8 @@ download_codex_desktop() {
 
     # Find the darwin release asset
     local release_info download_url asset_name asset_digest
-    release_info="$(curl -fsSL "$GITHUB_API/$CODEX_REPO/releases/tags/$version" 2>/dev/null)" || \
-        release_info="$(curl -fsSL "$GITHUB_API/$CODEX_REPO/releases/latest" 2>/dev/null)" || {
+    release_info="$(curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "$GITHUB_API/$CODEX_REPO/releases/tags/$version" 2>/dev/null)" || \
+        release_info="$(curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "$GITHUB_API/$CODEX_REPO/releases/latest" 2>/dev/null)" || {
         log_error "Failed to fetch release info"
         return 1
     }

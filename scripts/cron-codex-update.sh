@@ -184,7 +184,7 @@ get_latest_version() {
     esac
 
     local version
-    version="$(curl -fsSL --connect-timeout 15 "$api_url" 2>/dev/null \
+    version="$(curl -fsSL --connect-timeout 15 --retry 3 --retry-delay 5 --retry-all-errors "$api_url" 2>/dev/null \
         | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^ "]+"' | sed 's/.*"//;s/"$//' | head -1)"
 
     if [ -z "$version" ]; then
@@ -206,7 +206,7 @@ get_asset_digest_sha256() {
         return 1
     fi
 
-    digest="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${version}"         | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .digest // empty' 2>/dev/null         | head -1)" || true
+    digest="$(curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${version}"         | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .digest // empty' 2>/dev/null         | head -1)" || true
     digest="${digest#sha256:}"
     if [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
         echo "$digest"
@@ -292,7 +292,7 @@ do_update() {
     trap _cleanup EXIT
 
     # Download
-    if ! curl -fsSL --connect-timeout 30 -o "$tmpdir/$filename" "$url"; then
+    if ! curl -fsSL --connect-timeout 30 --retry 3 --retry-delay 5 --retry-all-errors -o "$tmpdir/$filename" "$url"; then
         log_error "Download failed: $url"
         return 1
     fi
