@@ -75,14 +75,14 @@ validate_tar_archive() {
 log_step()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}\n"; }
 
 get_latest_codex_version() {
-    curl -fsSL https://api.github.com/repos/openai/codex/releases/latest \
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors https://api.github.com/repos/openai/codex/releases/latest \
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
         | head -1
 }
 
 get_codex_asset_digest_sha256() {
     local version="$1" asset_name="$2"
-    curl -fsSL "https://api.github.com/repos/openai/codex/releases/tags/${version}" \
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/openai/codex/releases/tags/${version}" \
         | awk -v name="$asset_name" '
             index($0, "\"name\": \"" name "\"") { found=1 }
             found && /"digest":/ {
@@ -361,7 +361,7 @@ inject_codex() {
     trap _cleanup EXIT
 
     # Download and verify integrity using GitHub release asset digest.
-    curl -fsSL --retry 3 --retry-delay 5 -o "$tmpdir/$codex_filename" "$download_url" || {
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors -o "$tmpdir/$codex_filename" "$download_url" || {
         log_error "Failed to download Codex CLI binary."
         exit 1
     }
