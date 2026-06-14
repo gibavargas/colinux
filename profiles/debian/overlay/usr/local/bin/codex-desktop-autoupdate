@@ -158,7 +158,7 @@ load_config() {
 github_api() {
     local url="$1"
     local response
-    response="$(curl -fsSL --connect-timeout 15 -H "Accept: application/vnd.github+json" \
+    response="$(curl -fsSL --connect-timeout 15 --retry 3 --retry-delay 5 --retry-all-errors -H "Accept: application/vnd.github+json" \
         "$url" 2>/dev/null)" || return 1
 
     # Rate-limit check
@@ -294,7 +294,7 @@ update_codex_cli() {
     tmpdir="$(mktemp -d)"
     trap 'rm -rf "$tmpdir"' RETURN
 
-    if ! curl -fsSL --connect-timeout 30 -o "$tmpdir/codex.tar.gz" "$url" 2>/dev/null; then
+    if ! curl -fsSL --connect-timeout 30 --retry 3 --retry-delay 5 --retry-all-errors -o "$tmpdir/codex.tar.gz" "$url" 2>/dev/null; then
         log_error "Failed to download Codex CLI archive: $url"
         return 1
     fi

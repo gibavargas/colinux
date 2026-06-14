@@ -122,7 +122,7 @@ get_target_codex_version() {
 
     local version
     if command -v curl &>/dev/null; then
-        version="$(curl -sfL "https://api.github.com/repos/${CODEX_REPO}/releases/latest" \
+        version="$(curl -sfL --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/${CODEX_REPO}/releases/latest" \
             | jq -r '.tag_name // .name' 2>/dev/null || true)"
     elif command -v wget &>/dev/null; then
         version="$(wget -qO- "https://api.github.com/repos/${CODEX_REPO}/releases/latest" \
@@ -153,7 +153,7 @@ get_asset_digest_sha256() {
         return 1
     fi
 
-    digest="$(curl -sfL "https://api.github.com/repos/${CODEX_REPO}/releases/tags/${tag}"         | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .digest // empty' 2>/dev/null         | head -1)" || true
+    digest="$(curl -sfL --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/${CODEX_REPO}/releases/tags/${tag}"         | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .digest // empty' 2>/dev/null         | head -1)" || true
     digest="${digest#sha256:}"
 
     if [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
@@ -241,7 +241,7 @@ update_codex() {
     tmp_dir="$(mktemp -d)"
 
     # Download tarball
-    if ! curl -sfL -o "${tmp_dir}/${tarball_name}" "${base_url}/${tarball_name}" 2>/dev/null; then
+    if ! curl -sfL --retry 3 --retry-delay 5 --retry-all-errors -o "${tmp_dir}/${tarball_name}" "${base_url}/${tarball_name}" 2>/dev/null; then
         echo "  ✗ Failed to download tarball."
         log_action "codex_update_fail download_failed version=$latest_version file=$tarball_name"
         rm -rf "$tmp_dir"
@@ -252,7 +252,7 @@ update_codex() {
     # publish per-asset SHA-256 digests via the GitHub release API instead.
     local checksum_ok=false
     local expected_sha256=""
-    if curl -sfL -o "${tmp_dir}/SHA256SUMS" "${base_url}/SHA256SUMS" 2>/dev/null; then
+    if curl -sfL --retry 3 --retry-delay 5 --retry-all-errors -o "${tmp_dir}/SHA256SUMS" "${base_url}/SHA256SUMS" 2>/dev/null; then
         expected_sha256="$(grep "${tarball_name}" "${tmp_dir}/SHA256SUMS" 2>/dev/null | awk '{print $1}' || true)"
     fi
     if [[ -z "$expected_sha256" ]]; then
