@@ -14,7 +14,7 @@
 #   CODEX_DESKTOP_REPO   — GitHub repo URL (default: nicepkg/codex-desktop)
 #   CODEX_DESKTOP_BRANCH — Git branch (default: main; used only with CODEX_DESKTOP_COMMIT)
 #   CODEX_DESKTOP_COMMIT — Full 40-char commit SHA required to build external app
-#   NODE_VERSION         — Node.js version (default: 20)
+#   NODE_VERSION         — Node.js version (default: 22)
 #   INSTALL_DIR          — Installation directory (default: /opt/codex-desktop)
 # =============================================================================
 set -euo pipefail
@@ -24,7 +24,7 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/codex-desktop}"
 CODEX_DESKTOP_REPO="${CODEX_DESKTOP_REPO:-https://github.com/nicepkg/codex-desktop}"
 CODEX_DESKTOP_BRANCH="${CODEX_DESKTOP_BRANCH:-main}"
 CODEX_DESKTOP_COMMIT="${CODEX_DESKTOP_COMMIT:-}"
-NODE_VERSION="${NODE_VERSION:-20}"
+NODE_VERSION="${NODE_VERSION:-22}"
 LOG_DIR="/persist/logs"
 LOG_FILE="${LOG_DIR}/electron-codex-install.log"
 BIN_DIR="/usr/local/bin"

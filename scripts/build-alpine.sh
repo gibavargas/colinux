@@ -260,6 +260,10 @@ install_profile() {
         mkdir -p "$overlay_dest"
         rm -rf "${overlay_dest:?}"
         cp -a "$PROFILE_DIR/overlay" "$overlay_dest"
+
+        # Fix security-critical file permissions (cp -a preserves umask-inflated modes)
+        [ -f "$overlay_dest/etc/doas.conf" ] && chmod 640 "$overlay_dest/etc/doas.conf"
+        find "$overlay_dest/etc/sudoers.d" -type f -exec chmod 440 {} \; 2>/dev/null || true
     fi
 
     log_info "Profile installed."

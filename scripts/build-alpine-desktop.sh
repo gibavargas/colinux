@@ -256,6 +256,10 @@ install_profile() {
         local overlay_dest="$APORTS_DIR/scripts/colinux-desktop/overlay-desktop"
         rm -rf "$overlay_dest"
         cp -a "$PROFILE_DIR/overlay-desktop" "$overlay_dest"
+
+        # Fix security-critical file permissions (cp -a preserves umask-inflated modes)
+        [ -f "$overlay_dest/etc/doas.conf" ] && chmod 640 "$overlay_dest/etc/doas.conf"
+        find "$overlay_dest/etc/sudoers.d" -type f -exec chmod 440 {} \; 2>/dev/null || true
     else
         log_error "Desktop overlay directory not found: $PROFILE_DIR/overlay-desktop"
         exit 1
