@@ -165,7 +165,8 @@ download_codex_desktop() {
     # Download latest Codex release (for the binary)
     log "Checking latest Codex release..."
     local release_info latest_release
-    release_info="$(curl -fsSL -H "Accept: application/vnd.github+json" \
+    release_info="$(curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+        -H "Accept: application/vnd.github+json" \
         https://api.github.com/repos/openai/codex/releases/latest 2>/dev/null)" || release_info=""
     latest_release="$(echo "$release_info" | jq -r '.tag_name // "latest"' 2>/dev/null)" || latest_release="latest"
 
@@ -188,7 +189,7 @@ download_codex_desktop() {
             warn "Verified Codex desktop asset not available — will retry during build"
         else
             log "Downloading Codex desktop release..."
-            if curl -fsSL --connect-timeout 30 -o "$codex_zip" "$codex_url" 2>/dev/null; then
+            if curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors --connect-timeout 30 -o "$codex_zip" "$codex_url" 2>/dev/null; then
                 local dl_size actual_digest
                 dl_size="$(stat -c%s "$codex_zip" 2>/dev/null || echo 0)"
                 actual_digest="$(sha256sum "$codex_zip" | awk '{print $1}')"
@@ -236,7 +237,7 @@ configure_lb() {
     install_debian_debootstrap() {
         local version="$1" expected_sha="$2" url actual_sha
         url="https://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_${version}_all.deb"
-        if ! curl -fsSL "$url" -o /tmp/debootstrap.deb 2>/dev/null; then
+        if ! curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "$url" -o /tmp/debootstrap.deb 2>/dev/null; then
             return 1
         fi
         actual_sha="$(sha256sum /tmp/debootstrap.deb | awk '{print $1}')"

@@ -233,7 +233,7 @@ apt-get install -y --no-install-recommends \
 mkdir -p /etc/apt/keyrings
 key_tmp="$(mktemp)"
 trap 'rm -f "$key_tmp"' EXIT
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$key_tmp"
+curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$key_tmp"
 key_fingerprint="$(gpg --show-keys --with-colons "$key_tmp" 2>/dev/null | awk -F: '$1 == "fpr" {print $10; exit}')"
 if [ "$key_fingerprint" != "6F71F525282841EEDAF851B42F59B5F99B1BE0B4" ]; then
     echo "E: unexpected NodeSource signing key fingerprint: ${key_fingerprint:-missing}" >&2
