@@ -24,7 +24,7 @@ set -euo pipefail
 CODEX_STATE_DIR="/run/codex"
 CODEX_NETWORK_JSON="$CODEX_STATE_DIR/network.json"
 CODEX_LOG="/persist/logs/network.log"
-CODEX_WIFI_WIZARD="/usr/local/bin/codex-wifi-wizard"
+CODEX_WIFI_WIZARD="/usr/local/sbin/codex-wifi-wizard"
 
 DNS_PRIMARY="1.1.1.1"
 DNS_SECONDARY="8.8.8.8"
