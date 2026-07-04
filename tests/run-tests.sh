@@ -51,8 +51,8 @@ resolve_bats() {
         echo "$SCRIPT_DIR/.bats/bin/bats"
         return 0
     fi
-    info "bats not found — installing locally (no sudo)..."
-    if "$SCRIPT_DIR/install-bats.sh"; then
+    info "bats not found — installing locally (no sudo)..." >&2
+    if "$SCRIPT_DIR/install-bats.sh" >&2; then
         echo "$SCRIPT_DIR/.bats/bin/bats"
         return 0
     fi
