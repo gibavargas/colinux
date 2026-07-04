@@ -1,0 +1,11 @@
+# ShellCheck project configuration
+# https://github.com/koalaman/shellcheck/wiki/Directive
+
+# Do NOT follow sourced files — CoLinux wrappers source distro-specific runtime
+# files (/lib/lsb/init-functions, /persist/config/*) that do not exist in the
+# build/CI environment. Following them produces false positives and slow runs.
+external-sources=false
+
+# Globally silence "can't follow non-constant source" — wrappers intentionally
+# source runtime paths resolved at boot time.
+disable=SC1090,SC1091

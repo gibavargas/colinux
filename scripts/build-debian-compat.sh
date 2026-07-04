@@ -312,7 +312,9 @@ copy_overlay() {
         chown -R 1000:1000 "$chroot/home/codex"
 
         # Fix security-critical file permissions (cp -a preserves umask-inflated modes)
-        [ -f "$chroot/etc/doas.conf" ] && chmod 640 "$chroot/etc/doas.conf" 2>/dev/null || true
+        if [ -f "$chroot/etc/doas.conf" ]; then
+            chmod 640 "$chroot/etc/doas.conf" 2>/dev/null || true
+        fi
         find "$chroot/etc/sudoers.d" -type f -exec chmod 440 {} \; 2>/dev/null || true
 
         # Ensure scripts are executable; some overlays do not ship /usr/local/sbin.

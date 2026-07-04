@@ -22,7 +22,7 @@ The MVP works but has no automated test suite and the build scripts carry
 significant technical debt (6 KLOC of shell with zero unit tests).
 
 ### Deliverables
-- [ ] **Test harness** — `tests/` directory with:
+- [x] **Test harness** — `tests/` directory with:
   - Shellcheck lint pass on all `scripts/*.sh` (zero warnings)
   - Unit tests for `codex-*` wrapper scripts (`bats` framework)
   - ISO boot regression test integrated into `test-iso.sh` (already partial)
