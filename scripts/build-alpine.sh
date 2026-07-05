@@ -11,14 +11,24 @@
 #   sudo ./build-alpine.sh [--arch x86_64|aarch64] [--release 3.21] [--outdir ./out]
 #
 # Environment variables:
-#   CODEX_VERSION   — Override Codex CLI version (default: latest)
-#   ALPINE_MIRROR   — Alpine package mirror (default: dl-cdn.alpinelinux.org)
-#   GPG_KEY         — GPG key ID for signing release artifacts
+#   CODEX_VERSION      — Override Codex CLI version (default: latest)
+#   ALPINE_MIRROR      — Alpine package mirror (default: dl-cdn.alpinelinux.org)
+#   ALPINE_REPO_SNAPSHOT — Pin Alpine package repos to a frozen base URL (no
+#                          trailing slash) for hermetic, reproducible builds.
+#                          When set, repos resolve to <snapshot>/main and
+#                          <snapshot>/community instead of the rolling
+#                          v$ALPINE_RELEASE/* branches. Example:
+#                          https://dl-cdn.alpinelinux.org/alpine/v3.21.0
+#   GPG_KEY            — GPG key ID for signing release artifacts
 # =============================================================================
 set -euo pipefail
 
 # ── Cleanup ──────────────────────────────────────────────────────────────────
 _CLEANUP_DIRS=()
+# Reproducibility state: populated by capture_repo_state() as "url=sha256" entries.
+REPO_STATE=()
+# Resolved Codex release tag (set by inject_codex, read by the manifest).
+CODEX_RESOLVED_TAG=""
 _cleanup() {
     if [ ${#_CLEANUP_DIRS[@]} -gt 0 ]; then
         rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true
@@ -296,7 +306,8 @@ run_mkimage() {
     fi
 
     # Build the ISO
-    # --repository: Alpine package repos to use
+    # --repository: Alpine package repos to use (built from repo_urls(); honors
+    #               ALPINE_REPO_SNAPSHOT for hermetic, reproducible builds).
     # --profile:     Our custom profile name
     # --arch:        Target architecture
     # --outdir:      Where to put the result
@@ -312,11 +323,21 @@ run_mkimage() {
         mv "$(command -v git)" /tmp/git.disabled || true
     fi
 
+    # Assemble --repository flags from the resolved repo list.
+    local repo_args=() repo
+    while IFS= read -r repo; do
+        [ -n "$repo" ] || continue
+        repo_args+=(--repository "$repo")
+    done < <(repo_urls)
+    if [ "${#repo_args[@]}" -eq 0 ]; then
+        log_error "No Alpine repositories configured."
+        exit 1
+    fi
+
     "$mkimage_script" \
         --profile "colinux-lite" \
         --arch "$ARCH" \
-        --repository "${ALPINE_MIRROR}/v${ALPINE_RELEASE}/main" \
-        --repository "${ALPINE_MIRROR}/v${ALPINE_RELEASE}/community" \
+        "${repo_args[@]}" \
         --outdir "$OUTDIR" \
         --tag "v${ALPINE_RELEASE}" \
         || {
@@ -355,6 +376,8 @@ inject_codex() {
         log_error "Could not resolve Codex CLI release tag."
         exit 1
     fi
+    # Expose the resolved immutable tag for the reproducibility manifest.
+    CODEX_RESOLVED_TAG="$codex_tag"
     download_url="https://github.com/openai/codex/releases/download/${codex_tag}/${codex_filename}"
 
     log_info "Downloading Codex CLI $codex_tag from: $download_url"
@@ -643,6 +666,157 @@ EOF
     log_info "Raw image created: $raw_file"
 }
 
+# ── Step 7: Reproducibility — repo pinning, checksums, manifest ─────────────
+
+# Locate git even after run_mkimage moves it to /tmp/git.disabled (the aports
+# mkimage.sh trips on the colinux .git, so the binary is hidden during build).
+_git() {
+    if [ -x /tmp/git.disabled ]; then
+        /tmp/git.disabled "$@"
+    elif command -v git >/dev/null 2>&1; then
+        git "$@"
+    else
+        return 127
+    fi
+}
+
+# Resolve the Alpine package repository URLs used by mkimage.
+# When ALPINE_REPO_SNAPSHOT is set, all repos are pinned to that frozen base
+# (e.g. https://dl-cdn.alpinelinux.org/alpine/v3.21.0) for hermetic builds.
+# Otherwise the rolling v$ALPINE_RELEASE/* branches are used.
+repo_urls() {
+    local base
+    if [ -n "${ALPINE_REPO_SNAPSHOT:-}" ]; then
+        base="${ALPINE_REPO_SNAPSHOT%/}"
+    else
+        base="${ALPINE_MIRROR%/}/v${ALPINE_RELEASE}"
+    fi
+    echo "${base}/main"
+    echo "${base}/community"
+}
+
+# Capture the SHA-256 of each repo's APKINDEX.tar.gz so the exact package set
+# is recorded in the manifest. Non-fatal: offline builds record "unavailable".
+# APKINDEX path: <repo>/<arch>/APKINDEX.tar.gz
+capture_repo_state() {
+    log_info "Capturing Alpine repository APKINDEX checksums"
+    REPO_STATE=()
+    local repo url sum
+    while IFS= read -r repo; do
+        [ -n "$repo" ] || continue
+        url="${repo}/${ARCH}/APKINDEX.tar.gz"
+        sum="$(curl -fsSL --retry 2 --retry-delay 2 --retry-all-errors "$url" 2>/dev/null \
+            | sha256sum | awk '{print $1}')" || sum=""
+        if [ -n "$sum" ]; then
+            REPO_STATE+=("${url}=${sum}")
+            log_info "  ${repo} -> ${sum}"
+        else
+            REPO_STATE+=("${url}=unavailable")
+            log_warn "  ${repo} -> APKINDEX unavailable (offline build?)"
+        fi
+    done < <(repo_urls)
+}
+
+# Escape a string for safe inclusion in a JSON string literal (no jq needed).
+_json_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# Generate SHA-256 checksums for the build artifacts (ISO + raw image).
+# Local builds now get the same SHA256SUMS manifest CI produces.
+generate_checksums() {
+    log_step "Generating SHA-256 checksums for build artifacts"
+
+    local sums="$OUTDIR/SHA256SUMS"
+    (
+        cd "$OUTDIR"
+        : > "$sums"
+        local f
+        for f in colinux-lite-*.iso colinux-lite-*.raw.img; do
+            [ -e "$f" ] || continue
+            sha256sum "$f"
+        done >> "$sums"
+    )
+
+    if [ -s "$sums" ]; then
+        log_info "Wrote ${sums}"
+        cat "$sums"
+    else
+        log_warn "No ISO/raw-image artifacts found to checksum."
+    fi
+}
+
+# Write a reproducibility manifest (KEY=VALUE text + JSON) capturing every
+# input that affects the build output, so two builds can be verified identical.
+generate_build_manifest() {
+    log_step "Generating reproducibility manifest"
+
+    local aports_commit source_commit build_ts manifest_codex_tag
+    aports_commit="$(_git -C "$APORTS_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+    source_commit="$(_git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+    build_ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    manifest_codex_tag="${CODEX_RESOLVED_TAG:-$CODEX_VERSION}"
+    local build_host build_kernel
+    build_host="$(uname -n 2>/dev/null || echo unknown)"
+    build_kernel="$(uname -r 2>/dev/null || echo unknown)"
+
+    # ── KEY=VALUE text manifest (primary, dependency-free) ──
+    local manifest_txt="$OUTDIR/build-manifest.txt"
+    {
+        echo "# CoLinux Lite — reproducibility manifest"
+        echo "# Reproduce by pinning the same inputs (aports commit, codex tag,"
+        echo "# repo snapshot). Compare SHA256SUMS across two builds to verify."
+        echo "build_timestamp=${build_ts}"
+        echo "edition=colinux-lite"
+        echo "arch=${ARCH}"
+        echo "alpine_release=${ALPINE_RELEASE}"
+        echo "aports_branch=${APORTS_BRANCH}"
+        echo "aports_commit=${aports_commit}"
+        echo "codex_tag=${manifest_codex_tag}"
+        echo "alpine_mirror=${ALPINE_MIRROR}"
+        echo "alpine_repo_snapshot=${ALPINE_REPO_SNAPSHOT:-}"
+        echo "source_commit=${source_commit}"
+        echo "build_host=${build_host}"
+        echo "build_kernel=${build_kernel}"
+        echo ""
+        echo "# Alpine repository APKINDEX checksums (<url>=<sha256|unavailable>)"
+        local entry
+        for entry in "${REPO_STATE[@]}"; do
+            echo "repo_apkindex=${entry}"
+        done
+    } > "$manifest_txt"
+    log_info "Wrote ${manifest_txt}"
+
+    # ── JSON variant (portable; no jq dependency) ──
+    local manifest_json="$OUTDIR/build-manifest.json"
+    {
+        echo "{"
+        echo "  \"edition\": \"colinux-lite\","
+        echo "  \"build_timestamp\": \"$(_json_escape "$build_ts")\","
+        echo "  \"arch\": \"$(_json_escape "$ARCH")\","
+        echo "  \"alpine_release\": \"$(_json_escape "$ALPINE_RELEASE")\","
+        echo "  \"aports_branch\": \"$(_json_escape "$APORTS_BRANCH")\","
+        echo "  \"aports_commit\": \"$(_json_escape "$aports_commit")\","
+        echo "  \"codex_tag\": \"$(_json_escape "$manifest_codex_tag")\","
+        echo "  \"alpine_mirror\": \"$(_json_escape "$ALPINE_MIRROR")\","
+        echo "  \"alpine_repo_snapshot\": \"$(_json_escape "${ALPINE_REPO_SNAPSHOT:-}")\","
+        echo "  \"source_commit\": \"$(_json_escape "$source_commit")\","
+        echo "  \"build_host\": \"$(_json_escape "$build_host")\","
+        echo "  \"build_kernel\": \"$(_json_escape "$build_kernel")\","
+        echo "  \"repositories\": ["
+        local prefix="" url sum
+        for entry in "${REPO_STATE[@]}"; do
+            url="${entry%%=*}"
+            sum="${entry#*=}"
+            echo "    ${prefix}{\"url\": \"$(_json_escape "$url")\", \"apkindex_sha256\": \"$(_json_escape "$sum")\"}"
+            prefix=","
+        done
+        echo "  ]"
+        echo "}"
+    } > "$manifest_json"
+    log_info "Wrote ${manifest_json}"
+}
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 print_summary() {
     log_step "Build Complete"
@@ -650,9 +824,13 @@ print_summary() {
     echo ""
     echo "  Output directory: $OUTDIR"
     echo ""
-    find "$OUTDIR" -type f \( -name '*.iso' -o -name '*.raw.img' -o -name '*.sha256' \) \
+    find "$OUTDIR" -maxdepth 1 -type f \
+        \( -name '*.iso' -o -name '*.raw.img' -o -name 'SHA256SUMS' \
+           -o -name 'build-manifest.txt' -o -name 'build-manifest.json' \) \
         -exec ls -lh {} \;
     echo ""
+    log_info "Reproducibility: compare SHA256SUMS across two builds; pin inputs via"
+    log_info "  ALPINE_REPO_SNAPSHOT + CODEX_VERSION + aports branch (see build-manifest.txt)."
     log_info "To test: ./scripts/test-iso.sh --iso <path-to-iso>"
     log_info "To release: ./scripts/release.sh --outdir $OUTDIR"
 }
@@ -669,6 +847,9 @@ main() {
     run_mkimage
     inject_codex
     create_raw_image
+    capture_repo_state
+    generate_checksums
+    generate_build_manifest
     print_summary
 }
 

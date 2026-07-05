@@ -70,6 +70,9 @@ jobs:
             dist/colinux-lite-*.iso
             dist/colinux-lite-*.raw.img
             dist/SHA256SUMS-${{ matrix.arch }}.txt
+            dist/SHA256SUMS
+            dist/build-manifest.txt
+            dist/build-manifest.json
           retention-days: 30
           if-no-files-found: error
 
@@ -81,6 +84,8 @@ jobs:
             dist/colinux-lite-*.iso
             dist/colinux-lite-*.raw.img
             dist/SHA256SUMS-${{ matrix.arch }}.txt
+            dist/build-manifest.txt
+            dist/build-manifest.json
           draft: false
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
         env:

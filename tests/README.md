@@ -20,7 +20,7 @@ make test-iso        # QEMU boot regression (needs a built ISO + QEMU)
 | Suite | What it checks | Gate | Exit criterion |
 |-------|----------------|------|----------------|
 | `lint`  | `shellcheck` on `scripts/*.sh` (zero warnings) + informational report on all `codex-*` wrappers | ✅ gating | `shellcheck scripts/*.sh` clean |
-| `unit`  | `bats` tests: syntax, shebang, `set -euo pipefail`, `--help`, `die()`, no `grep -oP`, no `eval`/`source` on untrusted input, logging convention, no masked `***` secret writes | ✅ gating | `bats tests/` green |
+| `unit`  | `bats` tests: syntax, shebang, `set -euo pipefail`, `--help`, `die()`, no `grep -oP`, no `eval`/`source` on untrusted input, logging convention, no masked `***` secret writes, **build reproducibility contract** (repo snapshot pinning, APKINDEX capture, checksum + manifest generation) | ✅ gating | `bats tests/` green |
 | `iso`   | Boots the built ISO in QEMU and checks kernel/init/network/persistence via serial console (delegates to `scripts/test-iso.sh`) | ✅ when run | ISO boots to login |
 
 ### Layout
@@ -36,7 +36,8 @@ tests/
 │   └── shellcheck.sh    # shellcheck gate + wrapper report
 ├── unit/
 │   ├── syntax.bats      # bash -n + shebang/bashism checks for all scripts
-│   └── wrappers.bats    # codex-* contract & security checks
+│   ├── wrappers.bats    # codex-* contract & security checks
+│   └── build.bats       # build-alpine.sh reproducibility contract checks
 └── .gitignore
 ```
 
