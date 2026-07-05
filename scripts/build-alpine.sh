@@ -730,12 +730,11 @@ generate_checksums() {
     local sums="$OUTDIR/SHA256SUMS"
     (
         cd "$OUTDIR"
-        : > "$sums"
-        local f
+        : > SHA256SUMS
         for f in colinux-lite-*.iso colinux-lite-*.raw.img; do
             [ -e "$f" ] || continue
             sha256sum "$f"
-        done >> "$sums"
+        done >> SHA256SUMS
     )
 
     if [ -s "$sums" ]; then

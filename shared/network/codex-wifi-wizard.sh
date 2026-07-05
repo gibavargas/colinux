@@ -743,7 +743,7 @@ gui_select() {
             ((i++))
         done
         local result
-        result="$(dialog --title "$title" --menu "$title" 15 60 ${#items[@]} "${menu_args[@]}" 2>&1 >/dev/tty)"
+        result="$(dialog --stdout --title "$title" --menu "$title" 15 60 ${#items[@]} "${menu_args[@]}")"
         echo "${items[$((result-1))]}"
     elif command -v whiptail &>/dev/null && [[ -t 0 ]]; then
         local menu_args=()
@@ -777,7 +777,7 @@ gui_password() {
     local prompt="${1:-Enter WiFi password:}"
 
     if command -v dialog &>/dev/null && [[ -t 0 ]]; then
-        dialog --title "WiFi Password" --passwordbox "$prompt" 10 50 2>&1 >/dev/tty
+        dialog --stdout --title "WiFi Password" --passwordbox "$prompt" 10 50
     elif command -v whiptail &>/dev/null && [[ -t 0 ]]; then
         whiptail --title "WiFi Password" --passwordbox "$prompt" 10 50 3>&1 1>&2 2>&3
     elif command -v zenity &>/dev/null; then
