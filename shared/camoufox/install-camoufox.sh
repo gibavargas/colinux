@@ -255,7 +255,6 @@ WRAPPER_EOF
 
 create_wrappers() {
     local edition="$1"
-    local venv_python="$INSTALL_PREFIX/venv/bin/python"
     local gui_mode=""
 
     has_gui "$edition" && gui_mode="gui" || gui_mode="tty"

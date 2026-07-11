@@ -251,9 +251,6 @@ install_camoufox() {
 
     # Create wrapper stubs that will be replaced by install-camoufox.sh at runtime
     # but provide useful messages until then
-    local edition_var="lite"
-    has_gui && edition_var="gui"
-
     for cmd in camoufox camoufox-headless codex-web-search codex-web-browse; do
         safe_write "$bin/$cmd" "#!/bin/sh
 # CoLinux — $cmd wrapper stub
