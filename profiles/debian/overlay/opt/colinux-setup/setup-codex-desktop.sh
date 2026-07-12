@@ -32,7 +32,6 @@ trap _cleanup EXIT
 # ── Configuration ─────────────────────────────────────────────────────────────
 INSTALL_DIR="${INSTALL_DIR:-/opt/codex-desktop}"
 CODEX_DESKTOP_WRAPPER_REPO="https://github.com/ilysenko/codex-desktop-linux"
-CODEX_DESKTOP_WRAPPER_BRANCH="main"
 CODEX_DESKTOP_WRAPPER_COMMIT="${CODEX_DESKTOP_WRAPPER_COMMIT:-43c8bd1b5d4ab2eb4be8eb474528d6050c51db9a}"
 CODEX_REPO="openai/codex"
 GITHUB_API="https://api.github.com/repos"
@@ -44,7 +43,6 @@ CHECK_ONLY=false
 
 # ── State tracking ────────────────────────────────────────────────────────────
 STATE_DIR="${STATE_DIR:-/var/lib/codex-desktop}"
-STATE_FILE="$STATE_DIR/state.json"
 ROLLBACK_DIR="$STATE_DIR/rollback"
 CURRENT_VERSION_FILE="$STATE_DIR/current-version"
 WRAPPER_VERSION_FILE="$STATE_DIR/wrapper-version"

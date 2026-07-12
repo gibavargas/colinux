@@ -33,7 +33,6 @@ CONFIG_BACKEND="auto"
 CONFIG_AUTO_CONNECT="true"
 
 # Runtime
-DETECTED_ADAPTER=""
 DETECTED_BACKEND=""
 SELECTED_ADAPTER=""
 CURRENT_BACKEND=""
@@ -41,9 +40,9 @@ CURRENT_BACKEND=""
 # Colors
 if [[ -t 1 ]]; then
     RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+    CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 else
-    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
+    RED='' GREEN='' YELLOW='' CYAN='' BOLD='' NC=''
 fi
 
 # ---------------------------------------------------------------------------
@@ -256,7 +255,7 @@ ensure_backend_running() {
                 pkill -f "wpa_supplicant.*${SELECTED_ADAPTER}" 2>/dev/null || true
                 sleep 0.5
                 mkdir -p /run/wpa_supplicant 2>/dev/null || true
-                wpa_supplicant -B -i "$SELECTED_ADAPTER" -C /run/wpa_supplicant -P /run/wpa_supplicant/${SELECTED_ADAPTER}.pid 2>/dev/null || \
+                wpa_supplicant -B -i "$SELECTED_ADAPTER" -C /run/wpa_supplicant -P "/run/wpa_supplicant/${SELECTED_ADAPTER}.pid" 2>/dev/null || \
                     wpa_supplicant -B -i "$SELECTED_ADAPTER" -c /dev/null 2>/dev/null || \
                     die "Failed to start wpa_supplicant"
                 sleep 1
@@ -399,8 +398,6 @@ connect_iwd() {
 
     if [[ -n "$password" ]]; then
         # Write config for auto-reconnect
-        local escaped_ssid
-        escaped_ssid="$(echo "$ssid" | sed 's/\\/\\\\/g; s/ /\\ /g')"
         local safe_name
         safe_name="$(safe_ssid "$ssid")"
         local config_file="/var/lib/iwd/${safe_name}.psk"
@@ -414,8 +411,6 @@ EOF
         chmod 600 "$config_file"
     else
         # Open network
-        local escaped_ssid
-        escaped_ssid="$(echo "$ssid" | sed 's/\\/\\\\/g; s/ /\\ /g')"
         local safe_name
         safe_name="$(safe_ssid "$ssid")"
         local config_file="/var/lib/iwd/${safe_name}.open"
@@ -480,12 +475,6 @@ EOF
 
     # Configure wpa_supplicant
     if [[ -S "$ctrl" ]] || [[ -S "$ctrl_dir/$adapter/$adapter" ]]; then
-        local socket_path
-        if [[ -S "$ctrl" ]]; then
-            socket_path="$ctrl"
-        else
-            socket_path="$ctrl_dir/$adapter/$adapter"
-        fi
         wpa_cli -i "$adapter" -p "$ctrl_dir" remove_network all 2>/dev/null || true
         wpa_cli -i "$adapter" -p "$ctrl_dir" add_network 2>/dev/null || true
         wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 ssid "\"$safe_ssid_esc\"" 2>/dev/null
@@ -515,7 +504,7 @@ PSKEOF
         # Restart wpa_supplicant with our config
         pkill -f "wpa_supplicant.*$adapter" 2>/dev/null || true
         sleep 0.5
-        wpa_supplicant -B -i "$adapter" -c "$wpa_conf" -P /run/wpa_supplicant/${adapter}.pid
+        wpa_supplicant -B -i "$adapter" -c "$wpa_conf" -P "/run/wpa_supplicant/${adapter}.pid"
     fi
 }
 

@@ -38,9 +38,9 @@ MODE="full"   # full|eth-only|wifi-only|status|dns
 # Colors
 if [[ -t 1 ]]; then
     RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+    BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 else
-    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
+    RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
 fi
 
 # ---------------------------------------------------------------------------
@@ -342,7 +342,7 @@ show_status() {
 
     # DNS
     echo -e "${BOLD}DNS Configuration:${NC}"
-    cat /etc/resolv.conf 2>/dev/null | grep -v '^#' | grep -v '^$'
+    grep -v '^#' /etc/resolv.conf 2>/dev/null | grep -v '^$'
     echo ""
 
     # Connectivity
