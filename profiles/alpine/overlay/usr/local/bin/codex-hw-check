@@ -9,6 +9,19 @@
 #   codex-hw-check --smart DEV Show SMART data for specific device
 set -euo pipefail
 
+COLINUX_COMMAND="codex-hw-check"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/system.log"
 
@@ -21,8 +34,7 @@ log_action() {
 }
 
 die() {
-    echo "ERROR: $*" >&2
-    exit 1
+    colinux_die "$@"
 }
 
 usage() {
@@ -50,12 +62,14 @@ SMART_DEV=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --quick)  MODE="quick"; shift ;;
-        --json)   OUTPUT_FMT="json"; shift ;;
+        --json)   OUTPUT_FMT="json"; COLINUX_JSON=true; shift ;;
         --smart)  MODE="smart"; SMART_DEV="${2:?--smart requires a device}"; shift 2 ;;
         --help|-h) usage ;;
         *) die "Unknown option: $1" ;;
     esac
 done
+
+colinux_init_output
 
 # ── SMART detail ──────────────────────────────────────────────────────────
 if [[ "$MODE" == "smart" ]]; then
@@ -171,9 +185,8 @@ KERNEL_ERRORS="${KERNEL_ERRORS:-0}"
 if [[ "$OUTPUT_FMT" == "json" ]]; then
     # Ensure CPU_CORES is a valid integer for --argjson
     [[ "$CPU_CORES" =~ ^[0-9]+$ ]] || CPU_CORES=1
-    jq -n \
+    HW_JSON="$(jq -nc \
         --arg hostname "$(hostname -s 2>/dev/null || echo codex)" \
-        --arg timestamp "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
         --arg uptime "$UPTIME" \
         --arg cpu "$CPU_MODEL" \
         --argjson cores "$CPU_CORES" \
@@ -189,14 +202,15 @@ if [[ "$OUTPUT_FMT" == "json" ]]; then
         --argjson kernel_errors "$((KERNEL_ERRORS))" \
         '{
             hostname: $hostname,
-            timestamp: $timestamp,
             uptime: $uptime,
             cpu: { model: $cpu, cores: $cores, load_1m: $load1, load_5m: $load5, temp: ($cpu_temp // null) },
             memory: { total: $total_ram, used: $used_ram, percent: $ram_pct },
             disks: $disks,
             system: { vendor: $vendor, product: $product },
             kernel_errors: $kernel_errors
-        }'
+        }')"
+    log_action "complete ram_pct=${RAM_PCT}% kernel_errors=${KERNEL_ERRORS}"
+    colinux_result "hardware check complete" "$HW_JSON"
     exit 0
 fi
 

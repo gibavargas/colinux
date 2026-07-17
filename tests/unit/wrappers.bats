@@ -53,30 +53,9 @@ _EXEMPT_SHELL_WRAPPERS=(
 # Paths are relative to COLINUX_ROOT.
 # -----------------------------------------------------------------------------
 
-_KNOWN_HELP_GAPS=(
-    "disk/codex-disk-inventory"
-    "disk/codex-mount-ro"
-    "profiles/alpine/overlay/usr/local/bin/codex-disk-inventory"
-    "profiles/alpine/overlay/usr/local/bin/codex-mount-ro"
-    "profiles/debian-compat/overlay/usr/local/bin/codex-disk-inventory"
-    "profiles/debian-compat/overlay/usr/local/bin/codex-mount-ro"
-)
+_KNOWN_HELP_GAPS=()
 
-_KNOWN_DIE_GAPS=(
-    "disk/codex-disk-inventory"
-    "disk/codex-mount-ro"
-    "disk/codex-mount-rw"
-    "profiles/alpine/overlay/usr/local/bin/codex-disk-inventory"
-    "profiles/alpine/overlay/usr/local/bin/codex-logs"
-    "profiles/alpine/overlay/usr/local/bin/codex-mount-ro"
-    "profiles/alpine/overlay/usr/local/bin/codex-mount-rw"
-    "profiles/alpine/overlay/usr/local/bin/codex-network"
-    "profiles/debian-compat/overlay/usr/local/bin/codex-disk-inventory"
-    "profiles/debian-compat/overlay/usr/local/bin/codex-logs"
-    "profiles/debian-compat/overlay/usr/local/bin/codex-mount-ro"
-    "profiles/debian-compat/overlay/usr/local/bin/codex-mount-rw"
-    "profiles/debian-compat/overlay/usr/local/bin/codex-network"
-)
+_KNOWN_DIE_GAPS=()
 
 # Normalize an absolute path to a path relative to COLINUX_ROOT for comparison.
 _relpath() {

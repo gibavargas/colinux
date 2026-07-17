@@ -9,6 +9,20 @@
 # Requires: root (uses mount), blkid for label/uuid detection
 set -euo pipefail
 
+
+COLINUX_COMMAND="codex-mount-ro"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/disk-actions.log"
 MOUNT_BASE="/mnt/disks"
@@ -21,29 +35,48 @@ log_action() {
     echo "[$ts] mount-ro: $*" >> "$LOGFILE"
 }
 
-usage() {
-    echo "Usage: codex-mount-ro <device>"
-    echo ""
-    echo "Mount a block device read-only at ${MOUNT_BASE}/by-device/<name>"
-    echo ""
-    echo "Examples:"
-    echo "  codex-mount-ro /dev/sdb1"
-    echo "  codex-mount-ro /dev/nvme0n1p3"
-    exit 1
+die() {
+    log_action "FATAL $*"
+    colinux_die "$@"
 }
 
-# ── Argument validation ───────────────────────────────────────────────────
-if [[ $# -lt 1 ]]; then
-    usage
-fi
+usage() {
+    cat <<EOF
+Usage: codex-mount-ro <device>
 
-DEVICE="$1"
+Mount a block device read-only at ${MOUNT_BASE}/by-device/<name>
+
+Examples:
+  codex-mount-ro /dev/sdb1
+  codex-mount-ro /dev/nvme0n1p3
+EOF
+}
+
+# ── Parse arguments ───────────────────────────────────────────────────────
+DEVICE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json|--yes|-y) shift ;;  # pre-scan already set COLINUX_*
+        --help|-h) usage; exit 0 ;;
+        -*) die "Unknown option: $1" ;;
+        *)
+            [[ -n "$DEVICE" ]] && die "Multiple devices specified."
+            DEVICE="$1"
+            shift
+            ;;
+    esac
+done
+
+colinux_init_output
+
+if [[ -z "$DEVICE" ]]; then
+    usage >&2
+    die "No device specified."
+fi
 
 # Validate device exists
 if [[ ! -b "$DEVICE" ]]; then
-    echo "ERROR: $DEVICE is not a valid block device." >&2
-    log_action "FAILED device_not_block device=$DEVICE"
-    exit 1
+    die "$DEVICE is not a valid block device."
 fi
 
 DEVNAME="${DEVICE##*/}"
@@ -80,9 +113,7 @@ if mount -o ro,nosuid,nodev,noexec "$DEVICE" "$MOUNT_POINT"; then
     echo "Mounted $DEVICE (ro) at $MOUNT_POINT"
     log_action "OK device=$DEVICE fs=$FS_TYPE mountpoint=$MOUNT_POINT"
 else
-    echo "ERROR: Failed to mount $DEVICE read-only." >&2
-    log_action "FAILED mount_error device=$DEVICE fs=$FS_TYPE"
-    exit 1
+    die "Failed to mount $DEVICE read-only."
 fi
 
 # ── Create by-label symlink ───────────────────────────────────────────────
@@ -106,3 +137,4 @@ if [[ -n "$UUID" ]]; then
 fi
 
 echo "Done."
+colinux_result "mounted read-only" "{\"device\":\"$DEVICE\",\"mountpoint\":\"$MOUNT_POINT\",\"fstype\":\"$FS_TYPE\"}"

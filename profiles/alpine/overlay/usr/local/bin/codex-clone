@@ -11,6 +11,20 @@
 # Uses: ddrescue (resilient copying with retry)
 set -euo pipefail
 
+
+COLINUX_COMMAND="codex-clone"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/disk-actions.log"
 
@@ -23,9 +37,8 @@ log_action() {
 }
 
 die() {
-    echo "ERROR: $*" >&2
     log_action "FATAL $*"
-    exit 1
+    colinux_die "$@"
 }
 
 usage() {
@@ -70,6 +83,14 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         --yes|-y)  SKIP_CONFIRM=true; shift ;;
+        --json)
+            COLINUX_JSON=true
+            shift
+            ;;
+        --yes|-y)
+            COLINUX_YES=true
+            shift
+            ;;
         --help|-h) usage ;;
         -*) die "Unknown option: $1" ;;
         *)
@@ -82,6 +103,8 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+colinux_init_output
 
 if [[ -z "$SOURCE" ]] || [[ -z "$DEST" ]]; then
     die "Source and destination required. Use --help for usage."

@@ -10,6 +10,20 @@
 # escaping the staging directory are permitted.
 set -euo pipefail
 
+
+COLINUX_COMMAND="codex-restore"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 PERSIST_DIR="/persist"
 WORKSPACE_DIR="/workspace"
 BACKUP_DIR="${PERSIST_DIR}/backups"
@@ -25,9 +39,8 @@ log_action() {
 }
 
 die() {
-    echo "ERROR: $*" >&2
     log_action "FATAL $*"
-    exit 1
+    colinux_die "$@"
 }
 
 
@@ -46,6 +59,14 @@ validate_archive_members() {
         esac
         case "$entry" in
             persist|persist/*|workspace|workspace/*) ;;
+        --json)
+            COLINUX_JSON=true
+            shift
+            ;;
+        --yes|-y)
+            COLINUX_YES=true
+            shift
+            ;;
             *) die "Archive contains unsupported path: $entry" ;;
         esac
     done < <(tar tzf "$archive")
@@ -103,6 +124,8 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+colinux_init_output
 
 if [[ -z "$RESTORE_FILE" ]]; then
     die "No backup file specified. Usage: codex-restore <file>"

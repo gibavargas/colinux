@@ -18,6 +18,20 @@
 # Safety: Requires explicit confirmation with serial number.
 set -euo pipefail
 
+
+COLINUX_COMMAND="codex-install-pc"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/disk-actions.log"
 COLINUX_IMAGE_DIR="${COLINUX_IMAGE_DIR:-/opt/colinux}"
@@ -32,9 +46,8 @@ log_action() {
 }
 
 die() {
-    echo "ERROR: $*" >&2
     log_action "FATAL $*"
-    exit 1
+    colinux_die "$@"
 }
 
 usage() {
@@ -81,6 +94,14 @@ DRY_RUN=false
 case "$(uname -m)" in
     x86_64) GRUB_TARGET="x86_64-efi"; EFI_BOOT="BOOTX64.EFI"; GRUB_EFI="grubx64.efi" ;;
     aarch64) GRUB_TARGET="arm64-efi"; EFI_BOOT="BOOTAA64.EFI"; GRUB_EFI="grubaa64.efi" ;;
+        --json)
+            COLINUX_JSON=true
+            shift
+            ;;
+        --yes|-y)
+            COLINUX_YES=true
+            shift
+            ;;
     *) die "Unsupported architecture: $(uname -m)" ;;
 esac
 
@@ -140,6 +161,8 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+colinux_init_output
 
 # ── Validate device ───────────────────────────────────────────────────────
 if [[ -z "$DEVICE" ]]; then

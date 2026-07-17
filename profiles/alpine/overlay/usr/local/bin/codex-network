@@ -14,6 +14,20 @@
 #   wifi-list    — List saved Wi-Fi networks
 set -euo pipefail
 
+
+COLINUX_COMMAND="codex-network"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 PERSIST_DIR="/persist"
 STATE_DIR="${PERSIST_DIR}/state"
 WPA_CONF="${STATE_DIR}/wpa_supplicant.conf"
@@ -27,6 +41,11 @@ log_action() {
     local ts
     ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
     echo "[$ts] network: $*" >> "$LOGFILE"
+}
+
+die() {
+    log_action "FATAL $*"
+    colinux_die "$@"
 }
 
 # ── Helper: find network interfaces ───────────────────────────────────────
@@ -409,6 +428,15 @@ wizard() {
 }
 
 # ── Main dispatch ─────────────────────────────────────────────────────────
+# Strip --json/--yes/-y from positional args (pre-scan already set COLINUX_*).
+_filtered=()
+for _a in "$@"; do
+    case "$_a" in --json|--yes|-y) ;; *) _filtered+=("$_a") ;; esac
+done
+set -- "${_filtered[@]}"
+
+colinux_init_output
+
 case "${1:-}" in
     status)
         cmd_status
@@ -444,8 +472,6 @@ EOF
         wizard
         ;;
     *)
-        echo "Unknown command: $1"
-        echo "Run 'codex-network --help' for usage."
-        exit 1
+        die "Unknown command: ${1:-}. Run 'codex-network --help' for usage."
         ;;
 esac

@@ -7,6 +7,20 @@
 #   /run/codex/disks.md    — human-readable markdown summary
 set -euo pipefail
 
+
+COLINUX_COMMAND="codex-disk-inventory"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 RUN_DIR="/run/codex"
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/disk-actions.log"
@@ -18,6 +32,35 @@ log_msg() {
     ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
     echo "[$ts] inventory: $*" >> "$LOGFILE" 2>/dev/null || true
 }
+
+die() {
+    log_msg "FATAL $*"
+    colinux_die "$@"
+}
+
+usage() {
+    cat <<EOF
+Usage: codex-disk-inventory [--json]
+
+Scan all block devices and produce:
+  $RUN_DIR/disks.json  — machine-readable inventory
+  $RUN_DIR/disks.md    — human-readable markdown summary
+
+Options:
+  --json    Emit a structured JSON result envelope on stdout
+EOF
+}
+
+# ── Argument parsing ──────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json|--yes|-y) shift ;;
+        --help|-h) usage; exit 0 ;;
+        *) die "Unknown argument: $1" ;;
+    esac
+done
+
+colinux_init_output
 
 # ── Identify the boot device ──────────────────────────────────────────────
 find_boot_device() {
@@ -319,7 +362,6 @@ echo "$FULL_JSON" | jq '.' > "${RUN_DIR}/disks.json"
     "---",
     ""
     '
-
 } > "${RUN_DIR}/disks.md"
 
 log_msg "inventory_complete devices=${#DISK_LIST[@]}"
@@ -330,3 +372,4 @@ echo "  JSON: ${RUN_DIR}/disks.json"
 echo "  Markdown: ${RUN_DIR}/disks.md"
 echo ""
 echo "$FULL_JSON" | jq -r '.devices[] | "  \(.device)  \(.model)  \(.size)  \(.transport // "N/A")\(.is_boot | if . then "  [BOOT]" else "" end)\(.is_removable | if . then "  [USB]" else "" end)"'
+colinux_result "inventory complete" "$(echo "$FULL_JSON" | jq -c --arg j "${RUN_DIR}/disks.json" --arg m "${RUN_DIR}/disks.md" '{devices:.total_devices,boot_device:.boot_device,json_file:$j,md_file:$m}')"

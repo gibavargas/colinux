@@ -15,6 +15,21 @@
 # for security reasons.
 set -euo pipefail
 
+COLINUX_COMMAND="codex-backup"
+# Detect --json anywhere in args so error handling is position-independent.
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    # Fallbacks when the output library is unavailable (text mode only).
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 PERSIST_DIR="/persist"
 WORKSPACE_DIR="/workspace"
 BACKUP_DIR="${PERSIST_DIR}/backups"
@@ -30,9 +45,8 @@ log_action() {
 }
 
 die() {
-    echo "ERROR: $*" >&2
     log_action "FATAL $*"
-    exit 1
+    colinux_die "$@"
 }
 
 # ── Defaults ──────────────────────────────────────────────────────────────
@@ -65,6 +79,14 @@ while [[ $# -gt 0 ]]; do
             BACKUP_DIR="${2:?--dest requires a directory}"
             shift 2
             ;;
+        --json)
+            COLINUX_JSON=true
+            shift
+            ;;
+        --yes|-y)
+            COLINUX_YES=true
+            shift
+            ;;
         --help|-h)
             echo "Usage: codex-backup [OPTIONS]"
             echo ""
@@ -86,30 +108,36 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+colinux_init_output
 mkdir -p "$BACKUP_DIR"
 
 # ── List backups ──────────────────────────────────────────────────────────
 if [[ "$LIST_ONLY" == true ]]; then
-    echo "=== CoLinux Backups ==="
-    echo "Location: $BACKUP_DIR"
-    echo ""
-
-    if ! ls -1t "$BACKUP_DIR"/*.tar.gz 2>/dev/null | head -1 | read -r; then
-        echo "(no backups found)"
-        exit 0
-    fi
-
-    for f in "$BACKUP_DIR"/*.tar.gz; do
-        [[ -f "$f" ]] || continue
+    backups_json="[]"
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
         local_f="${f##*/}"
         local_size="$(du -sh "$f" 2>/dev/null | awk '{print $1}')"
         local_date="$(stat -c '%y' "$f" 2>/dev/null | cut -d. -f1)"
-        echo "  $local_f  ($local_size)  $local_date"
-    done | sort -r
+        backups_json="$(jq -c --arg n "$local_f" --arg s "$local_size" --arg d "$local_date" \
+            '. + [{file:$n, size:$s, date:$d}]' <<<"$backups_json" 2>/dev/null || echo "$backups_json")"
+    done < <(ls -1t "$BACKUP_DIR"/*.tar.gz 2>/dev/null)
 
+    total_count="$(jq 'length' <<<"$backups_json" 2>/dev/null || echo 0)"
+    total_size="$(du -sh "$BACKUP_DIR" 2>/dev/null | awk '{print $1}')"
+
+    echo "=== CoLinux Backups ==="
+    echo "Location: $BACKUP_DIR"
     echo ""
-    echo "Total: $(ls -1 "$BACKUP_DIR"/*.tar.gz 2>/dev/null | wc -l) backup(s)"
-    echo "Size:  $(du -sh "$BACKUP_DIR" 2>/dev/null | awk '{print $1}')"
+    if [[ "$total_count" -eq 0 ]]; then
+        echo "(no backups found)"
+    else
+        jq -r '.[] | "  \(.file)  (\(.size))  \(.date)"' <<<"$backups_json" | sort -r
+        echo ""
+        echo "Total: ${total_count} backup(s)"
+        echo "Size:  ${total_size}"
+    fi
+    colinux_result "listed backups" "{\"count\":${total_count},\"location\":\"${BACKUP_DIR}\",\"backups\":${backups_json}}"
     exit 0
 fi
 
@@ -124,8 +152,12 @@ if [[ "$PRUNE_COUNT" -gt 0 ]]; then
             rm -f "$old_backup"
         done
         log_action "prune kept=$PRUNE_COUNT deleted=$delete_count"
+        colinux_result "pruned backups" "{\"kept\":${PRUNE_COUNT},\"deleted\":${delete_count}}"
+        exit 0
     else
         echo "Nothing to prune (only $total backup(s) exist)."
+        colinux_result "nothing to prune" "{\"total\":${total},\"kept\":${PRUNE_COUNT}}"
+        exit 0
     fi
 fi
 
@@ -147,6 +179,7 @@ fi
 
 if [[ ${#PATHS[@]} -eq 0 ]]; then
     echo "Nothing to backup (no /persist or /workspace found)."
+    colinux_result "nothing to backup" '{"paths":[]}'
     exit 0
 fi
 
@@ -171,3 +204,4 @@ tar czf "$BACKUP_FILE" "${EXCLUDES[@]}" "${PATHS[@]}" 2>&1
 BACKUP_SIZE="$(du -sh "$BACKUP_FILE" | awk '{print $1}')"
 echo "✓ Backup complete: ${BACKUP_FILE##*/} ($BACKUP_SIZE)"
 log_action "backup_ok file=${BACKUP_FILE##*/} size=$BACKUP_SIZE"
+colinux_result "backup complete" "{\"file\":\"${BACKUP_FILE##*/}\",\"size\":\"${BACKUP_SIZE}\",\"path\":\"${BACKUP_FILE}\"}"

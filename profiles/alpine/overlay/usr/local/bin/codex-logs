@@ -18,8 +18,32 @@
 #   -s, --since TIME        Show logs since time (e.g., "1 hour ago")
 set -euo pipefail
 
+
+COLINUX_COMMAND="codex-logs"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 PERSIST_DIR="/persist"
 LOG_DIR="${PERSIST_DIR}/logs"
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] logs: $*" >> "${LOG_DIR}/codex.log" 2>/dev/null || true
+}
+
+die() {
+    colinux_die "$@"
+}
 
 # ── Defaults ──────────────────────────────────────────────────────────────
 FOLLOW=false
@@ -46,6 +70,14 @@ while [[ $# -gt 0 ]]; do
             SOURCE="$1"
             shift
             ;;
+        --json)
+            COLINUX_JSON=true
+            shift
+            ;;
+        --yes|-y)
+            COLINUX_YES=true
+            shift
+            ;;
         *)
             # Might be a positional source argument
             if [[ -z "$SOURCE" ]] || [[ "$SOURCE" == -* ]]; then
@@ -55,6 +87,8 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+colinux_init_output
 
 # ── Help ──────────────────────────────────────────────────────────────────
 if [[ "$SOURCE" == "help" ]] || [[ "$SOURCE" == "--help" ]] || [[ "$SOURCE" == "-h" ]]; then
@@ -229,8 +263,6 @@ case "$SOURCE" in
         ;;
     "")       show_summary ;;
     *)
-        echo "Unknown log source: $SOURCE"
-        echo "Available: system, disk, codex, update, network, backup, all"
-        exit 1
+        die "Unknown log source: '$SOURCE'. Available: system, disk, codex, update, network, backup, all"
         ;;
 esac
