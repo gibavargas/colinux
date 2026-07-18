@@ -1,0 +1,155 @@
+#!/bin/bash
+# codex-log-rotate — Rotate and prune CoLinux logs under /persist/logs/
+# Part of CoLinux Lite
+#
+# Applies the standard CoLinux rotation policy (see
+# /usr/local/lib/colinux/logging.sh and AGENTS.md §5): when a log exceeds the
+# size threshold it is rotated (active → .1.gz, older archives shifted up),
+# and rotated archives older than the max age are pruned. A no-op when no log
+# needs rotation — safe and idempotent to re-run.
+#
+# Usage: codex-log-rotate [OPTIONS] [FILE]
+#   (no args)            Rotate every /persist/logs/*.log
+#   FILE                 Rotate only the given log file
+#   --all                Explicitly rotate all logs (same as no args)
+#   --max-kb N           Size threshold in KiB (default 5120 = 5 MiB)
+#   --keep N             Rotated archives to keep per log (default 7)
+#   --max-age-days N     Prune archives older than N days (default 30)
+#   --quiet, -q          Suppress informational output
+#   --json               Emit a structured JSON result envelope on stdout
+#   --help, -h           Show this help
+#
+# Examples:
+#   codex-log-rotate                      # rotate all logs with defaults
+#   codex-log-rotate /persist/logs/network.log
+#   codex-log-rotate --max-kb 1024 --keep 5
+#   codex-log-rotate --quiet              # cron-friendly
+set -euo pipefail
+
+COLINUX_COMMAND="codex-log-rotate"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
+# shellcheck source=/usr/local/lib/colinux/logging.sh
+if ! source /usr/local/lib/colinux/logging.sh 2>/dev/null; then
+    colinux_die "logging library not found at /usr/local/lib/colinux/logging.sh"
+fi
+
+PERSIST_DIR="${PERSIST_DIR:-/persist}"
+# LOG_DIR follows the library's COLINUX_LOG_DIR (defaults to /persist/logs,
+# overridable via env — useful for tests and alternate layouts). Do not clobber.
+LOG_DIR="$COLINUX_LOG_DIR"
+[ -n "$LOG_DIR" ] || LOG_DIR="${PERSIST_DIR}/logs"
+
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "[$ts] log-rotate: $*" >> "${LOG_DIR}/codex.log" 2>/dev/null || true
+}
+
+die() {
+    log_action "FATAL $*"
+    colinux_die "$@"
+}
+
+usage() {
+    cat <<EOF
+Usage: codex-log-rotate [OPTIONS] [FILE]
+
+Rotate and prune CoLinux logs under ${LOG_DIR}.
+
+Arguments:
+  FILE                 Rotate only the given log file (default: rotate all)
+
+Options:
+  --all                Explicitly rotate all logs (same as no FILE)
+  --max-kb N           Size threshold in KiB (default 5120 = 5 MiB)
+  --keep N             Rotated archives to keep per log (default 7)
+  --max-age-days N     Prune archives older than N days (default 30)
+  --quiet, -q          Suppress informational output
+  --json               Emit a structured JSON result envelope on stdout
+  --help, -h           Show this help
+
+The active log is renamed to <name>.1 and gzipped when it reaches the size
+threshold; older archives shift up and those beyond --keep are deleted.
+Archives older than --max-age-days are pruned every run. Safe to re-run.
+EOF
+}
+
+# ── Defaults ───────────────────────────────────────────────────────────────
+MAX_KB="${COLINUX_LOG_MAX_KB:-5120}"
+KEEP="${COLINUX_LOG_KEEP:-7}"
+MAX_AGE_DAYS="${COLINUX_LOG_MAX_AGE_DAYS:-30}"
+QUIET=false
+TARGET=""
+
+# ── Argument parsing ───────────────────────────────────────────────────────
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --max-kb)
+            MAX_KB="${2:-}"; [ -n "$MAX_KB" ] || die "--max-kb requires a positive integer"
+            shift 2 ;;
+        --keep)
+            KEEP="${2:-}"; [ -n "$KEEP" ] || die "--keep requires a non-negative integer"
+            shift 2 ;;
+        --max-age-days)
+            MAX_AGE_DAYS="${2:-}"; [ -n "$MAX_AGE_DAYS" ] || die "--max-age-days requires a non-negative integer"
+            shift 2 ;;
+        --quiet|-q)     QUIET=true; shift ;;
+        --json)         COLINUX_JSON=true; shift ;;
+        --all)          TARGET=""; shift ;;
+        --help|-h)      usage; exit 0 ;;
+        --)             shift; [ $# -gt 0 ] && TARGET="$1"; break ;;
+        --*)            die "Unknown option: $1 (see --help)" ;;
+        *)              TARGET="$1"; shift ;;
+    esac
+done
+
+# Activate JSON mode (no-op in text mode).
+colinux_init_output
+
+# Validate numerics (defensive — the library also normalizes).
+case "$MAX_KB"       in (*[!0-9]*|'') die "--max-kb must be a positive integer";; esac
+case "$KEEP"         in (*[!0-9]*|'') die "--keep must be a non-negative integer";; esac
+case "$MAX_AGE_DAYS" in (*[!0-9]*|'') die "--max-age-days must be a non-negative integer";; esac
+[ "$MAX_KB" -gt 0 ] || die "--max-kb must be greater than 0"
+
+# ── Run rotation ───────────────────────────────────────────────────────────
+scanned=0
+if [ -n "$TARGET" ]; then
+    [ -f "$TARGET" ] || die "log file not found: $TARGET"
+    colinux_log_rotate "$TARGET" "$MAX_KB" "$KEEP" "$MAX_AGE_DAYS"
+    scanned=1
+else
+    [ "$QUIET" != true ] && \
+        echo "Rotating logs in ${LOG_DIR} (max ${MAX_KB} KiB, keep ${KEEP}, prune after ${MAX_AGE_DAYS} days)"
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        colinux_log_rotate "$f" "$MAX_KB" "$KEEP" "$MAX_AGE_DAYS"
+        scanned=$((scanned + 1))
+    done < <(find "$LOG_DIR" -maxdepth 1 -name '*.log' -type f 2>/dev/null)
+fi
+
+# Report archive count (informational; failure-tolerant).
+archives="$(find "$LOG_DIR" -maxdepth 1 -name '*.log.*.gz' -type f 2>/dev/null | wc -l | tr -dc '0-9')"
+archives="${archives:-0}"
+
+log_action "scanned=${scanned} archives=${archives} max_kb=${MAX_KB} keep=${KEEP} max_age_days=${MAX_AGE_DAYS}"
+
+if [ "$QUIET" != true ]; then
+    echo "Done. Logs scanned: ${scanned}. Rotated archives present: ${archives}."
+fi
+
+colinux_result "log rotation complete" \
+    "{\"scanned\":${scanned},\"archives\":${archives},\"max_kb\":${MAX_KB},\"keep\":${KEEP},\"max_age_days\":${MAX_AGE_DAYS}}"

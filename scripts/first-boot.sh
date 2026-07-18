@@ -414,6 +414,16 @@ EOF
 setup_cron() {
     log_info "Setting up cron jobs..."
 
+    # Daily log rotation — always installed, independent of the update schedule
+    # (ROADMAP v0.3 "Logging standardization"). Runs codex-log-rotate with the
+    # standard policy defined in /usr/local/lib/colinux/logging.sh.
+    if [ -x /usr/local/bin/codex-log-rotate ]; then
+        (crontab -l 2>/dev/null | grep -v 'codex-log-rotate'; echo "0 3 * * * /usr/local/bin/codex-log-rotate --quiet") | crontab - 2>/dev/null || {
+            log_warn "Failed to install log-rotation cron job (crond may not be running)"
+        }
+        log_info "Log-rotation cron job installed (daily at 03:00)."
+    fi
+
     if [ -x /usr/local/bin/cron-codex-update ]; then
         if [ -x /etc/init.d/codex-auto-update ]; then
             log_info "Skipping generic user crontab; codex-auto-update OpenRC service manages the schedule."

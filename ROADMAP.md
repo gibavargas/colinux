@@ -28,7 +28,7 @@ significant technical debt (6 KLOC of shell with zero unit tests).
   - ISO boot regression test integrated into `test-iso.sh` (already partial)
 - [x] **Build reproducibility** — pinned Alpine repo snapshot + checksums in build
 - [x] **Error handling audit** — every `codex-*` command returns structured JSON on `--json`
-- [ ] **Logging standardization** — all scripts emit to `/persist/logs/` with rotation
+- [x] **Logging standardization** — all scripts emit to `/persist/logs/` with rotation
 - [ ] **First-boot idempotency** — `first-boot.sh` safe to re-run without side effects
 
 ### Exit criteria

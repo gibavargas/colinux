@@ -58,8 +58,21 @@
 ## 5. Logging
 
 1. All important operations **must** be logged to `/persist/logs/`.
-2. Log format: `YYYY-MM-DD HH:MM:SS [LEVEL] message`
-3. Rotate logs: keep last 7 days, compress older entries.
+2. Standard log line format (emitted by the shared library
+   `/usr/local/lib/colinux/logging.sh`):
+   ```
+   [YYYY-MM-DD HH:MM:SS UTC] [LEVEL] message
+   ```
+   where `LEVEL` ∈ `{INFO, WARN, ERROR, DEBUG}`.
+3. Logs are rotated automatically (daily at 03:00 via cron installed on first
+   boot). Rotation policy:
+   - **Size**: when a log reaches 5 MiB it is rotated to `<name>.1.gz`;
+     older archives shift up by one. Set the threshold via
+     `COLINUX_LOG_MAX_KB` (default 5120).
+   - **Retention**: keep 7 rotated archives per log (`COLINUX_LOG_KEEP`);
+     delete archives older than 30 days (`COLINUX_LOG_MAX_AGE_DAYS`).
+4. Rotate on demand with `codex-log-rotate` (all logs by default, or a single
+   file). Safe and idempotent to re-run.
 
 ## 6. Security
 
@@ -100,6 +113,7 @@ Core commands (whitelisted in `doas.conf`):
 | `codex-install-usb` / `codex-install-pc` | Install CoLinux to media |
 | `codex-usb-persist` | Set up USB persistence |
 | `codex-logs` | View system logs |
+| `codex-log-rotate` | Rotate and prune logs under `/persist/logs/` |
 | `codex-recover` | Recover deleted files (testdisk/photorec) |
 | `codex-clone` | Clone disks with ddrescue + SHA-256 |
 | `codex-remote` | SSH keys, Cloudflare tunnels, QR codes |
