@@ -229,6 +229,14 @@ show_summary() {
 
     echo ""
     echo "System uptime: $(uptime 2>/dev/null || echo 'unknown')"
+
+    # Surface rotated archives so operators can confirm rotation is working.
+    local archive_count=0
+    if [[ -d "$LOG_DIR" ]]; then
+        archive_count="$(find "$LOG_DIR" -maxdepth 1 -name '*.log.*.gz' -type f 2>/dev/null | wc -l | tr -d ' ')"
+    fi
+    echo "Rotated archives (*.log.*.gz): ${archive_count}"
+    echo "Rotation policy: 5 MiB size cap, keep 7, prune after 30 days (codex-log-rotate)"
     echo ""
 
     # Show any recent errors across all logs
