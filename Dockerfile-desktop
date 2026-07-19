@@ -108,6 +108,9 @@ RUN chmod 640 /etc/doas.conf
 # Install all codex-* tools from both lite and desktop overlays
 COPY profiles/alpine/overlay/usr/local/bin/ /usr/local/bin/
 COPY profiles/alpine/overlay-desktop/usr/local/bin/ /usr/local/bin/
+# Shared libraries (logging.sh, output.sh) — required by codex-log-rotate and
+# every wrapper that sources /usr/local/lib/colinux/*.sh.
+COPY profiles/alpine/overlay/usr/local/lib/ /usr/local/lib/
 RUN chmod +x /usr/local/bin/codex-* 2>/dev/null || true
 
 # Install first-boot, setup-codex, cron-update, and electron setup scripts

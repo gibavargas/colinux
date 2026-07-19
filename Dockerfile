@@ -81,6 +81,10 @@ RUN chmod 640 /etc/doas.conf
 
 # Install all codex-* tools
 COPY profiles/alpine/overlay/usr/local/bin/ /usr/local/bin/
+# Shared libraries (logging.sh, output.sh) — required by codex-log-rotate and
+# every wrapper that sources /usr/local/lib/colinux/*.sh. Without this, the
+# daily log-rotation cron silently fails with "logging library not found".
+COPY profiles/alpine/overlay/usr/local/lib/ /usr/local/lib/
 RUN chmod +x /usr/local/bin/codex-* /usr/local/bin/codexctl
 
 # Install first-boot, setup-codex, and cron-update scripts

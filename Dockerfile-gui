@@ -160,6 +160,9 @@ COPY profiles/alpine/overlay-gui/etc/codex-shell.conf /etc/codex-shell.conf
 
 # ── Install codex tools from lite overlay ────────────────────────────────────
 COPY profiles/alpine/overlay/usr/local/bin/ /usr/local/bin/
+# Shared libraries (logging.sh, output.sh) — required by codex-log-rotate and
+# every wrapper that sources /usr/local/lib/colinux/*.sh.
+COPY profiles/alpine/overlay/usr/local/lib/ /usr/local/lib/
 RUN chmod +x /usr/local/bin/codex-* /usr/local/bin/codexctl 2>/dev/null || true
 
 # ── Install GUI overlay files ────────────────────────────────────────────────

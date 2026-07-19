@@ -97,6 +97,9 @@ RUN chmod 440 /etc/sudoers.d/codex-compat
 
 # Install all codex-* tools
 COPY profiles/debian-compat/overlay/usr/local/bin/ /usr/local/bin/
+# Shared libraries (logging.sh, output.sh) — required by codex-log-rotate and
+# every wrapper that sources /usr/local/lib/colinux/*.sh.
+COPY profiles/debian-compat/overlay/usr/local/lib/ /usr/local/lib/
 RUN chmod +x /usr/local/bin/codex-* 2>/dev/null || true
 
 # Install first-boot, setup-codex, and cron-update scripts
