@@ -29,7 +29,7 @@ significant technical debt (6 KLOC of shell with zero unit tests).
 - [x] **Build reproducibility** — pinned Alpine repo snapshot + checksums in build
 - [x] **Error handling audit** — every `codex-*` command returns structured JSON on `--json`
 - [x] **Logging standardization** — all scripts emit to `/persist/logs/` with rotation
-- [ ] **First-boot idempotency** — `first-boot.sh` safe to re-run without side effects
+- [x] **First-boot idempotency** — `first-boot.sh` safe to re-run without side effects
 
 ### Exit criteria
 - `shellcheck scripts/*.sh` passes with zero warnings
