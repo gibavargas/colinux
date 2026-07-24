@@ -448,6 +448,12 @@ EOF
         find "$BUILD_DIR/config/overlays/colinux/chroot" -type d -exec chmod 755 {} \;
         find "$BUILD_DIR/config/overlays/colinux/chroot/usr/local/bin" -type f -exec chmod 755 {} \;
 
+        # Fix security-critical file permissions (cp -a preserves umask-inflated modes)
+        if [ -f "$BUILD_DIR/config/overlays/colinux/chroot/etc/doas.conf" ]; then
+            chmod 640 "$BUILD_DIR/config/overlays/colinux/chroot/etc/doas.conf"
+        fi
+        find "$BUILD_DIR/config/overlays/colinux/chroot/etc/sudoers.d" -type f -exec chmod 440 {} \; 2>/dev/null || true
+
         ok "Overlay installed ($(find "$overlay_src" -type f | wc -l) files)"
     else
         warn "No overlay directory found at $overlay_src"
