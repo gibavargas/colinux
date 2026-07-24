@@ -193,7 +193,7 @@ When forensic mode is activated (`codexctl forensic on`):
 
 If you discover a security vulnerability in CoLinux Lite, please report it responsibly:
 
-1. **Email**: security@colinux.dev (PGP key available on request)
+1. **Email**: <security@colinux.dev> (PGP key available on request)
 2. **GitHub**: Open a **draft** security advisory (recommended for code-level issues)
 3. **Do not** publicly disclose the vulnerability until a fix is available.
 

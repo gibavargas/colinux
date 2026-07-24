@@ -90,3 +90,80 @@ jobs:
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # QEMU boot smoke test (ROADMAP v0.4 "GitHub Actions CI").
+  # Boots the x86_64 ISO built above in QEMU and verifies via the serial
+  # console that the system reaches a login prompt and the codex binary is
+  # present. Depends on the build job so it only runs once an ISO exists.
+  # KVM acceleration is auto-detected by test-iso.sh (ubuntu-latest exposes
+  # /dev/kvm); falls back to slower TCG software emulation otherwise.
+  # ──────────────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: QEMU smoke test (x86_64)
+    runs-on: ubuntu-latest
+    needs: build-alpine
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read   # required to download the ISO artifact from the build job
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download x86_64 ISO artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: alpine-iso-x86_64
+          path: dist
+
+      - name: Locate ISO
+        id: iso
+        run: |
+          set -eu
+          echo "Artifact contents:"
+          ls -la dist
+          ISO="$(find dist -type f -name 'colinux-lite-x86_64-*.iso' | head -1)"
+          if [ -z "$ISO" ]; then
+            echo "::error::No x86_64 ISO found in artifact" >&2
+            exit 1
+          fi
+          echo "ISO path: $ISO"
+          echo "size=$(du -h "$ISO" | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "path=$ISO" >> "$GITHUB_OUTPUT"
+
+      - name: Install QEMU + expect
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y qemu-system-x86 expect
+          qemu-system-x86_64 --version | head -1
+          expect -v
+
+      - name: Report KVM availability
+        run: |
+          if [ -e /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo "kvm=available ($(ls -l /dev/kvm))"
+          else
+            echo "kvm=unavailable — boot will use TCG software emulation (slower)"
+          fi
+
+      - name: Run QEMU smoke test (serial console)
+        # --memory 2048 speeds up boot; --timeout 420 gives TCG fallback headroom.
+        run: |
+          ./scripts/test-iso.sh \
+            --iso "${{ steps.iso.outputs.path }}" \
+            --arch x86_64 \
+            --memory 2048 \
+            --timeout 420
+
+      - name: Upload serial + test logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-logs-x86_64
+          path: |
+            dist/serial-output.log
+            dist/test-results.log
+          if-no-files-found: ignore
+          retention-days: 14

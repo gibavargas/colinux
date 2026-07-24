@@ -1,0 +1,67 @@
+name: CI
+
+# Fast quality gate for CoLinux.
+# Runs the v0.3 test harness (shellcheck + bats) plus a markdown lint on every
+# push to main and every PR targeting main. The heavier ISO/Docker builds live
+# in build-alpine.yml / build-docker.yml / build-debian.yml; this workflow is
+# the gating surface that PRs must pass before merge.
+#
+# Deliverable: ROADMAP.md v0.4 "GitHub Actions CI" — shellcheck + bats + markdown lint.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref to save CI minutes (e.g. a PR push
+# followed immediately by another push).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: shellcheck gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run shellcheck gate (tests/run-tests.sh lint)
+        run: ./tests/run-tests.sh lint
+
+  unit:
+    name: bats unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # tests/run-tests.sh auto-vendors bats-core into tests/.bats/ via git if a
+      # system bats is absent — no apt step required.
+      - name: Run bats unit suite (tests/run-tests.sh unit)
+        run: ./tests/run-tests.sh unit
+
+  markdown-lint:
+    name: markdown lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Reads globs from .markdownlint-cli2.jsonc and rules from .markdownlint.json.
+      - name: Lint markdown (markdownlint-cli2)
+        run: npx --yes markdownlint-cli2

@@ -44,7 +44,7 @@ significant technical debt (6 KLOC of shell with zero unit tests).
 Repetitive audit/fix cycles dominate the commit log. Automate the quality gate.
 
 ### Deliverables
-- [ ] **GitHub Actions CI** — on PR and push to main:
+- [x] **GitHub Actions CI** — on PR and push to main:
   - `shellcheck` + `bats` + markdown lint
   - Docker ISO build (`colinux-lite` edition)
   - QEMU smoke test via `test-iso.sh` (serial console)

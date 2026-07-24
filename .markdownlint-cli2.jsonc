@@ -1,0 +1,13 @@
+// markdownlint-cli2 configuration.
+// Rules live in .markdownlint.json (shared with IDE extensions / markdownlint-cli).
+// This file only declares discovery globs so vendored bats docs, node_modules,
+// and generated build output are excluded consistently across local + CI runs.
+// Run: npx markdownlint-cli2   (no arguments — reads this file)
+{
+  "globs": [
+    "**/*.md",
+    "!tests/.bats/**",
+    "!node_modules/**",
+    "!dist/**"
+  ]
+}

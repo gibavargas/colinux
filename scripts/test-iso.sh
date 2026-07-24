@@ -88,6 +88,17 @@ check_qemu() {
     echo "$qemu_bin"
 }
 
+# Detect hardware virtualisation so CI (and local KVM hosts) get a fast boot
+# instead of TCG software emulation. Returns "-enable-kvm" when /dev/kvm is
+# usable, otherwise an empty string. The caller appends it to the QEMU command.
+detect_kvm_accel() {
+    if [ -w /dev/kvm ] 2>/dev/null; then
+        echo "-enable-kvm"
+    else
+        echo ""
+    fi
+}
+
 # ── Run smoke tests via expect script ────────────────────────────────────────
 run_tests_expect() {
     log_step "Running smoke tests with expect"
@@ -100,6 +111,8 @@ run_tests_expect() {
 
     local qemu_bin="$1"
     local expect_script
+    local accel
+    accel="$(detect_kvm_accel)"
     expect_script="$(mktemp --suffix=.exp)"
 
     cat > "$expect_script" <<'EXPECT_SCRIPT'
@@ -110,6 +123,7 @@ set qemu_bin [lindex $argv 2]
 set iso_path [lindex $argv 3]
 set arch     [lindex $argv 4]
 set memory   [lindex $argv 5]
+set accel    [lindex $argv 6]
 
 log_file -noappend $log_file
 
@@ -122,6 +136,11 @@ if {$arch eq "aarch64"} {
 }
 lappend qemu_cmd -m $memory -nographic -cdrom $iso_path \
     -netdev user,id=net0 -device virtio-net-pci,netdev=net0
+# Hardware acceleration (KVM) when available — passed in from the bash wrapper.
+# Empty string = fall back to TCG software emulation.
+if {$accel ne ""} {
+    lappend qemu_cmd {*}$accel
+}
 
 puts "Starting QEMU: $qemu_cmd"
 spawn {*}$qemu_cmd
@@ -160,8 +179,9 @@ expect {
     }
     "not found" {
         puts "\n>>> FAIL: codex binary not found"
+        exit 4
     }
-    timeout { puts "\n>>> TIMEOUT: codex check" }
+    timeout { puts "\n>>> TIMEOUT: codex check"; exit 3 }
 }
 expect "#"
 
@@ -206,10 +226,20 @@ EXPECT_SCRIPT
     chmod +x "$expect_script"
 
     log_info "Running expect script (timeout: ${TIMEOUT}s)..."
-    if expect "$expect_script" "$TIMEOUT" "$SERIAL_LOG" "$qemu_bin" "$ISO_PATH" "$ARCH" "$MEMORY" 2>&1 | tee "$TEST_LOG"; then
-        log_info "All tests passed via expect."
+    if [ -n "$accel" ]; then
+        log_info "KVM acceleration: enabled ($accel)"
     else
-        log_info "Some tests failed or timed out — check $SERIAL_LOG"
+        log_info "KVM acceleration: disabled (software emulation — slower boot)"
+    fi
+    # set -o pipefail (enabled at top of script) makes the pipeline return
+    # expect's exit status, not tee's. expect exits non-zero on boot timeout
+    # (1), unexpected QEMU exit (2), shell timeout (3), or a hard test failure
+    # (codex missing). That MUST surface as a test failure — otherwise a boot
+    # that never reaches login falsely reports "ALL TESTS PASSED".
+    if expect "$expect_script" "$TIMEOUT" "$SERIAL_LOG" "$qemu_bin" "$ISO_PATH" "$ARCH" "$MEMORY" "$accel" 2>&1 | tee "$TEST_LOG"; then
+        log_pass "expect smoke suite passed (boot reached login, codex present)"
+    else
+        log_fail "Smoke test failed (expect exited non-zero) — boot may not have completed; see $SERIAL_LOG"
     fi
 
     rm -f "$expect_script"
@@ -220,6 +250,11 @@ run_tests_serial() {
     log_step "Running smoke tests via serial log capture"
 
     local qemu_bin="$1"
+    local accel
+    accel="$(detect_kvm_accel)"
+    if [ -n "$accel" ]; then
+        log_info "KVM acceleration: enabled ($accel)"
+    fi
     local serial_fifo
     serial_fifo="$(mktemp -u)"
 
@@ -237,30 +272,23 @@ run_tests_serial() {
 
     # Launch QEMU
     log_info "Booting QEMU ($qemu_bin)..."
-    case "$ARCH" in
-        x86_64)
-            timeout "${TIMEOUT}" "$qemu_bin" \
-                -machine q35 \
-                -m "$MEMORY" \
-                -nographic \
-                -cdrom "$ISO_PATH" \
-                -serial "pipe:$serial_fifo" \
-                -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
-                -no-reboot \
-                &>/dev/null &
-            ;;
-        aarch64)
-            timeout "${TIMEOUT}" "$qemu_bin" \
-                -machine virt -cpu cortex-a57 \
-                -m "$MEMORY" \
-                -nographic \
-                -cdrom "$ISO_PATH" \
-                -serial "pipe:$serial_fifo" \
-                -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
-                -no-reboot \
-                &>/dev/null &
-            ;;
-    esac
+    # Build the QEMU argument list as an array so that the optional KVM flag
+    # can be appended cleanly (no unquoted-variable word-splitting in a
+    # backslash-continuation block, which would trip both shellcheck and bash).
+    local -a qemu_args=("$qemu_bin" -m "$MEMORY" -nographic -cdrom "$ISO_PATH")
+    if [ "$ARCH" = "aarch64" ]; then
+        qemu_args+=(-machine virt -cpu cortex-a57)
+    else
+        qemu_args+=(-machine q35 -cpu qemu64)
+    fi
+    qemu_args+=(
+        -serial "pipe:$serial_fifo"
+        -netdev "user,id=net0"
+        -device "virtio-net-pci,netdev=net0"
+        -no-reboot
+    )
+    [ -n "$accel" ] && qemu_args+=("$accel")
+    timeout "${TIMEOUT}" "${qemu_args[@]}" &>/dev/null &
     local qemu_pid=$!
 
     # Wait for boot
