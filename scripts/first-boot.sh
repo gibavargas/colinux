@@ -77,10 +77,15 @@ CODEX_RUNTIME="/run/codex"
 # we never touch a real /persist mount or write outside the simulated scope.
 if [[ "$DRY_RUN" == true ]]; then
     CODEX_PERSIST="${CODEX_PERSIST_SIM:-/tmp/colinux-firstboot-sim}"
-    # CODEX_RUNTIME must also live under the simulated persist tree so that
-    # non-root / CI containers (where /run/codex is not writable) can run the
-    # dry-run path without spurious permission errors.
+    # CODEX_RUNTIME and CODEX_WORKSPACE must also live under the simulated
+    # persist tree so that non-root / CI containers — where /run/codex and
+    # /workspace do not exist or are not writable — can run the dry-run path
+    # without spurious permission errors. setup_agents_md writes AGENTS.md
+    # into CODEX_WORKSPACE; if that still points at a non-existent /workspace
+    # (as on a GitHub Actions runner), the write fails under `set -e` and the
+    # dry-run aborts before the first-boot marker is written.
     CODEX_RUNTIME="$CODEX_PERSIST/run"
+    CODEX_WORKSPACE="$CODEX_PERSIST/workspace"
 fi
 
 CODEX_CONFIG="$CODEX_PERSIST/config"
