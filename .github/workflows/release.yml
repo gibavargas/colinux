@@ -186,8 +186,58 @@ jobs:
           echo "=== SHA256SUMS ==="
           cat SHA256SUMS
 
+      # ── GPG signing ──────────────────────────────────────────────────────────
+      # Signs SHA256SUMS with a detached armored signature when the
+      # COLINUX_GPG_PRIVATE_KEY repository secret is configured. Releases
+      # proceed without a signature if the key is absent (so the first
+      # release works before the maintainer provisions a signing key).
+      # Public key is published under keys/ in the repo and on keyservers.
+      - name: Import GPG signing key (if configured)
+        id: gpg
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.COLINUX_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::notice::No COLINUX_GPG_PRIVATE_KEY secret set — release will be unsigned."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "keyid=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Import the ASCII-armored private key (no TTY/pinentry in CI).
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEYID="$(gpg --list-secret-keys --with-colons --fingerprint \
+                    | awk -F: '/^fpr:/ {print $10; exit}')"
+          if [ -z "$KEYID" ]; then
+            echo "::error::GPG key import failed — no secret key found." >&2
+            exit 1
+          fi
+          echo "::notice::Imported release signing key: ${KEYID}"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "keyid=$KEYID" >> "$GITHUB_OUTPUT"
+
+      - name: Sign SHA256SUMS (detached, armored)
+        if: steps.gpg.outputs.signed == 'true'
+        working-directory: release-artifacts
+        env:
+          GPG_PASSPHRASE: ${{ secrets.COLINUX_GPG_PASSPHRASE }}
+        run: |
+          # Loopback pinentry allows non-interactive passphrase (empty ok).
+          # --output pins the filename; --armor would otherwise emit .asc.
+          gpg --batch --yes --pinentry-mode loopback \
+            ${GPG_PASSPHRASE:+--passphrase "$GPG_PASSPHRASE"} \
+            --local-user "${{ steps.gpg.outputs.keyid }}" \
+            --output SHA256SUMS.sig \
+            --detach-sign --armor SHA256SUMS
+          # Self-verify before publishing.
+          gpg --verify SHA256SUMS.sig SHA256SUMS
+          echo "=== SHA256SUMS.sig ==="
+          ls -lh SHA256SUMS.sig
+
       - name: Generate release notes
         id: notes
+        env:
+          GPG_SIGNED: ${{ steps.gpg.outputs.signed }}
+          GPG_KEYID: ${{ steps.gpg.outputs.keyid }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           echo "## What's in ${TAG}" > release-notes.md
@@ -230,9 +280,24 @@ jobs:
 
           echo "" >> release-notes.md
           echo "### Verify" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "Checksum:" >> release-notes.md
           echo '```bash' >> release-notes.md
           echo 'sha256sum -c SHA256SUMS' >> release-notes.md
           echo '```' >> release-notes.md
+          if [ "${GPG_SIGNED}" = "true" ]; then
+            echo "" >> release-notes.md
+            echo "Signature (detached GPG, key fingerprint \`${GPG_KEYID}\`):" >> release-notes.md
+            echo '```bash' >> release-notes.md
+            echo '# Import the CoLinux release public key (keys/colinux-release.asc or a keyserver):' >> release-notes.md
+            echo "gpg --receive-keys ${GPG_KEYID}" >> release-notes.md
+            echo 'gpg --verify SHA256SUMS.sig SHA256SUMS' >> release-notes.md
+            echo '```' >> release-notes.md
+          else
+            echo "" >> release-notes.md
+            echo "> ℹ️ This release is **not GPG-signed** (no signing key configured)." >> release-notes.md
+            echo "> Verify integrity with the checksum above." >> release-notes.md
+          fi
           echo "" >> release-notes.md
           echo "### Docker" >> release-notes.md
           echo '```bash' >> release-notes.md
@@ -252,6 +317,7 @@ jobs:
             release-artifacts/colinux-desktop-*.iso
             release-artifacts/colinux-desktop-*.img.gz
             release-artifacts/SHA256SUMS
+            release-artifacts/SHA256SUMS.sig
           draft: false
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
           generate_release_notes: true

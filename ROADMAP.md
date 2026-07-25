@@ -54,7 +54,7 @@ Repetitive audit/fix cycles dominate the commit log. Automate the quality gate.
   > `continue-on-error` until the ISO includes a kernel — see issue #2
   > (the build currently emits a kernel-less 18 MB ISO). The CI gate
   > itself (lint/unit/markdown) is green.
-- [ ] **Release automation** — tag-triggered:
+- [x] **Release automation** — tag-triggered:
   - Build all stable editions
   - Generate SHA-256 + GPG signatures
   - GitHub Release with artifacts + changelog

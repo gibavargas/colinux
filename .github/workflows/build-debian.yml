@@ -3,7 +3,6 @@ name: Build Debian Desktop ISO
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -66,16 +65,3 @@ jobs:
             dist/SHA256SUMS-debian.txt
           retention-days: 14
           if-no-files-found: warn
-
-      - name: Upload as release asset (tags only)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/colinux-desktop-*.iso
-            dist/colinux-desktop-*.img.gz
-            dist/SHA256SUMS-debian.txt
-          draft: false
-          prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

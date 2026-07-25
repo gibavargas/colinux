@@ -3,7 +3,6 @@ name: Build Alpine ISO
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -75,21 +74,6 @@ jobs:
             dist/build-manifest.json
           retention-days: 30
           if-no-files-found: error
-
-      - name: Upload as release asset (tags only)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/colinux-lite-*.iso
-            dist/colinux-lite-*.raw.img
-            dist/SHA256SUMS-${{ matrix.arch }}.txt
-            dist/build-manifest.txt
-            dist/build-manifest.json
-          draft: false
-          prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────────────
   # QEMU boot smoke test (ROADMAP v0.4 "GitHub Actions CI").

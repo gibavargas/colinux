@@ -240,6 +240,59 @@ See `README.md` § Quick Start. Summary:
 
 ---
 
+## 4.5 Automated Tag-Triggered Releases (v0.4+)
+
+Starting with v0.4, releases are produced automatically by
+`.github/workflows/release.yml` when a `v*` tag is pushed. The per-push
+`build-alpine.yml` and `build-debian.yml` workflows run CI only (no release
+uploads); the `release.yml` workflow is the **sole** release producer.
+
+### How to cut a release
+
+```bash
+# 1. Confirm main is green and on the commit you want to ship.
+gh run list --repo gibavargas/colinux --limit 5
+
+# 2. Tag and push.
+git tag v0.4.0
+git push codexos v0.4.0    # or: git push origin v0.4.0
+
+# 3. Watch the Release workflow.
+gh run watch --repo gibavargas/colinux   # or: gh run list --workflow=release.yml
+```
+
+### What the workflow does
+
+1. Builds all stable editions in parallel:
+   - Alpine Lite ISO (x86_64 + aarch64)
+   - Debian Desktop ISO
+   - Docker image (pushed to `ghcr.io`, tagged with the semver)
+2. Downloads all build artifacts into one directory.
+3. Generates a combined `SHA256SUMS`.
+4. **GPG-signs `SHA256SUMS`** (→ `SHA256SUMS.sig`, detached armored) when the
+   `COLINUX_GPG_PRIVATE_KEY` repo secret is set; otherwise publishes unsigned
+   with a notice in the notes. See [`keys/README.md`](../keys/README.md) to
+   provision the signing key.
+5. Publishes a GitHub Release with the artifacts, `SHA256SUMS`, optional
+   `SHA256SUMS.sig`, and a generated changelog (`generate_release_notes: true`
+   appends GitHub's auto-generated PR/commit summary to the curated notes).
+6. Marks the release as prerelease automatically for `rc`/`beta`/`alpha` tags.
+
+### GPG signing setup (one-time)
+
+```bash
+# Generate + export per keys/README.md, then add repo secrets:
+#   COLINUX_GPG_PRIVATE_KEY  — output of: gpg --armor --export-secret-keys KEYID
+#   COLINUX_GPG_PASSPHRASE   — passphrase (omit secret if the key has none)
+gh secret set COLINUX_GPG_PRIVATE_KEY < colinux-private-key.asc
+gh secret set COLINUX_GPG_PASSPHRASE
+# Commit the public key:
+gpg --armor --export KEYID > keys/colinux-release.asc
+git add keys/colinux-release.asc && git commit -m "release: publish signing key"
+```
+
+---
+
 ## 5. Post-release Verification
 
 Within 1 hour of publishing:
@@ -253,8 +306,9 @@ gh release download v0.2.0 --repo gibavargas/colinux \
 # 5.2 Verify published checksums:
 cd /tmp/v0.2-verify && sha256sum -c SHA256SUMS
 
-# 5.3 (If signed) verify the signature:
-gpg --verify SHA256SUMS.asc SHA256SUMS
+# 5.3 (If signed) verify the detached GPG signature:
+gpg --import keys/colinux-release.asc
+gpg --verify SHA256SUMS.sig SHA256SUMS
 
 # 5.4 Confirm CI is still green on main:
 gh run list --repo gibavargas/colinux --limit 5
