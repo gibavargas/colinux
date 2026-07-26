@@ -1,0 +1,258 @@
+name: Nightly Build
+
+# ==============================================================================
+# CoLinux — Nightly build pipeline (ROADMAP v0.4 deliverable).
+#
+# Runs `scripts/build-alpine.sh` for both architectures on a cron schedule and
+# publishes a rolling prerelease on the `nightly` git tag. The `nightly` tag is
+# force-moved to the current HEAD commit on every run, and the prerelease's
+# assets are overwritten in place (stable filenames), so the Releases page
+# always exposes exactly one "CoLinux Nightly" entry with fresh ISOs.
+#
+# Scope is intentionally limited to the Alpine lite edition (the deliverable
+# text reads "`build-alpine.sh` on cron"). Debian desktop + Docker image builds
+# remain release-only (`release.yml`) to keep nightly CI minutes low.
+#
+# Triggers:
+#   - schedule: daily at 03:00 UTC (off-peak, avoids the 09:00 review and
+#     20:00 audit cronjobs).
+#   - workflow_dispatch: manual "Run workflow" from the Actions tab.
+# ==============================================================================
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual nightly trigger (optional)'
+        required: false
+        default: 'manual'
+
+permissions:
+  contents: write
+
+env:
+  ALPINE_RELEASE: '3.21'
+
+# A nightly build is long (~25-30 min). If a manual dispatch overlaps the
+# scheduled run, cancel the older run rather than burning double CI minutes.
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  # ── Build Alpine ISOs (matrix: x86_64 + aarch64) ───────────────────────────
+  # Mirrors the proven Docker-in-Docker build from release.yml / build-alpine.yml.
+  # Skip entirely on forks (no push access for the nightly tag / release).
+  build:
+    name: Alpine ISO (${{ matrix.arch }})
+    if: github.repository == 'gibavargas/colinux'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (aarch64 cross-build)
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build Alpine ISO (${{ matrix.arch }})
+        run: |
+          mkdir -p dist
+          ARCH=${{ matrix.arch }} \
+          ALPINE_RELEASE=${{ env.ALPINE_RELEASE }} \
+          OUTDIR="$GITHUB_WORKSPACE/dist" \
+          sudo docker run --rm \
+            --platform ${{ matrix.arch == 'aarch64' && 'linux/arm64' || 'linux/amd64' }} \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -e ARCH \
+            -e ALPINE_RELEASE \
+            -e OUTDIR \
+            alpine:3.21 \
+            sh -c '
+              apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl ca-certificates git \
+                xorriso squashfs-tools mtools dosfstools grub grub-efi efibootmgr e2fsprogs \
+                qemu-img openssl
+              if [ "$ARCH" = x86_64 ]; then apk add --no-cache syslinux; fi
+              git config --global --add safe.directory /src
+              cd /src && bash scripts/build-alpine.sh
+            '
+
+      - name: Generate per-arch checksums
+        working-directory: dist
+        run: |
+          sha256sum colinux-lite-* > "SHA256SUMS-${{ matrix.arch }}.txt"
+          echo "=== SHA256SUMS-${{ matrix.arch }}.txt ==="
+          cat "SHA256SUMS-${{ matrix.arch }}.txt"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-alpine-${{ matrix.arch }}
+          path: |
+            dist/colinux-lite-*.iso
+            dist/colinux-lite-*.raw.img
+            dist/SHA256SUMS-${{ matrix.arch }}.txt
+            dist/build-manifest.txt
+            dist/build-manifest.json
+          retention-days: 3
+          # ISO is always produced (build fails otherwise); raw.img is best-effort
+          # (loop devices are unavailable inside Docker — see pitfalls). At least
+          # one file always matches, so 'error' is safe.
+          if-no-files-found: error
+
+  # ── Publish rolling nightly prerelease ─────────────────────────────────────
+  publish:
+    name: Publish nightly release
+    needs: build
+    if: github.repository == 'gibavargas/colinux'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-alpine-x86_64
+          path: release-artifacts/x86_64
+
+      - name: Download aarch64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-alpine-aarch64
+          path: release-artifacts/aarch64
+
+      - name: Stage artifacts with stable nightly names
+        run: |
+          set -eu
+          mkdir -p release-staging
+          for arch in x86_64 aarch64; do
+            src="release-artifacts/${arch}"
+            [ -d "$src" ] || { echo "::warning::No artifact dir for ${arch}"; continue; }
+
+            iso="$(find "$src" -maxdepth 1 -name "colinux-lite-${arch}-*.iso" | head -1 || true)"
+            if [ -n "$iso" ] && [ -f "$iso" ]; then
+              mv "$iso" "release-staging/colinux-lite-${arch}-nightly.iso"
+            else
+              echo "::error::No ${arch} ISO in artifact" >&2
+              exit 1
+            fi
+
+            raw="$(find "$src" -maxdepth 1 -name "colinux-lite-${arch}-*.raw.img" | head -1 || true)"
+            if [ -n "$raw" ] && [ -f "$raw" ]; then
+              mv "$raw" "release-staging/colinux-lite-${arch}-nightly.raw.img"
+            else
+              echo "::notice::No raw.img for ${arch} (expected when loop devices are unavailable)"
+            fi
+
+            # Keep per-arch build provenance (no name collision after rename).
+            [ -f "$src/build-manifest.txt" ]  && mv "$src/build-manifest.txt"  "release-staging/build-manifest-${arch}.txt"
+            [ -f "$src/build-manifest.json" ] && mv "$src/build-manifest.json" "release-staging/build-manifest-${arch}.json"
+          done
+
+      - name: Generate combined SHA256SUMS
+        working-directory: release-staging
+        run: |
+          : > SHA256SUMS
+          for f in colinux-lite-*-nightly.iso colinux-lite-*-nightly.raw.img; do
+            [ -f "$f" ] && sha256sum "$f" >> SHA256SUMS
+          done
+          echo "=== nightly SHA256SUMS ==="
+          cat SHA256SUMS
+
+      - name: Prepare release metadata and notes
+        id: meta
+        working-directory: release-staging
+        run: |
+          DATE="$(date -u +%Y-%m-%d)"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "date=$DATE"           >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "# CoLinux Nightly — ${DATE}"
+            echo ""
+            echo "> ⚠️ **Automated nightly build.** Bleeding-edge and potentially unstable."
+            echo "> For a stable release, see the [latest tagged release](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/latest)."
+            echo ""
+            echo "**Build:** \`${DATE}-${SHORT_SHA}\`  "
+            echo "**Source:** [\`${SHORT_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})  "
+            echo "**Trigger:** \`${{ github.event_name }}\`"
+            echo ""
+            echo "### Downloads"
+            echo ""
+            echo "| File | Description |"
+            echo "|------|-------------|"
+            for f in colinux-*-nightly.iso colinux-*-nightly.raw.img; do
+              [ -f "$f" ] || continue
+              sz="$(du -h "$f" | cut -f1)"
+              # Filename pattern: colinux-lite-<arch>-nightly.<ext>
+              f_arch="$(echo "$f" | sed -E 's/^colinux-lite-([a-z0-9]+)-nightly\..*$/\1/')"
+              if [[ "$f" == *.iso ]]; then
+                desc="Alpine Lite ISO (${f_arch})"
+              else
+                desc="Raw disk image (${f_arch})"
+              fi
+              echo "| \`${f}\` | ${desc} (${sz}) |"
+            done
+            echo ""
+            echo "### Verify"
+            echo ""
+            echo '```bash'
+            echo 'sha256sum -c SHA256SUMS'
+            echo '```'
+            echo ""
+            echo "### Provenance"
+            echo ""
+            echo "Per-arch build manifests (\`build-manifest-<arch>.txt\`) record the exact"
+            echo "Alpine repo snapshot, Codex release tag, and aports commit used for this build."
+            echo ""
+            echo "---"
+            echo ""
+            echo "_This release is regenerated automatically every night at ~03:00 UTC._"
+          } > release-notes.md
+
+          echo "=== release-notes.md (preview) ==="
+          head -20 release-notes.md
+
+      - name: Move nightly tag to HEAD
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Force-create/move the rolling nightly tag onto the current commit.
+          git tag -f nightly "$GITHUB_SHA"
+          git push --force origin refs/tags/nightly
+
+      - name: Create / update nightly prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          target_commitish: ${{ github.sha }}
+          name: "CoLinux Nightly (${{ steps.meta.outputs.date }})"
+          body_path: release-staging/release-notes.md
+          prerelease: true
+          # Never let the rolling nightly shadow the real "latest" stable release.
+          make_latest: "false"
+          files: |
+            release-staging/colinux-lite-*-nightly.iso
+            release-staging/colinux-lite-*-nightly.raw.img
+            release-staging/build-manifest-*.txt
+            release-staging/build-manifest-*.json
+            release-staging/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -58,7 +58,7 @@ Repetitive audit/fix cycles dominate the commit log. Automate the quality gate.
   - Build all stable editions
   - Generate SHA-256 + GPG signatures
   - GitHub Release with artifacts + changelog
-- [ ] **Nightly builds** — `build-alpine.sh` on cron, publish to `nightly` tag
+- [x] **Nightly builds** — `build-alpine.sh` on cron, publish to `nightly` tag
 - [ ] **Branch protection** — main requires CI green + 1 review
 
 ### Exit criteria
