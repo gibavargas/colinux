@@ -138,6 +138,13 @@ jobs:
           path: release-artifacts/aarch64
 
       - name: Stage artifacts with stable nightly names
+        # NOTE: build-alpine.sh currently emits ISO filenames with a *hardcoded*
+        # `x86_64` arch token regardless of the build arch (the documented
+        # "output filename version duplication" profile quirk — e.g. the aarch64
+        # build yields `colinux-lite-x86_64-v3.21-v3.21-x86_64.iso`). So we cannot
+        # match on the arch token in the filename. Each per-arch artifact dir
+        # contains exactly one ISO, so we find the single ISO in each dir and
+        # rename it using the matrix arch variable instead.
         run: |
           set -eu
           mkdir -p release-staging
@@ -145,15 +152,18 @@ jobs:
             src="release-artifacts/${arch}"
             [ -d "$src" ] || { echo "::warning::No artifact dir for ${arch}"; continue; }
 
-            iso="$(find "$src" -maxdepth 1 -name "colinux-lite-${arch}-*.iso" | head -1 || true)"
-            if [ -n "$iso" ] && [ -f "$iso" ]; then
-              mv "$iso" "release-staging/colinux-lite-${arch}-nightly.iso"
-            else
-              echo "::error::No ${arch} ISO in artifact" >&2
+            iso_count="$(find "$src" -maxdepth 1 -name "colinux-lite-*.iso" | wc -l | tr -d ' ')"
+            if [ "$iso_count" -eq 0 ]; then
+              echo "::error::No ISO in ${arch} artifact dir" >&2
               exit 1
             fi
+            if [ "$iso_count" -gt 1 ]; then
+              echo "::warning::${arch} artifact has ${iso_count} ISOs; using the first"
+            fi
+            iso="$(find "$src" -maxdepth 1 -name "colinux-lite-*.iso" | head -1)"
+            mv "$iso" "release-staging/colinux-lite-${arch}-nightly.iso"
 
-            raw="$(find "$src" -maxdepth 1 -name "colinux-lite-${arch}-*.raw.img" | head -1 || true)"
+            raw="$(find "$src" -maxdepth 1 -name "colinux-lite-*.raw.img" | head -1 || true)"
             if [ -n "$raw" ] && [ -f "$raw" ]; then
               mv "$raw" "release-staging/colinux-lite-${arch}-nightly.raw.img"
             else
@@ -202,7 +212,7 @@ jobs:
               [ -f "$f" ] || continue
               sz="$(du -h "$f" | cut -f1)"
               # Filename pattern: colinux-lite-<arch>-nightly.<ext>
-              f_arch="$(echo "$f" | sed -E 's/^colinux-lite-([a-z0-9]+)-nightly\..*$/\1/')"
+              f_arch="$(echo "$f" | sed -E 's/^colinux-lite-([a-z0-9_]+)-nightly\..*$/\1/')"
               if [[ "$f" == *.iso ]]; then
                 desc="Alpine Lite ISO (${f_arch})"
               else
