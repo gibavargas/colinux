@@ -352,6 +352,44 @@ run_mkimage() {
     log_info "ISO built successfully."
 }
 
+# ── Verify ISO contains kernel and initramfs ─────────────────────────────────
+# mkimage.sh can exit 0 even when section_kernels fails silently, producing an
+# unbootable ISO (see issue #2).
+verify_iso_bootable() {
+    log_step "Verifying ISO kernel and initramfs"
+
+    local iso_file
+    iso_file="$(find "$OUTDIR" -maxdepth 1 -name "colinux-*.iso" -type f | head -1)"
+    if [ -z "$iso_file" ]; then
+        log_error "No ISO found in $OUTDIR — cannot verify bootability"
+        exit 1
+    fi
+
+    local boot_files=""
+    if command -v xorriso &>/dev/null; then
+        boot_files="$(xorriso -indev "$iso_file" -ls_l /boot/ 2>/dev/null || true)"
+    elif command -v isoinfo &>/dev/null; then
+        boot_files="$(isoinfo -l -i "$iso_file" 2>/dev/null || true)"
+    fi
+
+    if [ -z "$boot_files" ]; then
+        log_warn "Cannot inspect ISO (xorriso/isoinfo unavailable) — skipping kernel check"
+        return 0
+    fi
+
+    if ! echo "$boot_files" | grep -q 'vmlinuz'; then
+        log_error "FATAL: ISO missing kernel (boot/vmlinuz-*) — section_kernels failed silently (issue #2)"
+        exit 1
+    fi
+
+    if ! echo "$boot_files" | grep -q 'initramfs'; then
+        log_error "FATAL: ISO missing initramfs (boot/initramfs-*) — section_kernels failed silently"
+        exit 1
+    fi
+
+    log_info "Kernel and initramfs verified in ISO"
+}
+
 # ── Step 7: Download and inject Codex CLI binary ────────────────────────────
 inject_codex() {
     log_step "Downloading and injecting Codex CLI"
@@ -613,6 +651,7 @@ main() {
     install_shared
     setup_electron_overlay
     run_mkimage
+    verify_iso_bootable
     inject_codex
     create_raw_image
     print_summary
