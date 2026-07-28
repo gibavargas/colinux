@@ -1,0 +1,667 @@
+#!/bin/bash
+# codex-install — Interactive TUI installer for CoLinux
+# Part of CoLinux Lite
+#
+# Usage: codex-install [OPTIONS]
+#
+# A guided, menu-driven front-end that gathers installation options
+# interactively and dispatches to the hardened, non-interactive
+# installers (codex-install-pc / codex-install-usb). The TUI performs
+# all safety confirmation itself (disk serial + explicit YES), then
+# invokes the underlying installer with --ci so the user is not
+# prompted twice.
+#
+# Options:
+#   --dry-run     Gather all options and show the plan, but do not write
+#   --json        Emit the gathered plan as JSON (requires --dry-run)
+#   --yes         Skip the interactive TUI and use safe defaults
+#                  (intended for scripted --dry-run previews only)
+#   --help        Show this help
+#
+# Safety model:
+#   codex-install is intentionally NOT whitelisted in doas.conf, exactly
+#   like codex-install-pc / codex-install-usb. It must be run as root (or
+#   via explicit `doas` with a password) because it performs destructive
+#   disk writes.
+set -euo pipefail
+
+COLINUX_COMMAND="codex-install"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+fi
+
+LOG_DIR="/persist/logs"
+LOGFILE="${LOG_DIR}/install.log"
+
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    { echo "[$ts] codex-install: $*" >> "$LOGFILE" 2>/dev/null; } || true
+}
+
+die() {
+    log_action "FATAL $*"
+    colinux_die "$@"
+}
+
+usage() {
+    cat <<EOF
+Usage: codex-install [OPTIONS]
+
+Interactive TUI installer for CoLinux. Guides you through disk selection,
+partition layout, encryption, and dual-boot options, then dispatches to the
+appropriate non-interactive installer (codex-install-pc or codex-install-usb).
+
+Options:
+  --dry-run     Show the full installation plan without writing anything
+  --json        Emit the plan as JSON (requires --dry-run)
+  --yes         Use safe defaults without the interactive TUI
+                  (only meaningful with --dry-run for scripted previews)
+  --help, -h    Show this help
+
+This command is interactive and requires a terminal. For non-interactive
+installs (CI, automation), use codex-install-pc / codex-install-usb directly.
+
+NOTE: codex-install is NOT in doas.conf — run it as root or via explicit
+      'doas' with a password, just like the underlying installers.
+
+Examples:
+  codex-install                 # full guided install
+  codex-install --dry-run       # preview the plan, no disk changes
+  codex-install --dry-run --json # emit plan as JSON
+EOF
+    exit 0
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────
+DRY_RUN=false
+USE_DEFAULTS=false
+
+# ── Parse arguments ───────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true; shift ;;
+        --json) COLINUX_JSON=true; shift ;;
+        --yes|-y) USE_DEFAULTS=true; shift ;;
+        --help|-h) usage ;;
+        *) die "Unknown option: $1 (codex-install takes no positional args)" ;;
+    esac
+done
+
+# --yes bypasses the interactive TUI and is only safe for dry-run previews.
+if [[ "$USE_DEFAULTS" == true ]] && [[ "$DRY_RUN" != true ]]; then
+    die "--yes is only permitted with --dry-run (non-interactive previews). For a real install, run interactively or use codex-install-pc / codex-install-usb."
+fi
+
+colinux_init_output
+
+# In JSON mode, only a dry-run plan makes sense (install is destructive +
+# interactive). Refuse to actually install under --json.
+if [[ "$COLINUX_JSON" == "true" ]] && [[ "$DRY_RUN" != true ]]; then
+    die "--json requires --dry-run (destructive installs cannot run under JSON mode)."
+fi
+
+# Require a controlling terminal unless --yes defaults are requested.
+if [[ "$USE_DEFAULTS" != true ]] && [[ ! -t 0 ]]; then
+    die "codex-install is interactive and requires a terminal. Use --yes --dry-run for a non-interactive preview, or use codex-install-pc / codex-install-usb directly."
+fi
+
+# ══════════════════════════════════════════════════════════════════════════
+# TUI primitives
+# ══════════════════════════════════════════════════════════════════════════
+# Detection order mirrors shared/network/codex-wifi-wizard.sh:
+#   dialog  →  whiptail  →  plain read fallback.
+# A backend is only used when a controlling terminal is present.
+
+_tui_backend() {
+    if [[ "$USE_DEFAULTS" == true ]]; then
+        echo "none"
+    elif command -v dialog &>/dev/null && [[ -t 0 ]]; then
+        echo "dialog"
+    elif command -v whiptail &>/dev/null && [[ -t 0 ]]; then
+        echo "whiptail"
+    else
+        echo "plain"
+    fi
+}
+
+BACKEND="$(_tui_backend)"
+
+# Show a simple message box. Args: title text
+tui_msgbox() {
+    local title="$1" text="$2"
+    if [[ "$BACKEND" == "none" ]]; then
+        return 0
+    fi
+    if [[ "$BACKEND" == "dialog" ]]; then
+        dialog --title "$title" --msgbox "$text" 0 0 >/dev/tty 2>&1 || true
+    elif [[ "$BACKEND" == "whiptail" ]]; then
+        whiptail --title "$title" --msgbox "$text" 0 0 2>/dev/null || true
+    else
+        echo "" >&2
+        echo "── $title ──" >&2
+        printf '%s\n' "$text" >&2
+        echo "" >&2
+        read -rp "Press Enter to continue..." _ignored 2>/dev/null || true
+    fi
+}
+
+# Yes/No question. Returns 0 for Yes, 1 for No. Args: title prompt [default_yes]
+tui_yesno() {
+    local title="$1" prompt="$2" default_yes="${3:-false}"
+    if [[ "$USE_DEFAULTS" == true ]]; then
+        [[ "$default_yes" == "true" ]] && return 0 || return 1
+    fi
+    if [[ "$BACKEND" == "dialog" ]]; then
+        if dialog --title "$title" --yesno "$prompt" 0 0 >/dev/tty 2>&1; then
+            return 0
+        fi
+        return 1
+    elif [[ "$BACKEND" == "whiptail" ]]; then
+        if whiptail --title "$title" --yesno "$prompt" 0 0 2>/dev/tty; then
+            return 0
+        fi
+        return 1
+    else
+        local hint="y/N"
+        [[ "$default_yes" == "true" ]] && hint="Y/n"
+        local resp=""
+        echo "── $title ──" >&2
+        read -rp "$prompt [$hint]: " resp 2>/dev/null || resp=""
+        case "${resp,,}" in
+            y|yes) return 0 ;;
+            "") [[ "$default_yes" == "true" ]] && return 0 || return 1 ;;
+            *) return 1 ;;
+        esac
+    fi
+}
+
+# Menu selection. Args: title prompt tag1 desc1 tag2 desc2 ...
+# Echoes the selected TAG to stdout. Empty + return 1 on cancel.
+tui_menu() {
+    local title="$1" prompt="$2"; shift 2
+    local items=("$@")
+    local n=$(( ${#items[@]} / 2 ))
+    if [[ "$USE_DEFAULTS" == true ]]; then
+        # First item is the safe default.
+        printf '%s' "${items[0]}"
+        return 0
+    fi
+    if [[ "$BACKEND" == "dialog" ]]; then
+        local sel
+        sel=$(dialog --stdout --title "$title" --menu "$prompt" 0 0 "$n" "${items[@]}" 2>/dev/tty) || return 1
+        [[ -n "$sel" ]] && printf '%s' "$sel" && return 0
+        return 1
+    elif [[ "$BACKEND" == "whiptail" ]]; then
+        local sel
+        sel=$(whiptail --title "$title" --menu "$prompt" 0 0 "$n" "${items[@]}" 3>&1 1>&2 2>/dev/tty) || return 1
+        [[ -n "$sel" ]] && printf '%s' "$sel" && return 0
+        return 1
+    else
+        echo "── $title ──" >&2
+        echo "$prompt" >&2
+        local i
+        for (( i=0; i<n; i++ )); do
+            printf '  [%d] %-12s %s\n' "$((i+1))" "${items[$((i*2))]}" "${items[$((i*2+1))]}" >&2
+        done
+        local choice=""
+        while true; do
+            read -rp "Enter number [1-$n]: " choice 2>/dev/null || return 1
+            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= n )); then
+                printf '%s' "${items[$(((choice-1)*2))]}"
+                return 0
+            fi
+            echo "Invalid selection." >&2
+        done
+    fi
+}
+
+# Text input. Args: title prompt [default]. Echoes input to stdout.
+tui_input() {
+    local title="$1" prompt="$2" default="${3:-}"
+    if [[ "$USE_DEFAULTS" == true ]]; then
+        printf '%s' "$default"
+        return 0
+    fi
+    if [[ "$BACKEND" == "dialog" ]]; then
+        local val
+        val=$(dialog --stdout --title "$title" --inputbox "$prompt" 0 0 "$default" 2>/dev/tty) || return 1
+        printf '%s' "$val"
+        return 0
+    elif [[ "$BACKEND" == "whiptail" ]]; then
+        local val
+        val=$(whiptail --title "$title" --inputbox "$prompt" 0 0 "$default" 3>&1 1>&2 2>/dev/tty) || return 1
+        printf '%s' "$val"
+        return 0
+    else
+        local val=""
+        echo "── $title ──" >&2
+        local hint=""
+        [[ -n "$default" ]] && hint=" [$default]"
+        read -rp "$prompt$hint: " val 2>/dev/null || return 1
+        [[ -z "$val" ]] && val="$default"
+        printf '%s' "$val"
+        return 0
+    fi
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# Disk discovery
+# ══════════════════════════════════════════════════════════════════════════
+
+# Echo the block device the system is currently booted from (best-effort),
+# normalised to the whole-disk node. Empty if it cannot be determined.
+get_boot_device() {
+    local src="" whole=""
+    # Prefer findmnt, which resolves UUID=/LABEL=/PARTUUID= roots to a
+    # concrete /dev/ node. Fall back to the root= kernel cmdline token.
+    src="$(findmnt -n -o SOURCE / 2>/dev/null | head -1 || true)"
+    if [[ -z "$src" ]] || [[ "$src" != /dev/* ]]; then
+        if [[ -f /proc/cmdline ]]; then
+            src="$(grep -oE 'root=[^[:space:]]+' /proc/cmdline 2>/dev/null | sed 's/^root=//' || true)"
+            src="${src%% *}"
+        fi
+    fi
+    # Only /dev/ paths can be compared to disk nodes; anything else (UUID=,
+    # LABEL=, nfs, etc.) means we cannot determine the boot disk here.
+    [[ -z "$src" ]] && { echo ""; return; }
+    [[ "$src" != /dev/* ]] && { echo ""; return; }
+    # Strip the partition suffix to get the whole-disk node.
+    whole="${src%%p[0-9]*}"
+    whole="${whole%%[0-9]*}"
+    [[ -z "$whole" ]] && whole="$src"
+    echo "$whole"
+}
+
+# Build a menu of candidate whole-disk block devices. Echoes one
+# /dev/... node per line suitable for lsblk lookup. Skips loop, ram, dm.
+# Args: kind ("pc" or "usb"). For "usb", only removable/USB transports.
+list_disk_nodes() {
+    local kind="$1"
+    # lsblk column order: NAME,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,RM,NAME(full path)
+    lsblk -d -b -n -o NAME,TYPE,RM 2>/dev/null \
+        | awk -v kind="$kind" '
+            $2 == "disk" {
+                rm = $3
+                # USB install: prefer removable media; PC install: all disks.
+                if (kind == "usb" && rm != "1") next
+                print "/dev/" $1
+            }'
+}
+
+# Look up human-readable info for a disk node. Echoes a single summary line.
+disk_summary() {
+    local dev="$1"
+    local size model serial tran rota
+    size="$(lsblk -d -b -n -o SIZE "$dev" 2>/dev/null | awk '{printf "%.1fGB", $1/1024/1024/1024}' || echo "?")"
+    model="$(lsblk -d -n -o MODEL "$dev" 2>/dev/null | xargs || echo "Unknown")"
+    [[ -z "$model" ]] && model="Unknown"
+    serial="$(lsblk -d -n -o SERIAL "$dev" 2>/dev/null | xargs || echo "N/A")"
+    [[ -z "$serial" ]] && serial="N/A"
+    tran="$(lsblk -d -n -o TRAN "$dev" 2>/dev/null | xargs || echo "—")"
+    [[ -z "$tran" ]] && tran="—"
+    rota="$(lsblk -d -n -o ROTA "$dev" 2>/dev/null | xargs || echo "?")"
+    local media="HDD"
+    [[ "$rota" == "0" ]] && media="SSD"
+    printf '%s  %-9s  %-8s  ser:%s  %s' "$dev" "$size" "$media" "$serial" "$model"
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# Interactive flow
+# ══════════════════════════════════════════════════════════════════════════
+
+# Gathered plan (global, simple key=value for JSON emission).
+PLAN_TYPE=""          # pc | usb
+PLAN_DEVICE=""
+PLAN_SERIAL=""
+PLAN_MODEL=""
+PLAN_SIZE=""
+PLAN_DUAL_BOOT=false
+PLAN_EXTERNAL=false
+PLAN_USB_MODE="portable-safe"
+PLAN_EFI_SIZE=512
+PLAN_SYSTEM_SIZE=4096
+PLAN_PERSIST_SIZE=0   # 0 = remaining
+
+welcome() {
+    tui_msgbox "CoLinux Installer" \
+"Welcome to the CoLinux interactive installer.
+
+This tool will guide you through:
+  1. Choosing an install target (internal disk or USB)
+  2. Selecting a disk (with full safety information)
+  3. Configuring partitions and options
+  4. Reviewing and confirming the plan
+
+All disk writes require explicit confirmation. You can cancel at any time."
+}
+
+choose_install_type() {
+    local choice
+    choice=$(tui_menu "Installation Type" \
+        "Where do you want to install CoLinux?" \
+        "pc"  "Internal disk (NVMe/SATA SSD) — replace or dual-boot" \
+        "usb" "USB drive — portable / forensic" \
+    ) || die "Installation cancelled."
+    PLAN_TYPE="$choice"
+    if [[ "$PLAN_TYPE" == "pc" ]]; then
+        PLAN_SYSTEM_SIZE=4096
+    else
+        PLAN_SYSTEM_SIZE=2048
+    fi
+}
+
+choose_disk() {
+    local kind="$1"
+    local nodes=()
+    local line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && nodes+=("$line")
+    done < <(list_disk_nodes "$kind")
+
+    if [[ ${#nodes[@]} -eq 0 ]]; then
+        if [[ "$kind" == "usb" ]]; then
+            die "No removable USB drives detected. Insert a USB drive and re-run, or use 'pc' install type."
+        else
+            die "No suitable disks detected."
+        fi
+    fi
+
+    local boot_dev
+    boot_dev="$(get_boot_device)"
+
+    # Build menu items as tag/desc pairs. Tag = device node.
+    local items=()
+    local dev summary
+    for dev in "${nodes[@]}"; do
+        summary="$(disk_summary "$dev")"
+        items+=("$dev" "$summary")
+    done
+
+    local choice
+    choice=$(tui_menu "Select Disk" \
+        "Choose the target disk (boot device is refused):" \
+        "${items[@]}") || die "Disk selection cancelled."
+
+    # Safety: refuse the currently-booted device.
+    if [[ -n "$boot_dev" ]] && [[ "$choice" == "$boot_dev" ]]; then
+        die "Refusing to install to the currently-booted device ($choice). Boot from USB first."
+    fi
+
+    PLAN_DEVICE="$choice"
+    PLAN_SERIAL="$(lsblk -d -n -o SERIAL "$choice" 2>/dev/null | xargs || echo "N/A")"
+    [[ -z "$PLAN_SERIAL" ]] && PLAN_SERIAL="N/A"
+    PLAN_MODEL="$(lsblk -d -n -o MODEL "$choice" 2>/dev/null | xargs || echo "Unknown")"
+    [[ -z "$PLAN_MODEL" ]] && PLAN_MODEL="Unknown"
+    PLAN_SIZE="$(lsblk -d -b -n -o SIZE "$choice" 2>/dev/null | awk '{printf "%.1fGB", $1/1024/1024/1024}' || echo "?")"
+}
+
+choose_pc_options() {
+    # Dual-boot vs replace (default: replace for the common fresh-install case)
+    if tui_yesno "Install Mode" \
+       "Install ALONGSIDE an existing OS (dual-boot preserves its EFI partition)?" "false"; then
+        PLAN_DUAL_BOOT=true
+    else
+        PLAN_DUAL_BOOT=false
+        # Confirm destructive replace. Under --yes (dry-run only), proceed.
+        local destroy_default="false"
+        [[ "$USE_DEFAULTS" == true ]] && destroy_default="true"
+        if ! tui_yesno "DESTROY ALL DATA" \
+           "This will WIPE $PLAN_DEVICE completely. Are you sure?" "$destroy_default"; then
+            die "Installation cancelled."
+        fi
+    fi
+
+    # External SSD?
+    if tui_yesno "Target Type" \
+       "Is this an external SSD connected via a USB adapter?" "false"; then
+        PLAN_EXTERNAL=true
+    fi
+
+    # Partition sizes (with validation).
+    local sz
+    sz=$(tui_input "EFI Partition" "EFI system partition size in MB" "512") || sz="512"
+    validate_mb "$sz" "EFI size" || exit 1
+    PLAN_EFI_SIZE="$sz"
+
+    sz=$(tui_input "System Partition" "System (root) partition size in MB" "$PLAN_SYSTEM_SIZE") || sz="$PLAN_SYSTEM_SIZE"
+    validate_mb "$sz" "System size" || exit 1
+    PLAN_SYSTEM_SIZE="$sz"
+}
+
+choose_usb_options() {
+    local mode
+    mode=$(tui_menu "USB Mode" \
+        "Choose the USB installation mode:" \
+        "portable-safe"  "Read-only squashfs + LUKS persistence (default)" \
+        "portable-admin" "Writable ext4 system + LUKS persistence (dev)" \
+        "forensic"       "Read-only system, NO persistence" \
+    ) || die "Mode selection cancelled."
+    PLAN_USB_MODE="$mode"
+
+    local sz
+    sz=$(tui_input "EFI Partition" "EFI system partition size in MB" "512") || sz="512"
+    validate_mb "$sz" "EFI size" || exit 1
+    PLAN_EFI_SIZE="$sz"
+
+    sz=$(tui_input "System Partition" "System partition size in MB" "$PLAN_SYSTEM_SIZE") || sz="$PLAN_SYSTEM_SIZE"
+    validate_mb "$sz" "System size" || exit 1
+    PLAN_SYSTEM_SIZE="$sz"
+
+    if [[ "$mode" != "forensic" ]]; then
+        sz=$(tui_input "Persistence" "Persistence size in MB (0 = use remaining space)" "0") || sz="0"
+        validate_mb "$sz" "Persist size" || exit 1
+        PLAN_PERSIST_SIZE="$sz"
+    fi
+}
+
+# Validate that a value is a positive integer number of megabytes.
+validate_mb() {
+    local val="$1" label="$2"
+    if ! [[ "$val" =~ ^[0-9]+$ ]] || (( val <= 0 )); then
+        die "$label must be a positive integer (MB). Got: '$val'"
+    fi
+    return 0
+}
+
+# Build and show the full plan summary, then require serial confirmation.
+# Returns 0 if confirmed, exits (die) otherwise.
+final_confirm() {
+    local luks_note partition_lines
+    if [[ "$PLAN_TYPE" == "pc" ]]; then
+        luks_note="LUKS-encrypted (passphrase prompted during install)"
+        partition_lines="  EFI:     ${PLAN_EFI_SIZE}MB (FAT32)
+  System:  ${PLAN_SYSTEM_SIZE}MB (ext4)
+  Persist: remaining (LUKS ext4)"
+    else
+        case "$PLAN_USB_MODE" in
+            portable-safe)  luks_note="LUKS-encrypted persistence" ;;
+            portable-admin) luks_note="LUKS-encrypted persistence" ;;
+            forensic)       luks_note="NONE (forensic mode has no persistence)" ;;
+        esac
+        local persist_line
+        if [[ "$PLAN_USB_MODE" == "forensic" ]]; then
+            persist_line="  Persist: none"
+        elif (( PLAN_PERSIST_SIZE > 0 )); then
+            persist_line="  Persist: ${PLAN_PERSIST_SIZE}MB ($luks_note)"
+        else
+            persist_line="  Persist: remaining ($luks_note)"
+        fi
+        partition_lines="  EFI:     ${PLAN_EFI_SIZE}MB (FAT32)
+  System:  ${PLAN_SYSTEM_SIZE}MB
+$persist_line"
+    fi
+
+    local mode_desc
+    if [[ "$PLAN_TYPE" == "pc" ]]; then
+        if [[ "$PLAN_DUAL_BOOT" == true ]]; then
+            mode_desc="dual-boot (preserve existing EFI)"
+        elif [[ "$PLAN_EXTERNAL" == true ]]; then
+            mode_desc="replace (external SSD)"
+        else
+            mode_desc="replace (WIPE ALL DATA)"
+        fi
+    else
+        mode_desc="$PLAN_USB_MODE"
+    fi
+
+    cat >&2 <<SUMMARY
+
+╔══════════════════════════════════════════════════════╗
+║          COLINUX INSTALL PLAN                        ║
+╠══════════════════════════════════════════════════════╣
+║  Type:     $PLAN_TYPE
+║  Device:   $PLAN_DEVICE
+║  Model:    $PLAN_MODEL
+║  Serial:   $PLAN_SERIAL
+║  Size:     $PLAN_SIZE
+║  Mode:     $mode_desc
+╠══════════════════════════════════════════════════════╣
+║  Partition layout:
+$partition_lines
+╠══════════════════════════════════════════════════════╣
+SUMMARY
+    if [[ "$DRY_RUN" == true ]]; then
+        cat >&2 <<'SUMMARY'
+║  🔶 DRY-RUN — no disk changes will be made            ║
+╚══════════════════════════════════════════════════════╝
+SUMMARY
+        echo "" >&2
+        return 0
+    fi
+    cat >&2 <<'SUMMARY'
+║  ⚠  Confirm by typing the disk SERIAL NUMBER          ║
+╚══════════════════════════════════════════════════════╝
+SUMMARY
+    echo "" >&2
+
+    if [[ "$USE_DEFAULTS" == true ]]; then
+        die "Refusing to install non-interactively without confirmation. Use --dry-run to preview."
+    fi
+
+    local typed
+    read -rp "Type the serial number [$PLAN_SERIAL] to confirm: " typed 2>/dev/null || typed=""
+    if [[ "$typed" != "$PLAN_SERIAL" ]]; then
+        die "Serial confirmation failed. Installation aborted."
+    fi
+
+    # Extra explicit YES for destructive (non-dual-boot) installs.
+    if [[ "$PLAN_TYPE" == "pc" ]] && [[ "$PLAN_DUAL_BOOT" != true ]]; then
+        read -rp "Type YES to DESTROY ALL DATA on $PLAN_DEVICE: " typed 2>/dev/null || typed=""
+        if [[ "$typed" != "YES" ]]; then
+            die "Confirmation failed. Installation aborted."
+        fi
+    fi
+}
+
+# Emit the gathered plan as JSON (dry-run + --json mode).
+emit_plan_json() {
+    local data
+    data=$(jq -nc \
+        --arg type "$PLAN_TYPE" \
+        --arg device "$PLAN_DEVICE" \
+        --arg model "$PLAN_MODEL" \
+        --arg serial "$PLAN_SERIAL" \
+        --arg size "$PLAN_SIZE" \
+        --argjson dual_boot "$PLAN_DUAL_BOOT" \
+        --argjson external "$PLAN_EXTERNAL" \
+        --arg usb_mode "$PLAN_USB_MODE" \
+        --argjson efi_size "$PLAN_EFI_SIZE" \
+        --argjson system_size "$PLAN_SYSTEM_SIZE" \
+        --argjson persist_size "$PLAN_PERSIST_SIZE" \
+        '{type:$type, device:$device, model:$model, serial:$serial, size:$size,
+          dual_boot:$dual_boot, external:$external, usb_mode:$usb_mode,
+          efi_size_mb:$efi_size, system_size_mb:$system_size, persist_size_mb:$persist_size}' \
+        2>/dev/null) || data='{}'
+    colinux_result "install plan" "$data"
+}
+
+# Build the argument list for the underlying installer (without --dry-run,
+# which only the PC installer supports and which main() handles separately).
+# Echoes "<installer_name> <args...>" as a single line for display, and sets
+# the globals _DISPATCH_CMD and _DISPATCH_ARGS (array) for execution.
+build_dispatch_args() {
+    _DISPATCH_CMD=""
+    _DISPATCH_ARGS=()
+    if [[ "$PLAN_TYPE" == "pc" ]]; then
+        _DISPATCH_CMD="codex-install-pc"
+        [[ "$PLAN_DUAL_BOOT" == true ]] && _DISPATCH_ARGS+=("--dual-boot")
+        [[ "$PLAN_EXTERNAL" == true ]] && _DISPATCH_ARGS+=("--external")
+        _DISPATCH_ARGS+=("--efi-size" "$PLAN_EFI_SIZE")
+        _DISPATCH_ARGS+=("--system-size" "$PLAN_SYSTEM_SIZE")
+    else
+        _DISPATCH_CMD="codex-install-usb"
+        _DISPATCH_ARGS+=("--mode" "$PLAN_USB_MODE")
+        _DISPATCH_ARGS+=("--efi-size" "$PLAN_EFI_SIZE")
+        _DISPATCH_ARGS+=("--system-size" "$PLAN_SYSTEM_SIZE")
+        if [[ "$PLAN_USB_MODE" != "forensic" ]] && (( PLAN_PERSIST_SIZE > 0 )); then
+            _DISPATCH_ARGS+=("--persist-size" "$PLAN_PERSIST_SIZE")
+        fi
+    fi
+    # --ci lets the installer skip its own serial/YES prompt because the TUI
+    # has already performed that confirmation (COLINUX_CI_BUILD=1 is exported
+    # at dispatch time). The LUKS passphrase is still gathered interactively.
+    _DISPATCH_ARGS+=("--ci" "$PLAN_DEVICE")
+}
+
+# Dispatch to the underlying non-interactive installer (real install only).
+dispatch() {
+    build_dispatch_args
+    local cmd="$_DISPATCH_CMD"
+
+    # Resolve the installer binary (PATH, then known overlay locations).
+    local installer_bin=""
+    if command -v "$cmd" &>/dev/null; then
+        installer_bin="$(command -v "$cmd")"
+    elif [[ -x "/usr/local/bin/$cmd" ]]; then
+        installer_bin="/usr/local/bin/$cmd"
+    else
+        die "Underlying installer '$cmd' not found. Ensure CoLinux is fully installed."
+    fi
+
+    log_action "DISPATCH $cmd ${_DISPATCH_ARGS[*]}"
+
+    export COLINUX_CI_BUILD=1
+    exec "$installer_bin" "${_DISPATCH_ARGS[@]}"
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# Main
+# ══════════════════════════════════════════════════════════════════════════
+main() {
+    welcome
+    choose_install_type
+    choose_disk "$PLAN_TYPE"
+    if [[ "$PLAN_TYPE" == "pc" ]]; then
+        choose_pc_options
+    else
+        choose_usb_options
+    fi
+
+    final_confirm
+
+    if [[ "$DRY_RUN" == true ]]; then
+        log_action "PLAN type=$PLAN_TYPE device=$PLAN_DEVICE serial=$PLAN_SERIAL dry_run=true"
+        build_dispatch_args
+        echo "" >&2
+        echo "▶ Would run: $_DISPATCH_CMD ${_DISPATCH_ARGS[*]}" >&2
+        if [[ "$COLINUX_JSON" == "true" ]]; then
+            emit_plan_json
+        else
+            echo "" >&2
+            echo "✓ Plan ready. Re-run without --dry-run to perform the installation." >&2
+        fi
+        exit 0
+    fi
+
+    # Real install — hand off to the underlying installer (exec replaces us).
+    dispatch
+}
+
+main "$@"

@@ -75,7 +75,7 @@ Currently installation is `dd`-based and updates are cron-based Codex-only.
 Need a proper installer and in-place OS updates.
 
 ### Deliverables
-- [ ] **`codex-install` TUI** — interactive installer:
+- [x] **`codex-install` TUI** — interactive installer:
   - Disk selection with safety confirmation
   - Partition layout (EFI + root + persist)
   - LUKS encryption option

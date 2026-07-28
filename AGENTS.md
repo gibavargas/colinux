@@ -111,6 +111,7 @@ Core commands (whitelisted in `doas.conf`):
 | `codex-update` | Update Codex CLI binary |
 | `codex-shell` | Safe shell escalation |
 | `codex-install-usb` / `codex-install-pc` | Install CoLinux to media |
+| `codex-install` | Interactive TUI installer (dispatches to pc/usb) |
 | `codex-usb-persist` | Set up USB persistence |
 | `codex-logs` | View system logs |
 | `codex-log-rotate` | Rotate and prune logs under `/persist/logs/` |

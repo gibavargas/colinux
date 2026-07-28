@@ -90,6 +90,12 @@ CI_MODE=false
 case "$(uname -m)" in
     x86_64) GRUB_TARGET="x86_64-efi"; EFI_BOOT="BOOTX64.EFI" ;;
     aarch64) GRUB_TARGET="arm64-efi"; EFI_BOOT="BOOTAA64.EFI" ;;
+    *) die "Unsupported architecture: $(uname -m)" ;;
+esac
+
+# ── Parse arguments ───────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --json)
             COLINUX_JSON=true
             shift
@@ -98,12 +104,6 @@ case "$(uname -m)" in
             COLINUX_YES=true
             shift
             ;;
-    *) die "Unsupported architecture: $(uname -m)" ;;
-esac
-
-# ── Parse arguments ───────────────────────────────────────────────────────
-while [[ $# -gt 0 ]]; do
-    case "$1" in
         --mode)
             MODE="${2:?--mode requires an argument}"
             shift 2
