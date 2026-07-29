@@ -37,7 +37,7 @@ _OPERATIONAL_CMDS=(
     codex-hw-check codex-install-pc codex-install-usb codex-logs
     codex-mount-ro codex-mount-rw codex-network codex-pxe
     codex-recover codex-remote codex-restore codex-snapshot
-    codex-update codex-usb-persist
+    codex-update codex-update-os codex-usb-persist
 )
 
 _OVERLAY_BIN="$COLINUX_ROOT/profiles/alpine/overlay/usr/local/bin"

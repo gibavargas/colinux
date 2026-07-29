@@ -11,8 +11,11 @@
 # Usage: codex-update [OPTIONS]
 #   --codex-only    Only update Codex CLI
 #   --system-only   Only update Alpine packages
+#   --os            Update the full OS image (A/B with signature + rollback)
 #   --check         Check for updates without applying
 #   --force         Force update even if already latest
+#
+# All arguments after --os are passed through to codex-update-os.
 set -euo pipefail
 
 
@@ -107,6 +110,18 @@ while [[ $# -gt 0 ]]; do
         --system-only) SYSTEM_ONLY=true; shift ;;
         --check) CHECK_ONLY=true; shift ;;
         --force) FORCE=true; shift ;;
+        --os)
+            # Delegate to the OS-image updater (A/B + signature + rollback).
+            # Pass --json/--yes through so structured callers stay structured.
+            shift
+            os_args=()
+            [[ "${COLINUX_JSON:-}" == "true" ]] && os_args+=(--json)
+            [[ "${COLINUX_YES:-}" == "true" ]] && os_args+=(--yes)
+            [[ "$CHECK_ONLY" == true ]] && os_args+=(--check)
+            [[ "$FORCE" == true ]] && os_args+=(--force)
+            os_args+=("$@")
+            exec codex-update-os "${os_args[@]}"
+            ;;
         --json)
             COLINUX_JSON=true
             shift

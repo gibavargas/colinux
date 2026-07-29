@@ -109,6 +109,7 @@ Core commands (whitelisted in `doas.conf`):
 | `codex-snapshot` | Portable state snapshots with metadata |
 | `codex-network` | Configure network interfaces |
 | `codex-update` | Update Codex CLI binary |
+| `codex-update-os` | A/B OS image update with signature verification & rollback |
 | `codex-shell` | Safe shell escalation |
 | `codex-install-usb` / `codex-install-pc` | Install CoLinux to media |
 | `codex-install` | Interactive TUI installer (dispatches to pc/usb) |

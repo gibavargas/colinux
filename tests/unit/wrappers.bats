@@ -212,7 +212,7 @@ If you ADDED a wrapper, add die()/error() or register it in _KNOWN_DIE_GAPS."
         codex-hw-check codex-install-pc codex-install-usb codex-logs
         codex-mount-ro codex-mount-rw codex-network codex-pxe
         codex-recover codex-remote codex-restore codex-snapshot
-        codex-update codex-usb-persist
+        codex-update codex-update-os codex-usb-persist
     )
     local cmd file offenders=""
     for cmd in "${core_cmds[@]}"; do

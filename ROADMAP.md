@@ -81,7 +81,7 @@ Need a proper installer and in-place OS updates.
   - LUKS encryption option
   - Dual-boot EFI entry preservation
   - Validation before writing
-- [ ] **`codex-update` OS-level** — update the full appliance:
+- [x] **`codex-update` OS-level** — update the full appliance:
   - A/B partition scheme (fallback on failed update)
   - Signature verification on update payloads
   - Rollback mechanism

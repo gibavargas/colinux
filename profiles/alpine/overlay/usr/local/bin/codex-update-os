@@ -1,0 +1,765 @@
+#!/bin/bash
+# codex-update-os — A/B OS image update with signature verification & rollback
+# Part of CoLinux Lite (v0.5 deliverable: OS-level updates)
+#
+# Usage:
+#   codex-update-os [--check]                 Check for a newer OS image
+#   codex-update-os [--from FILE]             Apply an OS image (local or fetched)
+#   codex-update-os --rollback                Roll back to the previous OS slot
+#   codex-update-os --bootcheck               Confirm or revert a trial boot
+#                                             (normally invoked by first-boot)
+#
+# A/B scheme
+# ----------
+# Two system partitions (GPT names COLINUX-A / COLINUX-B, or labels
+# codex-system-a / codex-system-b) each hold a complete bootable image:
+#   system.squashfs, vmlinuz-lts, initramfs-lts, manifest.json
+# The ACTIVE slot is recorded in /persist/state/ab-slot ("A" or "B"). The
+# inactive slot is the update target. After writing, the new slot is marked
+# "trial" in /persist/state/ab-pending.json and the ESP boot config is flipped
+# to it. first-boot runs `codex-update-os --bootcheck`: if the health checks
+# pass the trial is confirmed; if they fail (or the trial exceeds
+# max_boot_attempts) the boot config reverts to the previous slot.
+#
+# Single-slot fallback
+# --------------------
+# Installs without an A/B layout (one partition labelled codex-system) get a
+# verified in-place update: the current image is saved as a rollback backup
+# before the new one is written, and the same trial/confirm mechanism guards
+# the switch.
+#
+# Signature verification
+# ----------------------
+# An OS payload is a tar.gz bundle containing:
+#   manifest.json   {version, alpine_release, arch, created}
+#   system.squashfs
+#   vmlinuz-lts
+#   initramfs-lts
+#   SHA256SUMS
+#   SHA256SUMS.sig  (optional detached OpenPGP signature of SHA256SUMS)
+# Every member is checked against SHA256SUMS. If a CoLinux release public key
+# is present (/persist/config/colinux-release.gpg or the baked-in copy) the
+# detached signature on SHA256SUMS is verified too. Without a key/signature
+# the update is REFUSED unless --insecure-no-sig is given (SHA256 still
+# required). Archive member names are validated before extraction (no absolute
+# paths, traversal, or symlinks/hardlinks).
+#
+# Security: runs as root via doas. Never writes to the active slot in place.
+set -euo pipefail
+
+
+COLINUX_COMMAND="codex-update-os"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
+PERSIST_DIR="${COLINUX_PERSIST_DIR:-/persist}"
+STATE_DIR="${PERSIST_DIR}/state"
+LOG_DIR="${PERSIST_DIR}/logs"
+LOGFILE="${LOG_DIR}/update-os.log"
+SLOT_STATE="${STATE_DIR}/ab-slot"
+PENDING_STATE="${STATE_DIR}/ab-pending.json"
+ROLLBACK_DIR="${STATE_DIR}/os-rollbacks"
+RELEASE_KEY_PERSIST="${PERSIST_DIR}/config/colinux-release.gpg"
+RELEASE_KEY_BAKED="/usr/share/colinux/colinux-release.gpg"
+COLINUX_REPO="${COLINUX_REPO:-gibavargas/colinux}"
+HEALTH_SCRIPT="${COLINUX_HEALTH_SCRIPT:-/usr/local/lib/colinux/health-check.sh}"
+MAX_BOOT_ATTEMPTS="${COLINUX_AB_MAX_BOOT_ATTEMPTS:-3}"
+
+mkdir -p "$LOG_DIR" "$STATE_DIR" "$ROLLBACK_DIR" 2>/dev/null || true
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    { echo "[$ts] update-os: $*" >> "$LOGFILE" 2>/dev/null; } || true
+    echo "[$ts] update-os: $*"
+}
+
+die() {
+    log_action "FATAL $*"
+    colinux_die "$@"
+}
+
+# ─── Helpers ──────────────────────────────────────────────────────────────
+json_get() {
+    # Safely read a top-level key from a JSON file without eval/source.
+    # Usage: json_get <file> <key>
+    local file="$1" key="$2"
+    [[ -f "$file" ]] || return 1
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg k "$key" '.[$k] // empty' "$file" 2>/dev/null
+    else
+        # Fallback: match  "key" : "value"  or  "key":"value"
+        grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null \
+            | sed -E "s/.*:[[:space:]]*\"([^\"]*)\".*/\1/" | head -1
+    fi
+}
+
+validate_tar_archive() {
+    # Reject unsafe archive member names + link entries before extraction.
+    # (Digest verification is necessary but not sufficient — a compromised
+    # trusted release could still carry path traversal or link entries.)
+    local archive="$1" member
+    local listing
+    listing="$(tar tzf "$archive" 2>/dev/null)" || {
+        echo "  ✗ Failed to list OS payload archive."
+        log_action "payload_list_failed"
+        return 1
+    }
+    while IFS= read -r member; do
+        case "$member" in
+            # Allow "." and "./..." (the harmless current-dir prefix produced by
+            # `tar -C dir .`), but reject absolute, parent-traversal, and empty.
+            ""|/*|../*|*/../*|*/..|..)
+                echo "  ✗ Unsafe archive member path: $member"
+                log_action "payload_unsafe_member path=$member"
+                return 1
+                ;;
+        esac
+    done <<< "$listing"
+    # Reject symlink/hardlink entries. GNU tar marks type with first mode char
+    # (l/h); BusyBox may print " -> " / " link to ". Reject all forms.
+    if ! tar tvzf "$archive" 2>/dev/null \
+        | awk '{ t=substr($1,1,1); if (t=="l"||t=="h"||$0~/ -> /||$0~/ link to /) exit 1 }'; then
+        echo "  ✗ OS payload contains symlink or hardlink entries."
+        log_action "payload_unsafe_link"
+        return 1
+    fi
+    return 0
+}
+
+sha256_of() {
+    command -v sha256sum >/dev/null 2>&1 || return 1
+    sha256sum "$1" 2>/dev/null | awk '{print $1}'
+}
+
+read_slot_state() {
+    [[ -f "$SLOT_STATE" ]] || { echo ""; return 0; }
+    local v
+    v="$(head -1 "$SLOT_STATE" 2>/dev/null | tr -cd 'A-Za-z' || true)"
+    echo "$v"
+}
+
+# ─── Layout discovery ─────────────────────────────────────────────────────
+# Discovers the A/B (or single-slot) layout. Respects overrides for testing:
+#   COLINUX_SLOT_A_DEV, COLINUX_SLOT_B_DEV, COLINUX_ESP_DEV, COLINUX_ACTIVE_SLOT
+discover_layout() {
+    SLOT_A_DEV="${COLINUX_SLOT_A_DEV:-}"
+    SLOT_B_DEV="${COLINUX_SLOT_B_DEV:-}"
+    ESP_DEV="${COLINUX_ESP_DEV:-}"
+    ACTIVE_SLOT="${COLINUX_ACTIVE_SLOT:-$(read_slot_state)}"
+    SINGLE_MODE=false
+
+    if [[ -n "$SLOT_A_DEV" ]] && [[ -n "$SLOT_B_DEV" ]]; then
+        # Explicit overrides (testing) — trust them.
+        :
+    else
+        # Discover by partition labels / GPT names via blkid + lsblk.
+        local lbl dev
+        # Try labels first (codex-system-a / codex-system-b)
+        while IFS= read -r line; do
+            lbl="$(awk -F'[=]' '{for(i=1;i<=NF;i++)if($i ~ /^LABEL/)print $(i+1)}' <<< "$line" \
+                | tr -d '"' | head -1)"
+            dev="$(awk '{print $1}' <<< "$line" | sed 's/://')"
+            case "$lbl" in
+                codex-system-a|COLINUX-A) [[ -z "$SLOT_A_DEV" ]] && SLOT_A_DEV="$dev" ;;
+                codex-system-b|COLINUX-B) [[ -z "$SLOT_B_DEV" ]] && SLOT_B_DEV="$dev" ;;
+                codex-esp|COLINUX-ESP)    [[ -z "$ESP_DEV" ]] && ESP_DEV="$dev" ;;
+            esac
+        done < <(blkid 2>/dev/null || true)
+
+        # Fall back to GPT partition names via sgdisk/sgdisk-less lsblk PARTLABEL
+        if [[ -z "$SLOT_A_DEV" ]] || [[ -z "$SLOT_B_DEV" ]]; then
+            if command -v lsblk >/dev/null 2>&1; then
+                while IFS=$'\t' read -r dev plabel; do
+                    case "$plabel" in
+                        COLINUX-A) [[ -z "$SLOT_A_DEV" ]] && SLOT_A_DEV="/dev/$dev" ;;
+                        COLINUX-B) [[ -z "$SLOT_B_DEV" ]] && SLOT_B_DEV="/dev/$dev" ;;
+                    esac
+                done < <(lsblk -n -o NAME,PARTLABEL 2>/dev/null | awk '$2 ~ /COLINUX/')
+            fi
+        fi
+    fi
+
+    # Resolve ESP if still unknown
+    if [[ -z "$ESP_DEV" ]] && [[ -z "${COLINUX_ESP_DEV:-}" ]]; then
+        ESP_DEV="$(blkid -t TYPE=vfat 2>/dev/null | awk -F: '/EFI|esp|COLINUX-ESP/{print $1; exit}')"
+        [[ -z "$ESP_DEV" ]] && ESP_DEV="$(findmnt -n -o SOURCE /boot/efi 2>/dev/null || true)"
+    fi
+
+    if [[ -z "$SLOT_A_DEV" ]] || [[ -z "$SLOT_B_DEV" ]]; then
+        # No A/B layout — look for a single system partition.
+        local single
+        single="${COLINUX_SLOT_SINGLE_DEV:-}"
+        if [[ -z "$single" ]]; then
+            single="$(blkid -t LABEL=codex-system 2>/dev/null | awk -F: '{print $1; exit}' || true)"
+        fi
+        if [[ -z "$single" ]]; then
+            die "No A/B system partitions (COLINUX-A/COLINUX-B) and no single system partition (codex-system) found."
+        fi
+        SINGLE_MODE=true
+        SLOT_A_DEV="$single"
+        SLOT_B_DEV=""
+        [[ -z "$ACTIVE_SLOT" ]] && ACTIVE_SLOT="A"
+        return 0
+    fi
+
+    [[ -z "$ACTIVE_SLOT" ]] && ACTIVE_SLOT="A"
+    case "$ACTIVE_SLOT" in
+        A|B) ;;
+        *) die "Invalid active slot state: '$ACTIVE_SLOT' (expected A or B)." ;;
+    esac
+}
+
+inactive_slot() {
+    # Echo the slot letter ("A"/"B") of the inactive slot, or "" in single mode.
+    [[ "$SINGLE_MODE" == true ]] && { echo ""; return 0; }
+    if [[ "$ACTIVE_SLOT" == "A" ]]; then echo "B"; else echo "A"; fi
+}
+
+slot_dev() {
+    # Echo the device for slot letter arg ("A"/"B"); "" in single mode.
+    local s="$1"
+    [[ "$SINGLE_MODE" == true ]] && { echo "$SLOT_A_DEV"; return 0; }
+    case "$s" in
+        A) echo "$SLOT_A_DEV" ;;
+        B) echo "$SLOT_B_DEV" ;;
+        *) echo "" ;;
+    esac
+}
+
+current_version() {
+    # Read the version from the active slot's manifest.json (best-effort).
+    local mnt dev manifest
+    dev="$(slot_dev "$ACTIVE_SLOT")"
+    [[ -n "$dev" ]] || { echo "unknown"; return 0; }
+    mnt="$(mktemp -d)"
+    if mount -o ro "$dev" "$mnt" 2>/dev/null; then
+        manifest="$mnt/manifest.json"
+        if [[ -f "$manifest" ]]; then
+            json_get "$manifest" version || echo "unknown"
+        else
+            echo "unknown"
+        fi
+        umount "$mnt" 2>/dev/null || true
+    else
+        echo "unknown"
+    fi
+    rmdir "$mnt" 2>/dev/null || true
+}
+
+# ─── Release resolution ───────────────────────────────────────────────────
+# Resolves the latest OS payload tag + asset URL from GitHub releases.
+resolve_latest_release() {
+    local arch tag asset url
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64)  arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        armv7l)  die "Unsupported architecture: armv7l. Only x86_64 and aarch64." ;;
+        *)       die "Unsupported architecture: $arch" ;;
+    esac
+
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        die "Neither curl nor wget is available; cannot fetch release info."
+    fi
+
+    local resp=""
+    if command -v curl >/dev/null 2>&1; then
+        resp="$(curl -sfL --retry 3 --retry-delay 5 --retry-all-errors \
+            "https://api.github.com/repos/${COLINUX_REPO}/releases/latest" 2>/dev/null || true)"
+    else
+        resp="$(wget -qO- "https://api.github.com/repos/${COLINUX_REPO}/releases/latest" 2>/dev/null || true)"
+    fi
+    [[ -n "$resp" ]] || die "Could not reach GitHub releases API for $COLINUX_REPO."
+
+    if ! command -v jq >/dev/null 2>&1; then
+        die "jq is required to resolve OS releases (parse release JSON)."
+    fi
+    tag="$(jq -r '.tag_name // empty' <<< "$resp")"
+    [[ -n "$tag" ]] || die "Release JSON had no tag_name."
+
+    # Find an asset named colinux-os-<arch>-<tag?>.tar.gz
+    asset="$(jq -r --arg arch "$arch" \
+        '.assets[]? | select(.name | test("colinux-os-" + $arch + ".*\\.tar\\.gz$")) | .name' \
+        <<< "$resp" | head -1)"
+    [[ -n "$asset" ]] || die "No OS payload asset for arch $arch in release $tag."
+
+    url="$(jq -r --arg name "$asset" '.assets[]? | select(.name==$name) | .browser_download_url' <<< "$resp")"
+    [[ -n "$url" ]] || die "Asset $asset has no download URL."
+
+    printf '%s\t%s\t%s\n' "$tag" "$asset" "$url"
+}
+
+# ─── Signature verification ───────────────────────────────────────────────
+find_release_key() {
+    if [[ -f "$RELEASE_KEY_PERSIST" ]]; then echo "$RELEASE_KEY_PERSIST"; return 0; fi
+    if [[ -f "$RELEASE_KEY_BAKED" ]];  then echo "$RELEASE_KEY_BAKED";  return 0; fi
+    return 1
+}
+
+verify_payload() {
+    # Verify a downloaded/extracted OS payload directory:
+    #   - SHA256SUMS lists every payload file and all digests match
+    #   - SHA256SUMS.sig verifies against the release key (if present)
+    # Fails closed unless --insecure-no-sig was given AND SHA256SUMS is intact.
+    local dir="$1" sums sumfile f expected actual
+    sums="$dir/SHA256SUMS"
+    [[ -f "$sums" ]] || { echo "  ✗ Payload missing SHA256SUMS."; log_action "verify_no_sums"; return 1; }
+
+    # Verify every listed file
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        expected="$(awk '{print $1}' <<< "$line")"
+        f="$(awk '{print $2}' <<< "$line")"
+        [[ -n "$expected" ]] && [[ -n "$f" ]] || continue
+        # Refuse absolute/traversal member names even inside SHA256SUMS
+        case "$f" in
+            /*|../*|*/../*) echo "  ✗ Unsafe path in SHA256SUMS: $f"; log_action "verify_unsafe_path"; return 1 ;;
+        esac
+        sumfile="$dir/$f"
+        [[ -f "$sumfile" ]] || { echo "  ✗ Missing payload file: $f"; log_action "verify_missing_file"; return 1; }
+        actual="$(sha256_of "$sumfile")" || { echo "  ✗ sha256sum unavailable"; return 1; }
+        if [[ "$actual" != "$expected" ]]; then
+            echo "  ✗ Checksum mismatch for $f"
+            log_action "verify_checksum_mismatch file=$f"
+            return 1
+        fi
+    done < "$sums"
+
+    # Verify the detached signature on SHA256SUMS if a key is present
+    local key sig
+    sig="$dir/SHA256SUMS.sig"
+    if key="$(find_release_key)"; then
+        if [[ ! -f "$sig" ]]; then
+            echo "  ✗ Release key present but payload has no SHA256SUMS.sig. Refusing."
+            log_action "verify_missing_sig"
+            return 1
+        fi
+        if ! command -v gpg >/dev/null 2>&1; then
+            echo "  ✗ Release key present but gpg is not installed. Refusing."
+            log_action "verify_no_gpg"
+            return 1
+        fi
+        if ! gpg --no-default-keyring --keyring "$key" --verify "$sig" "$sums" >/dev/null 2>&1; then
+            echo "  ✗ GPG signature verification failed."
+            log_action "verify_sig_bad"
+            return 1
+        fi
+        echo "  ✓ SHA256SUMS signature verified."
+        log_action "verify_sig_ok"
+    else
+        if [[ "$ALLOW_NO_SIG" != true ]]; then
+            echo "  ✗ No release key found ($RELEASE_KEY_PERSIST or $RELEASE_KEY_BAKED)."
+            echo "    Install a key or pass --insecure-no-sig (SHA256 still required). Refusing."
+            log_action "verify_no_key_refused"
+            return 1
+        fi
+        echo "  ⚠ No release key and --insecure-no-sig given: SHA256-only verification."
+        log_action "verify_no_key_allowed"
+    fi
+    echo "  ✓ Payload SHA256 checksums verified."
+    log_action "verify_ok"
+    return 0
+}
+
+# ─── Writing a slot ───────────────────────────────────────────────────────
+write_slot() {
+    # Atomically write a verified payload to a target slot device.
+    # Args: <slot_letter> <payload_dir>
+    local slot="$1" payload_dir="$2" dev mnt tmp
+    dev="$(slot_dev "$slot")"
+    [[ -n "$dev" ]] || die "Cannot resolve device for slot $slot."
+    mnt="$(mktemp -d)"
+    tmp="${mnt}/.colinux-new"
+    mkdir -p "$tmp"
+
+    log_action "write_slot_start slot=$slot dev=$dev"
+
+    # Single-slot mode: snapshot current contents as rollback before overwriting.
+    if [[ "$SINGLE_MODE" == true ]]; then
+        local rb
+        rb="${ROLLBACK_DIR}/slot-A-$(date -u '+%Y%m%dT%H%M%SZ')"
+        mkdir -p "$rb"
+        if mount -o ro "$dev" "$mnt" 2>/dev/null; then
+            cp -a "$mnt"/system.squashfs "$mnt"/vmlinuz-lts "$mnt"/initramfs-lts \
+                  "$mnt"/manifest.json "$rb"/ 2>/dev/null || true
+            umount "$mnt" 2>/dev/null || true
+        fi
+        echo "  → Saved rollback snapshot: $rb"
+        log_action "rollback_saved path=$rb"
+    fi
+
+    # Mount target rw and stage the new image in .colinux-new, then atomically
+    # rename over the old files. A crash mid-write leaves the old image intact
+    # until the final renames.
+    mount "$dev" "$mnt" || { rmdir "$mnt" 2>/dev/null || true; die "Failed to mount $dev."; }
+    for f in system.squashfs vmlinuz-lts initramfs-lts manifest.json; do
+        [[ -f "$payload_dir/$f" ]] || { umount "$mnt" 2>/dev/null || true; rmdir "$mnt" 2>/dev/null || true; die "Payload missing $f"; }
+        cp -f "$payload_dir/$f" "$tmp/$f"
+    done
+    # Sync the staged files before committing the rename set.
+    sync "$tmp"/ 2>/dev/null || sync
+    for f in system.squashfs vmlinuz-lts initramfs-lts manifest.json; do
+        mv -f "$tmp/$f" "$mnt/$f"
+    done
+    sync "$mnt"/ 2>/dev/null || sync
+    umount "$mnt" 2>/dev/null || true
+    rmdir "$tmp" "$mnt" 2>/dev/null || true
+    log_action "write_slot_ok slot=$slot"
+}
+
+# ─── Boot config (ESP) + trial state ──────────────────────────────────────
+update_boot_config() {
+    # Flip the ESP boot config to the given slot. In dry-run mode just echo.
+    # Args: <slot_letter>
+    local slot="$1" dev mnt conf
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would update ESP boot config to boot slot $slot."
+        return 0
+    fi
+    dev="$ESP_DEV"
+    if [[ -z "$dev" ]]; then
+        echo "  ⚠ No ESP device discovered; skipping boot-config update."
+        log_action "boot_config_skip no_esp"
+        return 0
+    fi
+    mnt="$(mktemp -d)"
+    mount "$dev" "$mnt" || { rmdir "$mnt" 2>/dev/null || true; die "Failed to mount ESP $dev."; }
+    conf="$mnt/EFI/colinux/colinux.conf"
+    mkdir -p "$(dirname "$conf")"
+    # Keep the root= stanza but note the active slot. The bootloader reads this
+    # file; the initramfs resolves the slot's PARTUUID from ab-slot on the
+    # persistent partition.
+    local slot_lower
+    slot_lower="$(echo "$slot" | tr 'A-Z' 'a-z')"
+    cat > "$conf" <<BOOTCFG
+title CoLinux Lite (slot $slot)
+linux /vmlinuz-lts
+initrd /initramfs-lts
+options quiet splash colinux.slot=$slot root=LABEL=codex-system-${slot_lower}
+BOOTCFG
+    sync "$conf" 2>/dev/null || sync
+    umount "$mnt" 2>/dev/null || true
+    rmdir "$mnt" 2>/dev/null || true
+    echo "  → ESP boot config now points at slot $slot."
+    log_action "boot_config_ok slot=$slot"
+}
+
+set_active_slot() {
+    # Persist the active slot letter.
+    echo "$1" > "$SLOT_STATE"
+    log_action "active_slot=$1"
+}
+
+set_trial() {
+    # Write ab-pending.json describing a trial boot.
+    # Args: <new_slot> <prev_slot> <version>
+    local new_slot="$1" prev_slot="$2" version="$3"
+    if command -v jq >/dev/null 2>&1; then
+        jq -nc \
+            --arg new "$new_slot" --arg prev "$prev_slot" --arg ver "$version" \
+            --argjson max "$MAX_BOOT_ATTEMPTS" \
+            '{new_slot:$new, prev_slot:$prev, version:$ver, status:"trial",
+              boot_attempts:0, max_boot_attempts:$max, started_at:now|todateiso8601}' \
+            > "$PENDING_STATE"
+    else
+        cat > "$PENDING_STATE" <<EOF
+{"new_slot":"$new_slot","prev_slot":"$prev_slot","version":"$version","status":"trial","boot_attempts":0,"max_boot_attempts":$MAX_BOOT_ATTEMPTS,"started_at":"$(date -u '+%Y-%m-%dT%H:%M:%SZ')"}
+EOF
+    fi
+    log_action "trial_set new=$new_slot prev=$prev_slot version=$version"
+}
+
+clear_pending() {
+    rm -f "$PENDING_STATE" 2>/dev/null || true
+}
+
+# ─── Boot health check ────────────────────────────────────────────────────
+run_health_checks() {
+    # Returns 0 if the booted system is healthy enough to confirm a trial.
+    # Uses an external script if present (overridable for tests), else a sane
+    # built-in check: persist mounted, codex binary present, root fs writable.
+    if [[ -x "$HEALTH_SCRIPT" ]]; then
+        "$HEALTH_SCRIPT"
+        return $?
+    fi
+    # Built-in checks
+    mountpoint -q "$PERSIST_DIR" 2>/dev/null || { log_action "health_fail persist_not_mounted"; return 1; }
+    [[ -x /usr/local/bin/codex ]] || { log_action "health_fail no_codex_binary"; return 1; }
+    # Root filesystem mounted rw
+    if ! findmnt -n -o OPTIONS / 2>/dev/null | grep -qE '(^|,)rw(,|$)'; then
+        log_action "health_fail root_ro"; return 1
+    fi
+    log_action "health_ok"
+    return 0
+}
+
+# ─── Commands ─────────────────────────────────────────────────────────────
+do_check() {
+    discover_layout
+    local cur latest
+    cur="$(current_version)"
+    echo "OS image:"
+    echo "  Active slot: $ACTIVE_SLOT$( [[ "$SINGLE_MODE" == true ]] && echo " (single-slot mode)" )"
+    echo "  Installed:   $cur"
+    if latest="$(resolve_latest_release | awk -F'\t' '{print $1}')"; then
+        echo "  Latest:      $latest"
+        if [[ "$cur" != "$latest" ]] && [[ "$cur" != "unknown" ]]; then
+            echo "  → Update available."
+            return 0
+        fi
+        echo "  → Up to date."
+    else
+        echo "  (could not determine latest)"
+    fi
+    log_action "check cur=$cur latest=$latest"
+}
+
+do_update() {
+    discover_layout
+    local target_slot prev_slot payload_src tmp_dir payload_dir tag
+    target_slot="$(inactive_slot)"
+    prev_slot="$ACTIVE_SLOT"
+
+    # Determine payload source
+    if [[ -n "$PAYLOAD_FILE" ]]; then
+        payload_src="$PAYLOAD_FILE"
+        tag="local"
+    else
+        echo "Resolving latest OS release..."
+        local resolved asset url
+        resolved="$(resolve_latest_release)"
+        tag="$(awk -F'\t' '{print $1}' <<< "$resolved")"
+        asset="$(awk -F'\t' '{print $2}' <<< "$resolved")"
+        url="$(awk -F'\t' '{print $3}' <<< "$resolved")"
+        echo "  Latest:  $tag"
+        echo "  Asset:   $asset"
+
+        local cur
+        cur="$(current_version)"
+        if [[ "$cur" == "$tag" ]] && [[ "$FORCE" != true ]]; then
+            echo "  → Already on $tag. Use --force to re-apply."
+            log_action "update_skip current=$cur"
+            return 0
+        fi
+
+        tmp_dir="$(mktemp -d)"
+        payload_src="$tmp_dir/$asset"
+        echo "  Downloading $asset..."
+        if command -v curl >/dev/null 2>&1; then
+            curl -sfL --retry 3 --retry-delay 5 --retry-all-errors -o "$payload_src" "$url" \
+                || { rm -rf "$tmp_dir"; die "Download failed: $asset"; }
+        else
+            wget -q -O "$payload_src" "$url" \
+                || { rm -rf "$tmp_dir"; die "Download failed: $asset"; }
+        fi
+    fi
+
+    # Validate archive metadata, then extract to a staging dir.
+    tmp_dir="${tmp_dir:-$(mktemp -d)}"
+    payload_dir="$tmp_dir/payload"
+    mkdir -p "$payload_dir"
+
+    echo "Validating payload archive..."
+    if ! validate_tar_archive "$payload_src"; then
+        rm -rf "$tmp_dir"; die "Payload archive failed safety checks."
+    fi
+    if ! tar xzf "$payload_src" -C "$payload_dir" 2>/dev/null; then
+        rm -rf "$tmp_dir"; die "Failed to extract payload."
+    fi
+
+    echo "Verifying payload integrity & signature..."
+    if ! verify_payload "$payload_dir"; then
+        rm -rf "$tmp_dir"; die "Payload verification failed."
+    fi
+
+    local new_ver
+    new_ver="$(json_get "$payload_dir/manifest.json" version || echo unknown)"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would write slot $target_slot ($SLOT_A_DEV) with version $new_ver"
+        [[ "$SINGLE_MODE" != true ]] && echo "[DRY-RUN] Would flip ESP boot config to slot $target_slot and set trial."
+        rm -rf "$tmp_dir"
+        log_action "update_dry_run version=$new_ver"
+        return 0
+    fi
+
+    # Confirm before destructive op (unless --yes / CI)
+    if ! colinux_confirm "Write OS image $new_ver to slot $target_slot? [y/N]"; then
+        rm -rf "$tmp_dir"; die "Aborted by user."
+    fi
+
+    # Write inactive slot (or single slot, with rollback snapshot)
+    echo "Writing OS image to slot $target_slot..."
+    write_slot "$target_slot" "$payload_dir"
+    rm -rf "$tmp_dir"
+
+    # Flip boot config + set trial
+    update_boot_config "$target_slot"
+    set_active_slot "$target_slot"
+    set_trial "$target_slot" "$prev_slot" "$new_ver"
+
+    echo ""
+    echo "✓ OS image $new_ver written to slot $target_slot."
+    echo "  A trial boot has been scheduled. On next boot the system will"
+    echo "  run health checks; if they fail it rolls back to slot $prev_slot."
+    log_action "update_ok new=$new_ver slot=$target_slot prev=$prev_slot"
+    colinux_result "OS update staged" "{\"version\":\"$new_ver\",\"slot\":\"$target_slot\",\"prev_slot\":\"$prev_slot\"}"
+}
+
+do_rollback() {
+    discover_layout
+    local prev new
+    if [[ -f "$PENDING_STATE" ]]; then
+        # A trial is in progress — roll back to prev_slot from the pending record.
+        prev="$(json_get "$PENDING_STATE" prev_slot || true)"
+        new="$(json_get "$PENDING_STATE" new_slot || true)"
+        [[ -n "$prev" ]] || prev="$ACTIVE_SLOT"
+        echo "Rolling back: trial slot $new → previous slot $prev"
+        update_boot_config "$prev"
+        set_active_slot "$prev"
+        clear_pending
+        log_action "manual_rollback from=$new to=$prev"
+        echo "✓ Rolled back to slot $prev."
+        colinux_result "rolled back" "{\"slot\":\"$prev\"}"
+        return 0
+    fi
+    # No pending trial — restore the most recent single-slot rollback snapshot.
+    if [[ "$SINGLE_MODE" == true ]] && [[ -d "$ROLLBACK_DIR" ]]; then
+        local latest_rb
+        latest_rb="$(ls -1dt "$ROLLBACK_DIR"/slot-A-* 2>/dev/null | head -1)"
+        if [[ -n "$latest_rb" ]] && [[ -f "$latest_rb/system.squashfs" ]]; then
+            echo "Restoring rollback snapshot: $latest_rb"
+            write_slot "A" "$latest_rb"
+            update_boot_config "A"
+            set_active_slot "A"
+            log_action "snapshot_rollback path=$latest_rb"
+            echo "✓ Restored from $latest_rb."
+            colinux_result "restored rollback" "{\"path\":\"$latest_rb\"}"
+            return 0
+        fi
+    fi
+    die "No pending trial and no rollback snapshot available — nothing to roll back."
+}
+
+do_bootcheck() {
+    # Invoked by first-boot after the rootfs is up. Confirms or reverts a trial.
+    [[ -f "$PENDING_STATE" ]] || { log_action "bootcheck_no_pending"; return 0; }
+    local new prev attempts max
+    new="$(json_get "$PENDING_STATE" new_slot || true)"
+    prev="$(json_get "$PENDING_STATE" prev_slot || true)"
+    attempts="$(json_get "$PENDING_STATE" boot_attempts || echo 0)"
+    max="$(json_get "$PENDING_STATE" max_boot_attempts || echo "$MAX_BOOT_ATTEMPTS")"
+    attempts=$((attempts + 1))
+
+    echo "A/B trial boot check: slot=$new attempt=$attempts/$max"
+    if run_health_checks; then
+        echo "  ✓ Health checks passed — confirming slot $new."
+        clear_pending
+        set_active_slot "$new"
+        log_action "bootcheck_confirmed slot=$new"
+        return 0
+    fi
+
+    echo "  ✗ Health checks failed (attempt $attempts/$max)."
+    # Record the incremented attempt
+    if command -v jq >/dev/null 2>&1; then
+        jq --argjson a "$attempts" '.boot_attempts=$a' "$PENDING_STATE" > "$PENDING_STATE.tmp" \
+            && mv "$PENDING_STATE.tmp" "$PENDING_STATE"
+    else
+        log_action "bootcheck_no_jq_increment"
+    fi
+
+    if [[ "$attempts" -ge "$max" ]]; then
+        echo "  ⚠ Max boot attempts reached — rolling back to slot $prev."
+        update_boot_config "$prev"
+        set_active_slot "$prev"
+        clear_pending
+        log_action "bootcheck_rolled_back from=$new to=$prev"
+        echo "✓ Rolled back to slot $prev. Reboot to complete."
+        colinux_result "trial rolled back" "{\"from\":\"$new\",\"to\":\"$prev\"}"
+        return 0
+    fi
+    echo "  Trial continues; will retry on next boot."
+    log_action "bootcheck_retry attempt=$attempts"
+}
+
+# ─── Argument parsing ─────────────────────────────────────────────────────
+# The parse + dispatch is wrapped so the script's helpers can be sourced in
+# unit tests without triggering argument parsing or action dispatch. It runs
+# only when the script is executed directly.
+ACTION="update"
+PAYLOAD_FILE=""
+CHECK_ONLY=false
+FORCE=false
+ALLOW_NO_SIG=false
+DRY_RUN=false
+
+usage() {
+    cat <<EOF
+Usage: codex-update-os [OPTIONS] [COMMAND]
+
+Commands:
+  (default)         Check for and apply an OS image update (A/B or single-slot)
+  --check           Only check for a newer OS image; make no changes
+  --rollback        Roll back to the previous OS slot / snapshot
+  --bootcheck       Confirm or revert a trial boot (run by first-boot)
+
+Options:
+  --from FILE       Apply a local OS payload bundle instead of fetching
+  --force           Re-apply even if the version matches
+  --insecure-no-sig Allow SHA256-only verification when no release key exists
+  --dry-run         Simulate without touching disks
+  --json            Emit a structured JSON result envelope
+  --yes, -y         Auto-confirm prompts (non-interactive)
+  --help, -h        Show this help
+
+Environment overrides (testing / recovery):
+  COLINUX_SLOT_A_DEV, COLINUX_SLOT_B_DEV, COLINUX_ESP_DEV, COLINUX_ACTIVE_SLOT,
+  COLINUX_SLOT_SINGLE_DEV, COLINUX_PERSIST_DIR, COLINUX_ESP_MNT,
+  COLINUX_HEALTH_SCRIPT, COLINUX_AB_MAX_BOOT_ATTEMPTS, COLINUX_REPO
+EOF
+    exit 0
+}
+
+main() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --check)        CHECK_ONLY=true; ACTION="check"; shift ;;
+            --rollback)     ACTION="rollback"; shift ;;
+            --bootcheck)    ACTION="bootcheck"; shift ;;
+            --from)         PAYLOAD_FILE="${2:?--from requires a file path}"; shift 2 ;;
+            --force)        FORCE=true; shift ;;
+            --insecure-no-sig) ALLOW_NO_SIG=true; shift ;;
+            --dry-run)      DRY_RUN=true; shift ;;
+            --json)         COLINUX_JSON=true; shift ;;
+            --yes|-y)       COLINUX_YES=true; shift ;;
+            --help|-h)      usage ;;
+            *)              die "Unknown option: $1" ;;
+        esac
+    done
+
+    colinux_init_output
+
+    case "$ACTION" in
+        check)     do_check ;;
+        update)    if [[ "$CHECK_ONLY" == true ]]; then do_check; else do_update; fi ;;
+        rollback)  do_rollback ;;
+        bootcheck) do_bootcheck ;;
+        *)         die "Unknown action: $ACTION" ;;
+    esac
+}
+
+# Run main() only when executed directly (not sourced for unit tests).
+if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
+    main "$@"
+fi

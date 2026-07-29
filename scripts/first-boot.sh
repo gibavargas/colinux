@@ -535,6 +535,24 @@ run_postinstall_hooks() {
     return "$failed"
 }
 
+# ── A/B trial boot check ─────────────────────────────────────────────────────
+# Runs before the first-boot idempotency guard so a pending OS trial is
+# confirmed or reverted on EVERY boot, not just the first. Idempotent: a no-op
+# when /persist/state/ab-pending.json is absent (the normal case).
+ab_bootcheck() {
+    local updater="$CODEX_PERSIST/state/ab-pending.json"
+    # Only run when persistence is present (the trial record lives there).
+    [[ -d "$CODEX_PERSIST/state" ]] || return 0
+    if [[ -f "$updater" ]] && [[ -x /usr/local/bin/codex-update-os ]]; then
+        log_info "A/B trial pending — running codex-update-os --bootcheck"
+        if /usr/local/bin/codex-update-os --bootcheck >> "$LOGFILE" 2>&1; then
+            log_info "A/B trial confirmed."
+        else
+            log_warn "A/B bootcheck failed or rolled back (see codex-update-os log)."
+        fi
+    fi
+}
+
 # ── Mark first boot complete ─────────────────────────────────────────────────
 mark_complete() {
     mkdir -p "$(dirname "$FIRST_BOOT_FLAG")"
@@ -553,6 +571,11 @@ main() {
     log_info "Kernel: $(uname -r)"
     log_info "Arch:   $(uname -m)"
     log_info "Date:   $(date)"
+
+    # A/B trial confirmation runs on every boot, before the first-boot guard,
+    # so a staged OS update is confirmed or rolled back even when first-boot
+    # is already complete.
+    ab_bootcheck
 
     # Top-level idempotency guard (ROADMAP v0.3 "First-boot idempotency").
     # If first boot was already completed and --force was not passed, exit
