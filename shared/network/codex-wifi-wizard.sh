@@ -480,18 +480,9 @@ EOF
         wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 ssid "\"$safe_ssid_esc\"" 2>/dev/null
         wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 scan_ssid 1 2>/dev/null
         if [[ -n "$password" ]]; then
-            # Write a temporary config to feed PSK safely (avoids password in ps/process list)
-            local tmp_psk_conf
-            tmp_psk_conf="$(mktemp /tmp/wpa_psk_XXXXXX.conf)"
-            cat > "$tmp_psk_conf" <<PSKEOF
-network={
-    ssid="$safe_ssid_esc"
-    psk="$password"
-}
-PSKEOF
+            # Hash the PSK via stdin to avoid password in process list
             local hashed_psk
-            hashed_psk="$(wpa_passphrase -f "$tmp_psk_conf" 2>/dev/null | grep '^[[:space:]]*psk=' | head -1 | sed 's/^[[:space:]]*//' | cut -d= -f2-)"
-            rm -f "$tmp_psk_conf"
+            hashed_psk="$(printf '%s\n' "$password" | wpa_passphrase "$ssid" 2>/dev/null | grep '^[[:space:]]*psk=' | head -1 | sed 's/^[[:space:]]*//' | cut -d= -f2-)"
             if [[ -n "$hashed_psk" ]]; then
                 wpa_cli -i "$adapter" -p "$ctrl_dir" set_network 0 psk "$hashed_psk" 2>/dev/null
             fi

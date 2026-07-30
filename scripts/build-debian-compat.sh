@@ -47,7 +47,7 @@ DEBIAN_SECURITY="${DEBIAN_SECURITY:-http://security.debian.org/debian-security}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/dist}"
 CODEX_VERSION="${CODEX_VERSION:-latest}"
 COLINUX_IMG_SIZE="${COLINUX_IMG_SIZE:-1200}"
-BUILD_DIR="/tmp/colinux-compat-build"
+BUILD_DIR="${BUILD_DIR:-/tmp/colinux-compat-build}"
 
 # ── Colors (for TTY) ─────────────────────────────────────────────────────────
 if [ -t 1 ]; then
