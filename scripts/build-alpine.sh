@@ -392,6 +392,56 @@ verify_iso_bootable() {
 }
 
 # ── Step 5: Download and inject Codex CLI binary ────────────────────────────
+# Write /etc/colinux-version and /etc/colinux-release.json into the ISO staging
+# tree so the running appliance (and codex-snapshot, codexctl status, etc.) can
+# report a real version. The version is derived from the source git state so it
+# is stable for a given commit and reproducible across builds.
+#
+# Args: <staging_dir> <codex_tag>
+inject_version_files() {
+    local staging="$1" codex_tag="$2"
+    local etc_dir="$staging/etc"
+    mkdir -p "$etc_dir"
+
+    # Appliance version: prefer a VERSION file in the repo root, fall back to
+    # the short source SHA, and finally "dev". Always suffixed with the short
+    # source SHA for traceability (e.g. "0.5.1+0f65f2a").
+    local repo_version source_sha_short appliance_version
+    if [ -f "$PROJECT_ROOT/VERSION" ]; then
+        repo_version="$(head -1 "$PROJECT_ROOT/VERSION" | tr -d '[:space:]')"
+    fi
+    source_sha_short="$(_git -C "$PROJECT_ROOT" rev-parse --short=8 HEAD 2>/dev/null || echo unknown)"
+    if [ -n "$repo_version" ]; then
+        appliance_version="${repo_version}+${source_sha_short}"
+    else
+        appliance_version="dev+${source_sha_short}"
+    fi
+
+    # Human-readable version file.
+    printf '%s\n' "$appliance_version" > "$etc_dir/colinux-version"
+
+    # Structured release provenance (JSON; no jq needed at build time).
+    local build_ts source_commit build_host edition
+    build_ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    source_commit="$(_git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+    build_host="$(uname -n 2>/dev/null || echo unknown)"
+    edition="lite"
+    {
+        printf '{\n'
+        printf '  "edition": "%s",\n' "$(_json_escape "$edition")"
+        printf '  "version": "%s",\n' "$(_json_escape "$appliance_version")"
+        printf '  "codex_tag": "%s",\n' "$(_json_escape "$codex_tag")"
+        printf '  "arch": "%s",\n' "$(_json_escape "$ARCH")"
+        printf '  "alpine_release": "%s",\n' "$(_json_escape "$ALPINE_RELEASE")"
+        printf '  "source_commit": "%s",\n' "$(_json_escape "$source_commit")"
+        printf '  "build_timestamp": "%s",\n' "$(_json_escape "$build_ts")"
+        printf '  "build_host": "%s"\n' "$(_json_escape "$build_host")"
+        printf '}\n'
+    } > "$etc_dir/colinux-release.json"
+    chmod 644 "$etc_dir/colinux-version" "$etc_dir/colinux-release.json"
+    log_info "Injected appliance version: ${appliance_version} (codex ${codex_tag})"
+}
+
 inject_codex() {
     log_step "Downloading and injecting Codex CLI"
 
@@ -533,6 +583,12 @@ inject_codex() {
         cp "$PROJECT_ROOT/scripts/cron-codex-update.sh" "$iso_staging/usr/local/bin/cron-codex-update"
         chmod 755 "$iso_staging/usr/local/bin/cron-codex-update"
     fi
+
+    # Inject appliance version files so the running system (and codex-snapshot)
+    # can report a real version instead of "dev". Writes:
+    #   /etc/colinux-version       — human version string ("0.5.1-dev+<sha>")
+    #   /etc/colinux-release.json  — structured build provenance
+    inject_version_files "$iso_staging" "$codex_tag"
 
     # Repack into a new ISO
     local repacked_iso="${iso_file%.iso}-injected.iso"

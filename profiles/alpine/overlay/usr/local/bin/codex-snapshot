@@ -24,7 +24,8 @@ if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
     }
 fi
 
-PERSIST_DIR="/persist"
+PERSIST_DIR="${COLINUX_PERSIST_DIR:-/persist}"
+ETC_DIR="${COLINUX_ETC_DIR:-/etc}"
 SNAPSHOT_DIR="${PERSIST_DIR}/snapshots"
 LOG_DIR="${PERSIST_DIR}/logs"
 LOGFILE="${LOG_DIR}/backup.log"
@@ -40,6 +41,19 @@ log_action() {
 die() {
     log_action "FATAL $*"
     colinux_die "$@"
+}
+
+# ── JSON helpers (no eval/source; safe even on BusyBox) ─────────────────────
+# Read a top-level string key from a JSON file.
+json_get() {
+    local file="$1" key="$2"
+    [[ -f "$file" ]] || return 1
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg k "$key" '.[$k] // empty' "$file" 2>/dev/null
+    else
+        grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null \
+            | sed -E "s/.*:[[:space:]]*\"([^\"]*)\".*/\1/" | head -1
+    fi
 }
 
 
@@ -64,20 +78,34 @@ usage() {
     cat <<'EOF'
 Usage: codex-snapshot [OPTIONS]
 
-Create portable state snapshots with metadata for easy transfer.
+Create portable state snapshots with version metadata embedded.
+
+Each snapshot is a tar.gz of /persist with a META.json at its root capturing
+version info (edition, colinux_version, os_image_version, codex_cli_version,
+alpine_release, hostname, kernel, arch, timestamp, etc.). A sibling
+<snapshot>.meta.json is also written for backward compatibility.
 
 Options:
   (no args)     Create a new snapshot
   --upload URL  Upload snapshot to remote URL (via curl PUT)
   --list        List existing snapshots with metadata
-  --restore F   Restore from a snapshot file
+  --restore F   Restore from a snapshot file (shows source version + downgrade
+                advisory before overwriting /persist)
   --prune N     Keep only the last N snapshots
+  --json        Emit JSON result where applicable
+  --yes         Skip interactive prompts (automation; also honors COLINUX_YES)
   --help        Show this help
+
+Environment:
+  COLINUX_PERSIST_DIR  Override /persist (testing / non-standard layouts)
+  COLINUX_ETC_DIR      Override /etc (testing / non-standard layouts)
+  COLINUX_YES=true     Equivalent to --yes
 
 Examples:
   codex-snapshot
   codex-snapshot --upload https://example.com/backups/
   codex-snapshot --list
+  codex-snapshot --restore colinux-codex-20260730-120000.tar.gz
   codex-snapshot --prune 5
 EOF
     exit 0
@@ -111,6 +139,11 @@ done
 colinux_init_output
 
 # ── Gather metadata ───────────────────────────────────────────────────────
+# Reads version info from multiple sources (best-effort, never fails):
+#   - /etc/colinux-version          → human version string ("0.5.1")
+#   - /etc/colinux-release.json     → {edition, version, codex_tag, ...}
+#   - active A/B slot manifest.json → {version, alpine_release, arch, created}
+#   - codex --version               → installed Codex CLI version
 gather_metadata() {
     local hostname_val kernel_val arch_val timestamp_val
     hostname_val="$(hostname -s 2>/dev/null || echo 'codex')"
@@ -141,6 +174,36 @@ gather_metadata() {
     local persist_size
     persist_size="$(du -sh "$PERSIST_DIR" 2>/dev/null | awk '{print $1}' || echo 'unknown')"
 
+    # ── Version metadata (v0.5: rich, multi-source) ───────────────────────
+    local release_json="${ETC_DIR}/colinux-release.json"
+    local version_file="${ETC_DIR}/colinux-version"
+
+    # Edition + appliance version
+    local edition appliance_version codex_tag
+    edition="$(json_get "$release_json" edition || echo 'lite')"
+    appliance_version="$(cat "$version_file" 2>/dev/null || json_get "$release_json" version || echo 'dev')"
+    codex_tag="$(json_get "$release_json" codex_tag || echo '')"
+
+    # OS image version from active slot manifest (best-effort; may be absent on
+    # non-A/B installs or in CI/test sandboxes).
+    local os_image_version alpine_release_img
+    os_image_version="$(current_os_version || echo 'unknown')"
+    alpine_release_img="$(current_os_field alpine_release || echo '')"
+
+    # Alpine release (running system) — /etc/alpine-release on Alpine.
+    local alpine_release_running
+    alpine_release_running="$(cat "${ETC_DIR}/alpine-release" 2>/dev/null || echo "$alpine_release_img" || echo 'unknown')"
+
+    # Codex CLI version (best-effort)
+    local codex_cli_version codex_bin
+    codex_cli_version="unknown"
+    for codex_bin in /usr/local/bin/codex /usr/bin/codex; do
+        if [[ -x "$codex_bin" ]]; then
+            codex_cli_version="$("$codex_bin" --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo 'unknown')"
+            break
+        fi
+    done
+
     jq -n \
         --arg hostname "$hostname_val" \
         --arg kernel "$kernel_val" \
@@ -150,18 +213,134 @@ gather_metadata() {
         --arg boot_device "$boot_dev" \
         --arg boot_size "$boot_size" \
         --arg persist_size "$persist_size" \
-        --arg colinux_version "lite-$(cat /etc/colinux-version 2>/dev/null || echo 'dev')" \
+        --arg edition "$edition" \
+        --arg colinux_version "$appliance_version" \
+        --arg codex_cli_version "$codex_cli_version" \
+        --arg codex_tag "$codex_tag" \
+        --arg os_image_version "$os_image_version" \
+        --arg alpine_release "$alpine_release_running" \
+        --arg snapshot_format "1" \
         '{
+            schema_version: ($snapshot_format|tonumber),
+            timestamp: $timestamp,
+            edition: $edition,
+            colinux_version: $colinux_version,
+            codex_cli_version: $codex_cli_version,
+            codex_tag: $codex_tag,
+            os_image_version: $os_image_version,
+            alpine_release: $alpine_release,
             hostname: $hostname,
             kernel: $kernel,
             arch: $arch,
-            timestamp: $timestamp,
             hw_id: $hw_id,
             boot_device: $boot_device,
             boot_size: $boot_size,
-            persist_size: $persist_size,
-            colinux_version: $colinux_version
+            persist_size: $persist_size
         }'
+}
+
+# ── OS slot helpers (best-effort, read-only, never fatal) ───────────────────
+# These mirror codex-update-os's lightweight approach but avoid any dependency
+# on that command. They try (1) /persist/state/ab-slot + mounting the active
+# slot's manifest.json, then (2) fall back to /etc/colinux-release.json.
+current_os_version() { _current_os_field version; }
+current_os_field()   { _current_os_field "$1"; }
+_current_os_field() {
+    local key="${1:-version}"
+    local slot_file="${PERSIST_DIR}/state/ab-slot"
+    local release_json="${ETC_DIR}/colinux-release.json"
+
+    # Prefer the release.json baked at build time — it's always present on a
+    # real install and reflects the currently booted image. The A/B slot
+    # manifest is authoritative for an in-progress update, but that info is
+    # also captured in release.json after a successful trial confirmation.
+    local v
+    if v="$(json_get "$release_json" "$key" 2>/dev/null)" && [[ -n "$v" ]]; then
+        echo "$v"
+        return 0
+    fi
+
+    # Fall back to reading the active slot manifest (best-effort mount).
+    if [[ -f "$slot_file" ]] && command -v mount >/dev/null 2>&1; then
+        local slot dev mnt manifest
+        slot="$(cat "$slot_file" 2>/dev/null | tr -d '[:space:]')"
+        [[ -n "$slot" ]] || return 1
+        dev="$(_slot_device_for "$slot")"
+        [[ -n "$dev" && -b "$dev" ]] || return 1
+        mnt="$(mktemp -d 2>/dev/null)" || return 1
+        if mount -o ro "$dev" "$mnt" 2>/dev/null; then
+            manifest="$mnt/manifest.json"
+            v="$(json_get "$manifest" "$key" 2>/dev/null || true)"
+            umount "$mnt" 2>/dev/null || true
+        fi
+        rmdir "$mnt" 2>/dev/null || true
+        if [[ -n "$v" ]]; then
+            echo "$v"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Map an A/B slot label ("A"/"B") to its block device, using blkid labels.
+# Pure discovery — no writes. Returns empty string when not found.
+_slot_device_for() {
+    local slot="$1"
+    local label
+    case "$slot" in
+        A) label="codex-system-a" ;;
+        B) label="codex-system-b" ;;
+        *) return 0 ;;
+    esac
+    if command -v blkid >/dev/null 2>&1; then
+        blkid -t "LABEL=$label" -o device 2>/dev/null | head -1
+    elif [[ -x /sbin/findfs ]]; then
+        /sbin/findfs "LABEL=$label" 2>/dev/null | head -1
+    fi
+}
+
+# ── Embedded-metadata reader ───────────────────────────────────────────────
+# Extract META.json from a snapshot tarball to a temp file and echo its path.
+# Returns non-zero (and echoes nothing) when no embedded META is present.
+# Extraction is limited to the single META.json member so we never touch the
+# rest of the payload here.
+#
+# The member may be stored as either ./META.json (when appended from a
+# -C dir that preserved the ./ prefix) or META.json (when appended without
+# the prefix). We try both patterns individually because passing both to a
+# single tar invocation makes tar exit non-zero if either is absent, which
+# would mask a successful extraction of the other.
+extract_embedded_meta() {
+    local archive="$1" tmp
+    tmp="$(mktemp)"
+    local ok=1
+    for pat in ./META.json META.json; do
+        if tar xzf "$archive" -O "$pat" 2>/dev/null > "$tmp" \
+           && [[ -s "$tmp" ]] \
+           && jq -e . >/dev/null 2>&1 < "$tmp"; then
+            ok=0
+            break
+        fi
+    done
+    if [[ "$ok" -eq 0 ]]; then
+        echo "$tmp"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
+# Print a single metadata field for a snapshot, preferring the embedded META
+# over the sibling .meta.json. Usage: meta_field <snapshot_path> <key>
+meta_field() {
+    local snap="$1" key="$2" embedded sibling
+    if embedded="$(extract_embedded_meta "$snap")"; then
+        jq -r --arg k "$key" '.[$k] // empty' "$embedded" 2>/dev/null
+        rm -f "$embedded"
+        return 0
+    fi
+    sibling="${snap}.meta.json"
+    [[ -f "$sibling" ]] && jq -r --arg k "$key" '.[$k] // empty' "$sibling" 2>/dev/null
 }
 
 # ── Create snapshot ───────────────────────────────────────────────────────
@@ -176,31 +355,60 @@ if [[ "$MODE" == "create" ]]; then
 
     # Generate metadata
     META_JSON="$(gather_metadata)"
-    META_TMP="$(mktemp)"
-    echo "$META_JSON" > "$META_TMP"
+    META_STAGE="$(mktemp -d)"
+    _cleanup_meta() { rm -rf "$META_STAGE" 2>/dev/null || true; }
+    trap _cleanup_meta EXIT
+    echo "$META_JSON" > "${META_STAGE}/META.json"
 
     log_action "create_start snapshot=${SNAP_NAME}"
 
-    # Create archive with metadata embedded
-    tar czf "$SNAP_PATH" \
-        --exclude='*.sock' \
-        --exclude='*.pid' \
-        --exclude='__pycache__' \
-        --exclude='.cache' \
-        --exclude='snapshots/*.tar.gz' \
-        --exclude='backups/*.tar.gz' \
-        -C /persist \
-        . 2>&1
+    # Build the archive with META.json embedded at ./META.json (root of the
+    # tarball), so the snapshot is self-describing and survives copy/upload
+    # without its sibling .meta.json. The payload is the /persist tree with
+    # snapshots/backups excluded to avoid recursion.
+    #
+    # Two-step (tar then gzip) so we can append META.json portably. BusyBox
+    # tar supports -r (append); GNU tar does too. If append fails for any
+    # reason we fall back to the single-step tar-from-/persist and ship META
+    # only as the sibling file (legacy behaviour).
+    SNAP_UNCOMPRESSED="${SNAP_PATH%.tar.gz}.tar"
+    _cleanup_uncompressed() { rm -f "$SNAP_UNCOMPRESSED" 2>/dev/null || true; }
+    trap '_cleanup_meta; _cleanup_uncompressed' EXIT
 
-    # Append metadata as separate file
-    cp "$META_TMP" "${SNAP_PATH}.meta.json"
-    rm -f "$META_TMP"
+    if tar cf "$SNAP_UNCOMPRESSED" \
+            --exclude='*.sock' \
+            --exclude='*.pid' \
+            --exclude='__pycache__' \
+            --exclude='.cache' \
+            --exclude='snapshots/*.tar.gz' \
+            --exclude='snapshots/*.tar' \
+            --exclude='backups/*.tar.gz' \
+            -C /persist \
+            . 2>&1 \
+       && tar rf "$SNAP_UNCOMPRESSED" -C "$META_STAGE" META.json 2>&1; then
+        gzip -f "$SNAP_UNCOMPRESSED"
+    else
+        # Fallback: legacy single-step archive without embedded META.
+        rm -f "$SNAP_UNCOMPRESSED"
+        tar czf "$SNAP_PATH" \
+            --exclude='*.sock' \
+            --exclude='*.pid' \
+            --exclude='__pycache__' \
+            --exclude='.cache' \
+            --exclude='snapshots/*.tar.gz' \
+            --exclude='backups/*.tar.gz' \
+            -C /persist \
+            . 2>&1
+    fi
+
+    # Also write metadata as sibling file (back-compat with older --list).
+    cp "${META_STAGE}/META.json" "${SNAP_PATH}.meta.json"
 
     SNAP_SIZE="$(du -sh "$SNAP_PATH" | awk '{print $1}')"
     echo ""
     echo "Snapshot created:"
     echo "  File:     ${SNAP_NAME} ($SNAP_SIZE)"
-    echo "  Metadata: ${SNAP_NAME}.meta.json"
+    echo "  Metadata: embedded (META.json) + sibling (.meta.json)"
     echo ""
     echo "Metadata:"
     echo "$META_JSON" | jq '.' 2>/dev/null || echo "$META_JSON"
@@ -245,17 +453,26 @@ if [[ "$MODE" == "list" ]]; then
         snap_size="$(du -sh "$snap" | awk '{print $1}')"
         snap_date="$(stat -c '%y' "$snap" 2>/dev/null | cut -d. -f1)"
 
-        # Read metadata if available
-        meta_file="${snap}.meta.json"
-        if [[ -f "$meta_file" ]]; then
-            meta_host="$(jq -r '.hostname // "?"' "$meta_file" 2>/dev/null)"
-            meta_hw="$(jq -r '.hw_id // "?"' "$meta_file" 2>/dev/null)"
-            meta_kernel="$(jq -r '.kernel // "?"' "$meta_file" 2>/dev/null)"
-            echo "  $snap_name  ($snap_size)  $snap_date"
-            echo "    Host: ${meta_host} | HW: ${meta_hw} | Kernel: ${meta_kernel}"
-        else
-            echo "  $snap_name  ($snap_size)  $snap_date"
-        fi
+        # Read metadata (embedded META preferred over sibling .meta.json).
+        meta_host="$(meta_field "$snap" hostname || echo '?')"
+        meta_hw="$(meta_field "$snap" hw_id || echo '?')"
+        meta_kernel="$(meta_field "$snap" kernel || echo '?')"
+        meta_edition="$(meta_field "$snap" edition || echo '')"
+        meta_colinux="$(meta_field "$snap" colinux_version || echo '')"
+        meta_codex="$(meta_field "$snap" codex_cli_version || echo '')"
+        meta_os="$(meta_field "$snap" os_image_version || echo '')"
+        meta_ts="$(meta_field "$snap" timestamp || echo '')"
+
+        echo "  $snap_name  ($snap_size)  $snap_date"
+        echo "    Host: ${meta_host} | HW: ${meta_hw} | Kernel: ${meta_kernel}"
+        # Version line (v0.5): edition, appliance version, OS image, Codex CLI
+        _vline=""
+        [[ -n "$meta_edition" ]] && _vline+="${meta_edition}/"
+        [[ -n "$meta_colinux" ]] && _vline+="colinux-${meta_colinux}"
+        [[ -n "$meta_os" && "$meta_os" != "unknown" ]] && _vline+=" os=${meta_os}"
+        [[ -n "$meta_codex" && "$meta_codex" != "unknown" ]] && _vline+=" codex=${meta_codex}"
+        [[ -n "$_vline" ]] && echo "    Version: ${_vline}"
+        [[ -n "$meta_ts" ]] && echo "    Created: ${meta_ts}"
     done
 
     if [[ $count -eq 0 ]]; then
@@ -289,10 +506,48 @@ if [[ "$MODE" == "restore" ]]; then
     echo "This will overwrite /persist with the snapshot contents."
     echo "  Source: $RESTORE_FILE"
     echo ""
-    read -rp "Type 'RESTORE' to confirm: " confirm
-    if [[ "$confirm" != "RESTORE" ]]; then
-        echo "Aborted."
-        exit 0
+
+    # Show source version metadata (v0.5) before prompting.
+    SRC_META="$(extract_embedded_meta "$RESTORE_FILE" || true)"
+    if [[ -n "$SRC_META" ]]; then
+        src_edition="$(json_get "$SRC_META" edition || echo '')"
+        src_colinux="$(json_get "$SRC_META" colinux_version || echo '')"
+        src_os="$(json_get "$SRC_META" os_image_version || echo '')"
+        src_codex="$(json_get "$SRC_META" codex_cli_version || echo '')"
+        src_alpine="$(json_get "$SRC_META" alpine_release || echo '')"
+        src_host="$(json_get "$SRC_META" hostname || echo '')"
+        src_ts="$(json_get "$SRC_META" timestamp || echo '')"
+        echo "  Snapshot version:"
+        [[ -n "$src_edition" ]]  && echo "    Edition:    ${src_edition}"
+        [[ -n "$src_colinux" ]]  && echo "    CoLinux:    ${src_colinux}"
+        [[ -n "$src_os" && "$src_os" != "unknown" ]] && echo "    OS image:   ${src_os}"
+        [[ -n "$src_codex" && "$src_codex" != "unknown" ]] && echo "    Codex CLI:  ${src_codex}"
+        [[ -n "$src_alpine" && "$src_alpine" != "unknown" ]] && echo "    Alpine:     ${src_alpine}"
+        [[ -n "$src_host" ]]     && echo "    Origin:     ${src_host}"
+        [[ -n "$src_ts" ]]       && echo "    Captured:   ${src_ts}"
+        echo ""
+
+        # Non-blocking downgrade advisory — compare to running appliance version.
+        cur_colinux="$(cat "${ETC_DIR}/colinux-version" 2>/dev/null || json_get "${ETC_DIR}/colinux-release.json" version || echo '')"
+        if [[ -n "$cur_colinux" && -n "$src_colinux" \
+              && "$cur_colinux" != "$src_colinux" \
+              && "$cur_colinux" != "dev" && "$src_colinux" != "dev" ]]; then
+            echo "  ⚠ Version mismatch: snapshot is CoLinux ${src_colinux}, this host runs ${cur_colinux}."
+            echo "    Restoring an older snapshot is a DOWNGRADE and may be incompatible."
+            echo "    Review codex_cli_version / os_image_version above before continuing."
+            echo ""
+        fi
+    else
+        echo "  (No embedded version metadata; legacy snapshot.)"
+        echo ""
+    fi
+
+    if [[ "${COLINUX_YES:-}" != "true" ]]; then
+        read -rp "Type 'RESTORE' to confirm: " confirm
+        if [[ "$confirm" != "RESTORE" ]]; then
+            echo "Aborted."
+            exit 0
+        fi
     fi
 
     log_action "restore_start source=$RESTORE_FILE"
@@ -306,12 +561,14 @@ if [[ "$MODE" == "restore" ]]; then
     if [[ -n "$(ls -A "$RESTORE_TMP" 2>/dev/null)" ]]; then
         cp -a "$RESTORE_TMP"/. "$PERSIST_DIR/" 2>&1
         rm -rf "$RESTORE_TMP"
+        rm -f "$SRC_META" 2>/dev/null || true
     else
         rm -rf "$RESTORE_TMP"
+        rm -f "$SRC_META" 2>/dev/null || true
         die "Failed to extract snapshot."
     fi
 
-    echo "Snapshot restored to /persist"
+    echo "Snapshot restored to ${PERSIST_DIR}"
     echo "Reboot recommended for full effect."
     log_action "restore_ok source=$RESTORE_FILE"
 fi

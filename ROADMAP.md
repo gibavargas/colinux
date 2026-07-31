@@ -85,7 +85,7 @@ Need a proper installer and in-place OS updates.
   - A/B partition scheme (fallback on failed update)
   - Signature verification on update payloads
   - Rollback mechanism
-- [ ] **`codex-snapshot` improve** — snapshots include version metadata
+- [x] **`codex-snapshot` improve** — snapshots include version metadata
 - [ ] **USB persistence wizard** — guided `codex-usb-persist` setup
 
 ### Exit criteria
