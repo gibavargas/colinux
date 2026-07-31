@@ -406,7 +406,7 @@ inject_version_files() {
     # Appliance version: prefer a VERSION file in the repo root, fall back to
     # the short source SHA, and finally "dev". Always suffixed with the short
     # source SHA for traceability (e.g. "0.5.1+0f65f2a").
-    local repo_version source_sha_short appliance_version
+    local repo_version="" source_sha_short appliance_version
     if [ -f "$PROJECT_ROOT/VERSION" ]; then
         repo_version="$(head -1 "$PROJECT_ROOT/VERSION" | tr -d '[:space:]')"
     fi

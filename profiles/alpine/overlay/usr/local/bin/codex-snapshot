@@ -383,7 +383,7 @@ if [[ "$MODE" == "create" ]]; then
             --exclude='snapshots/*.tar.gz' \
             --exclude='snapshots/*.tar' \
             --exclude='backups/*.tar.gz' \
-            -C /persist \
+            -C "$PERSIST_DIR" \
             . 2>&1 \
        && tar rf "$SNAP_UNCOMPRESSED" -C "$META_STAGE" META.json 2>&1; then
         gzip -f "$SNAP_UNCOMPRESSED"
@@ -397,7 +397,7 @@ if [[ "$MODE" == "create" ]]; then
             --exclude='.cache' \
             --exclude='snapshots/*.tar.gz' \
             --exclude='backups/*.tar.gz' \
-            -C /persist \
+            -C "$PERSIST_DIR" \
             . 2>&1
     fi
 
