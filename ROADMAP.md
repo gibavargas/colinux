@@ -86,7 +86,7 @@ Need a proper installer and in-place OS updates.
   - Signature verification on update payloads
   - Rollback mechanism
 - [x] **`codex-snapshot` improve** — snapshots include version metadata
-- [ ] **USB persistence wizard** — guided `codex-usb-persist` setup
+- [x] **USB persistence wizard** — guided `codex-usb-persist` setup
 
 ### Exit criteria
 - Clean install to bare metal via `codex-install`

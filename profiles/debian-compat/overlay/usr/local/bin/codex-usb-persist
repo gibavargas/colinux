@@ -21,6 +21,13 @@ LUKS_MAPPER="codex-persist"
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/disk-actions.log"
 
+# Global flags parsed from argv (text-mode only; compat edition has no JSON lib).
+COLINUX_YES="false"
+for _a in "$@"; do
+    case "$_a" in --yes|-y) COLINUX_YES="true" ;; esac
+done
+unset _a
+
 mkdir -p "$LOG_DIR"
 
 log_action() {
@@ -33,6 +40,24 @@ die() {
     echo "ERROR: $*" >&2
     log_action "FATAL usb-persist: $*"
     exit 1
+}
+
+# Local confirmation helper mirroring the Alpine output.sh contract.
+colinux_confirm() {
+    local prompt="$1" expected="${2:-}"
+    if [[ "$COLINUX_YES" == "true" ]]; then
+        return 0
+    fi
+    local resp=""
+    read -rp "$prompt " resp || resp=""
+    if [[ -n "$expected" ]]; then
+        [[ "$resp" == "$expected" ]]
+        return $?
+    fi
+    case "${resp,,}" in
+        y|yes) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # ── Find the persistence partition ────────────────────────────────────────
@@ -408,39 +433,274 @@ cmd_info() {
     fi
 }
 
-# ── Main dispatch ─────────────────────────────────────────────────────────
-COMMAND="${1:-}"
+# ── Helpers for setup wizard ──────────────────────────────────────────────
 
-case "${COMMAND:-}" in
-    status|st|"")
-        cmd_status "${2:-}"
-        ;;
-    open|unlock)
-        cmd_open "${2:-}"
-        ;;
-    close|lock)
-        cmd_close
-        ;;
-    mount)
-        cmd_mount "${2:-}"
-        ;;
-    unmount|umount)
-        cmd_unmount
-        ;;
-    resize)
-        cmd_resize "${2:-}" "${3:-}"
-        ;;
-    passphrase|pass|chpass)
-        cmd_passphrase "${2:-}"
-        ;;
-    info|details)
-        cmd_info "${2:-}"
-        ;;
-    help|--help|-h)
-        cat <<EOF
+# Check that a device is safe to write to (not the boot device, not mounted,
+# not a loop/ram device, meets minimum size). Echoes size in bytes on success.
+_validate_target_device() {
+    local dev="$1" min_bytes="${2:-$((4 * 1024 * 1024 * 1024))}"
+
+    [[ -b "$dev" ]] || die "Not a block device: $dev"
+
+    # Refuse loop, ram, and zram devices.
+    case "$dev" in
+        /dev/loop*|/dev/ram*|/dev/zram*) die "Refusing to use virtual device: $dev" ;;
+    esac
+
+    # Refuse the running root/boot device.
+    local root_dev
+    root_dev="$(findmnt -n -o SOURCE / 2>/dev/null | sed -E 's/p?[0-9]+$//' || true)"
+    if [[ -n "$root_dev" ]] && [[ "$dev" == "$root_dev" || "$dev" == "${root_dev}p"* ]]; then
+        die "$dev is the running root device. Aborting."
+    fi
+
+    # Mounted check (whole-disk mode).
+    if lsblk -n -o MOUNTPOINT "$dev" 2>/dev/null | grep -q .; then
+        die "$dev has mounted partitions. Unmount all partitions first."
+    fi
+
+    local size_bytes
+    size_bytes="$(lsblk -d -b -n -o SIZE "$dev" 2>/dev/null || echo 0)"
+    [[ "$size_bytes" =~ ^[0-9]+$ ]] || size_bytes=0
+    if [[ "$size_bytes" -lt "$min_bytes" ]]; then
+        local min_gb cur_gb
+        min_gb="$(awk -v b="$min_bytes" 'BEGIN{printf "%.1f", b/1073741824}')"
+        cur_gb="$(awk -v b="$size_bytes" 'BEGIN{printf "%.1f", b/1073741824}')"
+        die "Device too small (${cur_gb}GB). Minimum ${min_gb}GB required."
+    fi
+    echo "$size_bytes"
+}
+
+# Read a non-empty passphrase twice (confirmation) via stdin. Echoes the
+# passphrase on stdout (prompts go to stderr so they don't contaminate the
+# value when used in command substitution). Sensitive: caller must `unset`.
+_read_passphrase_twice() {
+    local p1="" p2=""
+    echo -n "Enter new LUKS passphrase: " >&2
+    read -rs p1; echo "" >&2
+    [[ -n "$p1" ]] || { echo "Aborted: empty passphrase." >&2; return 1; }
+    echo -n "Confirm passphrase: " >&2
+    read -rs p2; echo "" >&2
+    [[ "$p1" == "$p2" ]] || { echo "Aborted: passphrases do not match." >&2; return 1; }
+    printf '%s' "$p1"
+    unset p1 p2
+}
+
+# Format a partition as LUKS2 + ext4 labeled codex-persist. Args:
+#   $1 partition device, passphrase read from stdin via fd 0
+_format_luks_persist() {
+    local part="$1" pass
+    pass="$(cat)"
+    [[ -n "$pass" ]] || die "Empty passphrase passed to _format_luks_persist."
+    printf '%s' "$pass" | cryptsetup luksFormat --type luks2 "$part" -q - \
+        || die "cryptsetup luksFormat failed on $part"
+    printf '%s' "$pass" | cryptsetup open "$part" "$LUKS_MAPPER" - \
+        || die "cryptsetup open failed on $part"
+    mkfs.ext4 -F -L codex-persist "/dev/mapper/${LUKS_MAPPER}" >/dev/null 2>&1 \
+        || { cryptsetup close "$LUKS_MAPPER" 2>/dev/null || true; \
+             die "mkfs.ext4 failed on mapper ${LUKS_MAPPER}"; }
+    cryptsetup close "$LUKS_MAPPER" || die "cryptsetup close failed"
+    unset pass
+}
+
+# ── Command: setup (guided wizard) ────────────────────────────────────────
+cmd_setup() {
+    local target_disk="" target_part="" size_spec="max"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --disk) target_disk="${2:?--disk requires a device}"; shift 2 ;;
+            --partition) target_part="${2:?--partition requires a device}"; shift 2 ;;
+            --size) size_spec="${2:?--size requires a value (e.g. 4096 or max)}"; shift 2 ;;
+            --yes|-y) shift ;;  # already parsed globally; consume
+            --help|-h) cat <<'EOF'
+Usage: codex-usb-persist setup --disk DEVICE [--size N]
+       codex-usb-persist setup --partition PARTITION
+
+Guided wizard to create and format the CoLinux persistence partition.
+
+Modes:
+  --disk DEVICE       Create a new partition in the remaining free space of
+                      DEVICE (a whole disk that already has CoLinux installed)
+                      and format it as LUKS2 + ext4.
+  --partition PART    Format an EXISTING partition PART as LUKS2 + ext4.
+                      All data on PART will be destroyed.
+
+Options:
+  --size N            Partition size in MB (only with --disk). Use 'max' (the
+                      default) to fill all remaining free space.
+  --yes               Skip interactive confirmation (CI / scripted use).
+  --help, -h          Show this help.
+
+Examples:
+  codex-usb-persist setup --disk /dev/sdb
+  codex-usb-persist setup --disk /dev/sdb --size 8192
+  codex-usb-persist setup --partition /dev/sdb3
+EOF
+                return 0 ;;
+            *) die "setup: unknown option '$1'. See 'codex-usb-persist setup --help'." ;;
+        esac
+    done
+
+    if [[ -z "$target_disk" ]] && [[ -z "$target_part" ]]; then
+        die "setup: --disk or --partition is required. See 'codex-usb-persist setup --help'."
+    fi
+    if [[ -n "$target_disk" ]] && [[ -n "$target_part" ]]; then
+        die "setup: --disk and --partition are mutually exclusive."
+    fi
+    if [[ -n "$target_part" ]] && [[ "$size_spec" != "max" ]]; then
+        die "setup: --size is only valid with --disk."
+    fi
+
+    command -v cryptsetup >/dev/null 2>&1 || die "cryptsetup not found. Install: apt install cryptsetup"
+    command -v mkfs.ext4 >/dev/null 2>&1 || die "mkfs.ext4 not found. Install: apt install e2fsprogs"
+
+    local part=""
+    log_action "setup_start disk=${target_disk:-} part=${target_part:-} size=$size_spec"
+
+    # ── Whole-disk mode: create a new partition ───────────────────────────
+    if [[ -n "$target_disk" ]]; then
+        command -v sgdisk >/dev/null 2>&1 || die "sgdisk not found. Install: apt install gdisk"
+
+        _validate_target_device "$target_disk"
+
+        echo "╔══════════════════════════════════════════════════════╗"
+        echo "║       COLINUX USB PERSISTENCE WIZARD (DISK)         ║"
+        echo "╠══════════════════════════════════════════════════════╣"
+        echo "║  Target disk: $target_disk"
+        local model size_gb transport
+        model="$(lsblk -d -n -o MODEL "$target_disk" 2>/dev/null | xargs || echo 'Unknown')"
+        size_gb="$(lsblk -d -b -n -o SIZE "$target_disk" 2>/dev/null | awk '{printf "%.1f", $1/1073741824}')"
+        transport="$(lsblk -d -n -o TRAN "$target_disk" 2>/dev/null | xargs || echo 'N/A')"
+        echo "║  Model:       $model"
+        echo "║  Size:        ${size_gb}GB"
+        echo "║  Transport:   $transport"
+        echo "╠══════════════════════════════════════════════════════╣"
+        echo "║  This will create a new partition and DESTROY all    ║"
+        echo "║  data in the remaining free space of this disk.      ║"
+        echo "╚══════════════════════════════════════════════════════╝"
+
+        colinux_confirm "Type YES to continue:" "YES" \
+            || die "Aborted by user."
+
+        local last_part
+        last_part="$(sgdisk -p "$target_disk" 2>/dev/null | awk '/^ +[0-9]+/ {n=$1} END{print n+0}')"
+        local new_part_num=$((last_part + 1))
+        [[ "$new_part_num" -ge 1 ]] || die "Could not determine next partition number on $target_disk"
+
+        if [[ "$size_spec" == "max" ]]; then
+            sgdisk -n "${new_part_num}:0:0" -t "${new_part_num}:8300" \
+                   -c "${new_part_num}:CoLinuxPersistence" "$target_disk" >/dev/null 2>&1 \
+                || die "sgdisk: failed to create partition ${new_part_num} on $target_disk"
+        else
+            [[ "$size_spec" =~ ^[0-9]+$ ]] || die "--size must be a number of MB or 'max'."
+            sgdisk -n "${new_part_num}:0:+${size_spec}M" -t "${new_part_num}:8300" \
+                   -c "${new_part_num}:CoLinuxPersistence" "$target_disk" >/dev/null 2>&1 \
+                || die "sgdisk: failed to create partition ${new_part_num} (size ${size_spec}M) on $target_disk"
+        fi
+
+        partprobe "$target_disk" 2>/dev/null || true
+        sleep 2
+
+        case "$target_disk" in
+            /dev/nvme*|/dev/mmcblk*) part="${target_disk}p${new_part_num}" ;;
+            *) part="${target_disk}${new_part_num}" ;;
+        esac
+        [[ -b "$part" ]] || die "Newly created partition $part is not visible. Run partprobe and retry."
+
+    # ── Partition mode: format an existing partition ──────────────────────
+    else
+        part="$target_part"
+        _validate_target_device "$part"
+
+        echo "╔══════════════════════════════════════════════════════╗"
+        echo "║    COLINUX USB PERSISTENCE WIZARD (PARTITION)       ║"
+        echo "╠══════════════════════════════════════════════════════╣"
+        echo "║  Target partition: $part"
+        echo "║  Existing filesystem: $(blkid -s TYPE -o value "$part" 2>/dev/null || echo 'none')"
+        echo "║  Existing label:     $(blkid -s LABEL -o value "$part" 2>/dev/null || echo 'none')"
+        echo "╠══════════════════════════════════════════════════════╣"
+        echo "║  This will DESTROY all data on this partition.       ║"
+        echo "╚══════════════════════════════════════════════════════╝"
+
+        colinux_confirm "Type YES to continue:" "YES" \
+            || die "Aborted by user."
+    fi
+
+    # ── Format: LUKS2 + ext4 labeled codex-persist ────────────────────────
+    echo ""
+    echo "[1/3] Creating LUKS2 container on $part ..."
+    echo "[2/3] Creating ext4 filesystem (label: codex-persist) ..."
+
+    local pass
+    pass="$(_read_passphrase_twice)" || die "Passphrase entry failed."
+    printf '%s' "$pass" | _format_luks_persist "$part"
+    unset pass
+
+    # ── Verify the result ─────────────────────────────────────────────────
+    echo "[3/3] Verifying ..."
+    local fmt
+    fmt="$(blkid -s TYPE -o value "$part" 2>/dev/null || true)"
+    [[ "$fmt" == "crypto_LUKS" ]] || die "Verification failed: $part is not LUKS ($fmt)."
+
+    echo ""
+    echo "✓ Persistence partition ready: $part"
+    echo "  Format: LUKS2 + ext4"
+    echo "  Label:  codex-persist"
+    echo ""
+    echo "To use it:"
+    echo "  codex-usb-persist mount $part"
+    log_action "setup_ok part=$part fmt=$fmt"
+}
+
+# ── Main dispatch ─────────────────────────────────────────────────────────
+# Guarded so the script can be sourced by unit tests (functions only) without
+# triggering dispatch.
+if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
+main_dispatch() {
+    # `setup` takes its own flags (--disk/--partition/--size/--help), so route
+    # it BEFORE the simple positional dispatch used by the other subcommands.
+    case "${1:-}" in
+        setup|create|init|wizard)
+            shift
+            cmd_setup "$@"
+            exit $?
+            ;;
+    esac
+
+    COMMAND="${1:-}"
+
+    case "${COMMAND:-}" in
+        status|st|"")
+            cmd_status "${2:-}"
+            ;;
+        open|unlock)
+            cmd_open "${2:-}"
+            ;;
+        close|lock)
+            cmd_close
+            ;;
+        mount)
+            cmd_mount "${2:-}"
+            ;;
+        unmount|umount)
+            cmd_unmount
+            ;;
+        resize)
+            cmd_resize "${2:-}" "${3:-}"
+            ;;
+        passphrase|pass|chpass)
+            cmd_passphrase "${2:-}"
+            ;;
+        info|details)
+            cmd_info "${2:-}"
+            ;;
+        help|--help|-h)
+            cat <<EOF
 Usage: codex-usb-persist <COMMAND> [OPTIONS]
 
 Commands:
+  setup               Guided wizard — create & format the persistence partition
   status [DEVICE]     Show persistence status
   open [DEVICE]       Unlock LUKS persistence
   close               Lock LUKS persistence
@@ -450,12 +710,16 @@ Commands:
   passphrase [DEVICE] Change LUKS passphrase
   info [DEVICE]       Detailed partition info
 
+Run 'codex-usb-persist setup --help' for the wizard's own options.
 If DEVICE is not specified, auto-detection is attempted.
 EOF
-        ;;
-    *)
-        echo "Unknown command: $COMMAND"
-        echo "Run 'codex-usb-persist help' for usage."
-        exit 1
-        ;;
-esac
+            ;;
+        *)
+            echo "Unknown command: $COMMAND"
+            echo "Run 'codex-usb-persist help' for usage."
+            exit 1
+            ;;
+    esac
+}
+main_dispatch "$@"
+fi
