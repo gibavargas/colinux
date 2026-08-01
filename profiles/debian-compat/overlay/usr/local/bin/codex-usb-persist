@@ -28,12 +28,14 @@ for _a in "$@"; do
 done
 unset _a
 
-mkdir -p "$LOG_DIR"
+# Best-effort: /persist/ may not exist yet (CI, pre-first-boot, read-only).
+# Logging already degrades gracefully via `2>/dev/null || true` below.
+mkdir -p "$LOG_DIR" 2>/dev/null || true
 
 log_action() {
     local ts
     ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
-    echo "[$ts] usb-persist: $*" >> "$LOGFILE" 2>/dev/null || true
+    { echo "[$ts] usb-persist: $*" >> "$LOGFILE"; } 2>/dev/null || true
 }
 
 die() {
