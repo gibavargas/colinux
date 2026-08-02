@@ -1,0 +1,342 @@
+#!/bin/bash
+# codex-osk — On-screen keyboard manager for CoLinux Lite GUI (tablets/touch)
+#
+# Wraps wvkbd (Wayland Virtual Keyboard) to provide a togglable on-screen
+# keyboard for touch-only devices (tablets, convertibles, Pi touchscreens).
+#
+# Features:
+#   - Auto-detects whether to start the OSK based on:
+#       a) /persist/config/osk.conf ENABLED=yes|auto|no
+#       b) presence of a touch input device (auto mode)
+#   - Supports cage (wlroots) via wvkbd layer-shell
+#   - Toggle key binding (Mod4+Space by default) exposed for sway config
+#   - Status / start / stop / toggle / restart commands
+#
+# Usage:
+#   codex-osk start          Start the on-screen keyboard
+#   codex-osk stop           Stop the OSK
+#   codex-osk restart        Restart the OSK
+#   codex-osk toggle         Toggle visibility (requires wvkbd already running)
+#   codex-osk status         Show OSK status (JSON if --json)
+#   codex-osk auto           Auto-start if config or touch device says so
+#   codex-osk --json         JSON output (status/auto)
+#   codex-osk --help|-h      This help
+set -euo pipefail
+
+COLINUX_COMMAND="codex-osk"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+fi
+
+PERSIST_DIR="/persist"
+CONFIG_FILE="${PERSIST_DIR}/config/osk.conf"
+LOG_DIR="${PERSIST_DIR}/logs"
+LOGFILE="${LOG_DIR}/gui-session.log"
+PIDFILE="/run/codex-osk.pid"
+
+mkdir -p "$LOG_DIR" "$(dirname "$PIDFILE")" 2>/dev/null || true
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')"
+    echo "[$ts] [INFO] [osk] $*" >> "$LOGFILE" 2>/dev/null || true
+}
+
+die() { colinux_die "$@"; }
+
+usage() {
+    cat <<'EOF'
+Usage: codex-osk COMMAND [OPTIONS]
+
+On-screen keyboard manager (wvkbd) for CoLinux Lite GUI.
+
+Commands:
+  start       Start wvkbd (landscape layout).
+  stop        Stop wvkbd if running.
+  restart     Stop + start.
+  toggle      Toggle OSK visibility (starts if not running).
+  status      Show running state.
+  auto        Auto-start based on config + touch device presence.
+              Called from codex-shell-gui after the compositor is up.
+
+Options:
+  --json      Emit JSON (status/auto).
+  --help      Show this help.
+
+Configuration (/persist/config/osk.conf):
+  ENABLED=yes     Always start OSK
+  ENABLED=auto    Start only if a touch input device is detected (default)
+  ENABLED=no      Never start OSK
+  LAYOUT=landscape|simple|special   wvkbd layout (default: landscape)
+  HEIGHT=N        Pixel height of the keyboard (default: 250)
+  SCALE=N         Font scale multiplier (default: 1)
+
+Notes:
+  - Requires wvkbd (apk add wvkbd) and a running wlroots compositor (cage/sway).
+  - For sway, add to ~/.config/sway/config:
+      bindsym Mod4+Space exec codex-osk toggle
+EOF
+    exit 0
+}
+
+# ── Args ───────────────────────────────────────────────────────────────────
+ACTION=""
+JSON_OUT="${COLINUX_JSON:-false}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        start|stop|restart|toggle|status|auto) ACTION="$1"; shift ;;
+        --json)                                 JSON_OUT="true"; shift ;;
+        --help|-h)                              usage ;;
+        *) die "Unknown argument: $1 (see --help)" ;;
+    esac
+done
+
+[[ -z "$ACTION" ]] && ACTION="status"
+colinux_init_output
+
+# ── Config parsing (safe KEY=VALUE) ────────────────────────────────────────
+config_get() {
+    local key="$1"
+    [[ -f "$CONFIG_FILE" ]] || return 0
+    awk -v k="$key" '
+        BEGIN { FS="=" }
+        /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=/ {
+            n=$1; gsub(/[[:space:]]/, "", n);
+            if (n==k) {
+                v=substr($0, index($0,"=")+1);
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", v);
+                gsub(/^["'\'']|["'\'']$/, "", v);
+                print v; exit
+            }
+        }
+    ' "$CONFIG_FILE" 2>/dev/null
+}
+
+# ── Runtime helpers ────────────────────────────────────────────────────────
+# The Alpine 'wvkbd' package ships /usr/bin/wvkbd-mobintl (the mobile/intl
+# layout variant). Some distros also ship a plain 'wvkbd' symlink. Resolve
+# whichever is available.
+osk_binary() {
+    if command -v wvkbd-mobintl >/dev/null 2>&1; then printf '%s\n' "wvkbd-mobintl"
+    elif command -v wvkbd >/dev/null 2>&1; then printf '%s\n' "wvkbd"
+    else return 1; fi
+}
+have_wvkbd() { osk_binary >/dev/null 2>&1; }
+have_jq()    { command -v jq >/dev/null 2>&1; }
+
+# Detect a touch-capable input device from /sys/class/input.
+# Returns 0 (true) if any input device advertises multi-touch or BTN_TOUCH.
+# /proc/bus/input/devices reports capabilities as packed hex bitmasks in
+# "B: ABS=..." lines. We check for known multi-touch bits:
+#   ABS_MT_POSITION_X = 53  (bit 0x20000000000000)
+#   ABS_MT_SLOT       = 47
+#   BTN_TOUCH         = 14A (appears in B: KEY= lines)
+# Rather than decode hex, we check for the presence of ABS_MT in the Name or
+# a non-trivial ABS line on a device named *touch*. This is robust across
+# kernel versions and matches what libinput relies on.
+has_touch_input() {
+    [[ -r /proc/bus/input/devices ]] || return 1
+    # Awk: walk device blocks (separated by blank lines). A device is touch
+    # if its Name matches /touch|digitizer|stylus|pen/i AND it has an ABS line,
+    # OR if any device block contains ABS_MT capabilities. We use a global
+    # flag because `exit 0` in the main block still runs END in awk.
+    awk '
+        BEGIN { found=0; RS=""; FS="\n" }
+        found { exit }
+        {
+            name=""; has_abs=0; has_mt=0; has_btn_touch=0
+            for (i=1; i<=NF; i++) {
+                if ($i ~ /^N: Name=/) {
+                    name=$i
+                    sub(/^N: Name=/, "", name)
+                    gsub(/"/, "", name)
+                }
+                if ($i ~ /^B: ABS=/) {
+                    has_abs=1
+                    # ABS_MT_* bits are 47..57 (high hex digits). A multi-touch
+                    # touchscreen always has ABS_MT_SLOT (47) and
+                    # ABS_MT_POSITION_X (53) set, making the hex string long.
+                    line=$i; sub(/^B: ABS=/, "", line)
+                    gsub(/[[:space:]]/, "", line)
+                    if (length(line) > 8) has_mt=1
+                }
+                if ($i ~ /BTN_TOUCH/) has_btn_touch=1
+            }
+            if (name ~ /[Tt]ouch|[Dd]igitizer|[Ss]tylus|[Pp]en/ && (has_abs || has_btn_touch)) found=1
+            if (has_mt) found=1
+        }
+        END { if (found) exit 0; else exit 1 }
+    ' /proc/bus/input/devices 2>/dev/null
+}
+
+is_running() {
+    [[ -f "$PIDFILE" ]] || return 1
+    local pid
+    pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+    [[ -n "$pid" ]] || return 1
+    [[ -d "/proc/$pid" ]] || return 1
+    return 0
+}
+
+# ── Commands ───────────────────────────────────────────────────────────────
+cmd_start() {
+    if ! have_wvkbd; then
+        log_action "wvkbd not installed — skipping OSK start"
+        die "wvkbd not found. Install with: apk add wvkbd"
+    fi
+    if is_running; then
+        log_action "OSK already running (PID $(cat "$PIDFILE"))"
+        return 0
+    fi
+
+    local layout height scale args bin
+    layout="$(config_get LAYOUT)"
+    height="$(config_get HEIGHT)"
+    scale="$(config_get SCALE)"
+    layout="${layout:-landscape}"
+
+    bin="$(osk_binary)" || { log_action "wvkbd not installed"; die "wvkbd not found. Install with: apk add wvkbd"; }
+
+    args=("$bin")
+    # wvkbd-mobintl uses -l for layers. Common layer sets:
+    #   full: landscape full keyboard
+      #   simple: fewer keys
+    #   special: special chars
+    case "$layout" in
+        landscape) args+=(-l "full,landscape") ;;
+        simple)    args+=(-l "simple,landscape") ;;
+        special)   args+=(-l "special,landscape") ;;
+        *)         args+=(-l "full,landscape") ;;
+    esac
+    [[ -n "$height" ]] && args+=(-H "$height")
+    # --scale is not a wvkbd-mobintl flag; scale is driven by -H/--fn instead.
+    # Keep SCALE in config for forward compat but only apply when supported.
+    [[ -n "$scale" ]] && args+=(--fn "DejaVu Sans $(( 20 * scale))")
+    # Start hidden; toggle via SIGUSR2 to show.
+    args+=(--hidden)
+
+    log_action "starting $bin: ${args[*]}"
+    setsid "${args[@]}" >> "$LOGFILE" 2>&1 &
+    local pid=$!
+    echo "$pid" > "$PIDFILE" 2>/dev/null || true
+    # Give it a moment to attach to layer-shell
+    sleep 0.2
+    if kill -0 "$pid" 2>/dev/null; then
+        log_action "OSK started (PID $pid)"
+    else
+        log_action "OSK failed to start"
+        rm -f "$PIDFILE"
+        return 1
+    fi
+}
+
+cmd_stop() {
+    if ! is_running; then
+        log_action "OSK not running"
+        rm -f "$PIDFILE"
+        return 0
+    fi
+    local pid
+    pid="$(cat "$PIDFILE")"
+    log_action "stopping OSK (PID $pid)"
+    kill "$pid" 2>/dev/null || true
+    # Also kill any stray wvkbd processes owned by this user (both binary names)
+    pkill -u "$(id -un)" -x wvkbd-mobintl 2>/dev/null || true
+    pkill -u "$(id -un)" -x wvkbd 2>/dev/null || true
+    rm -f "$PIDFILE"
+}
+
+cmd_restart() { cmd_stop; cmd_start; }
+
+cmd_toggle() {
+    if is_running; then
+        # wvkbd-mobintl: SIGUSR2 toggles visibility (show/hide).
+        # If USR2 fails for some reason, USR1 is the fallback on some builds.
+        if kill -USR2 "$(cat "$PIDFILE")" 2>/dev/null; then
+            log_action "OSK toggled (SIGUSR2)"
+            return 0
+        fi
+    fi
+    # Not running — start it (visible via --hidden + immediate USR2)
+    cmd_start
+    if is_running; then
+        kill -USR2 "$(cat "$PIDFILE")" 2>/dev/null || true
+    fi
+}
+
+cmd_status() {
+    local running="false" pid="" bin=""
+    if is_running; then running="true"; pid="$(cat "$PIDFILE")"; fi
+    bin="$(osk_binary 2>/dev/null || echo '')"
+    if [[ "$JSON_OUT" == "true" ]] && have_jq; then
+        jq -n \
+            --arg running "$running" \
+            --arg pid "$pid" \
+            --arg wvkbd "$bin" \
+            --arg touch "$(has_touch_input && echo true || echo false)" \
+            --arg enabled "$(config_get ENABLED || echo auto)" \
+            '{running:($running=="true"), pid:$pid, wvkbd:$wvkbd,
+              touch_detected:($touch=="true"), enabled:$enabled}'
+    else
+        echo "OSK running: $running"
+        [[ -n "$pid" ]] && echo "PID: $pid"
+        [[ -n "$bin" ]] && echo "wvkbd: $(command -v "$bin" 2>/dev/null || echo "$bin")" || echo "wvkbd: NOT INSTALLED"
+        echo "touch detected: $(has_touch_input && echo yes || echo no)"
+        echo "config ENABLED: $(config_get ENABLED || echo auto)"
+    fi
+}
+
+# auto: used during GUI session startup. Respects config + touch detection.
+cmd_auto() {
+    local enabled
+    enabled="$(config_get ENABLED)"
+    enabled="${enabled:-auto}"   # default
+
+    case "$enabled" in
+        yes)
+            log_action "auto-start: ENABLED=yes → starting OSK"
+            cmd_start
+            ;;
+        no)
+            log_action "auto-start: ENABLED=no → skipping OSK"
+            if [[ "$JSON_OUT" == "true" ]] && have_jq; then
+                jq -n '{started:false, reason:"disabled"}'
+            else
+                echo "codex-osk: disabled by config"
+            fi
+            ;;
+        auto|*)
+            if has_touch_input; then
+                log_action "auto-start: touch device detected → starting OSK"
+                cmd_start
+                if [[ "$JSON_OUT" == "true" ]] && have_jq; then
+                    jq -n '{started:true, reason:"touch_detected"}'
+                fi
+            else
+                log_action "auto-start: no touch device → skipping OSK"
+                if [[ "$JSON_OUT" == "true" ]] && have_jq; then
+                    jq -n '{started:false, reason:"no_touch"}'
+                else
+                    echo "codex-osk: no touch device detected"
+                fi
+            fi
+            ;;
+    esac
+}
+
+case "$ACTION" in
+    start)   cmd_start ;;
+    stop)    cmd_stop ;;
+    restart) cmd_restart ;;
+    toggle)  cmd_toggle ;;
+    status)  cmd_status ;;
+    auto)    cmd_auto ;;
+    *)       die "Unknown command: $ACTION" ;;
+esac
+
+colinux_result "codex-osk: $ACTION complete"

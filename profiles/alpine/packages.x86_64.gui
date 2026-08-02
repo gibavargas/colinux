@@ -107,6 +107,9 @@ font-dejavu
 wlr-randr
 wl-clipboard
 
+# On-screen keyboard for tablets/touch devices (codex-osk)
+wvkbd
+
 # Screenshots (optional)
 grim
 slurp

@@ -123,10 +123,19 @@ Core commands (whitelisted in `doas.conf`):
 | `codex-benchmark` | Quick benchmarks (CPU, disk, network) |
 | `codex-pxe` | Network boot server (PXE) |
 
+GUI edition commands (not present on the TTY lite edition):
+
+| Command | Purpose |
+|---------|---------|
+| `codex-shell-gui` | Wayland kiosk session launcher (cage + foot + codex) |
+| `codex-clipboard` | Wayland clipboard helper (wl-clipboard wrapper) |
+| `codex-display` | Resolution auto-detection + display mode management |
+| `codex-osk` | On-screen keyboard manager (wvkbd) for tablets/touch |
+
 Use `codex-<command> --help` for usage. All commands support `--json` or
 structured output where applicable.
 
 ---
 
-*Last updated: 2026-04-30T22:40:00+00:00*
+*Last updated: 2026-08-02T00:00:00+00:00*
 *CoLinux Lite — Alpine Linux + OpenAI Codex CLI*

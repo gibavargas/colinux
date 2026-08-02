@@ -1,0 +1,329 @@
+#!/bin/bash
+# codex-display — Wayland display / resolution management for CoLinux Lite GUI
+#
+# Responsibilities:
+#   1. Auto-detect the preferred/native resolution of every connected output
+#      (EDID probe via DRM, then wlr-randr once the compositor is up).
+#   2. Apply a user override from /persist/config/display.conf if present.
+#   3. Persist the detected mode so cage/sway start at native resolution
+#      without manual `wlr-randr` calls on every boot.
+#   4. Expose a tiny CLI: list, apply, auto, status, set OUTPUT MODE.
+#
+# Design notes:
+#   - cage launches a single client (foot) fullscreen, so the output mode is
+#     fixed at compositor start. This script is therefore called in two places:
+#       A) Pre-cage:  codex-display auto  (writes /persist/state/display.state)
+#       B) Post-cage: codex-display apply (applies state via wlr-randr / swaymsg)
+#   - All detection degrades gracefully. A headless / DRM-less box is a no-op.
+#   - BusyBox-safe: no `grep -P`, no brace expansion, no bashisms beyond what
+#     /bin/bash provides (we run under bash, not sh).
+#
+# Usage:
+#   codex-display auto                 Detect + persist best mode (pre-compositor)
+#   codex-display apply                Apply persisted state to live compositor
+#   codex-display list                 List connected outputs + modes
+#   codex-display status               Show current persisted state
+#   codex-display set OUTPUT MODE      Override (e.g. set eDP-1 1920x1080@60)
+#   codex-display --json               Emit JSON (where applicable)
+#   codex-display --help|-h            This help
+set -euo pipefail
+
+COLINUX_COMMAND="codex-display"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+
+# ── Shared output helpers (optional; present on installed image) ────────────
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+fi
+
+PERSIST_DIR="/persist"
+STATE_DIR="${PERSIST_DIR}/state"
+STATE_FILE="${STATE_DIR}/display.state"
+CONFIG_FILE="${PERSIST_DIR}/config/display.conf"
+LOG_DIR="${PERSIST_DIR}/logs"
+LOGFILE="${LOG_DIR}/gui-session.log"
+
+mkdir -p "$STATE_DIR" "$LOG_DIR" 2>/dev/null || true
+
+log_action() {
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')"
+    echo "[$ts] [INFO] [display] $*" >> "$LOGFILE" 2>/dev/null || true
+}
+
+die() { colinux_die "$@"; }
+
+usage() {
+    cat <<'EOF'
+Usage: codex-display COMMAND [OPTIONS]
+
+Wayland display / resolution management for CoLinux Lite GUI.
+
+Commands:
+  auto              Detect best mode for each connected output and persist it.
+                    Called before cage starts (DRM/EDID probe, no compositor).
+  apply             Apply persisted state to the running compositor
+                    (wlr-randr for cage, swaymsg for sway).
+  list              List connected outputs and their preferred modes.
+  status            Show the persisted display state.
+  set OUTPUT MODE   Persist an override, e.g. `set eDP-1 1920x1080@60`.
+
+Options:
+  --json   Emit JSON output (for list/status/auto).
+  --help   Show this help.
+
+Configuration:
+  /persist/config/display.conf   Optional KEY=VALUE overrides:
+                                   OUTPUT_<NAME>=WIDTHxHEIGHT@REFRESH
+                                   SCALE=<1|1.5|2>
+                                   TRANSFORM=<normal|90|180|270|flipped>
+
+State:
+  /persist/state/display.state   Persisted mode per output (source of truth).
+EOF
+    exit 0
+}
+
+# ── Argument parsing ───────────────────────────────────────────────────────
+ACTION=""
+JSON_OUT="${COLINUX_JSON:-false}"
+SET_OUTPUT=""
+SET_MODE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        auto|apply|list|status) ACTION="$1"; shift ;;
+        set)                    ACTION="set"; SET_OUTPUT="${2:-}"; SET_MODE="${3:-}"; shift 3 ;;
+        --json)                 JSON_OUT="true"; shift ;;
+        --help|-h)              usage ;;
+        *) die "Unknown argument: $1 (see --help)" ;;
+    esac
+done
+
+[[ -z "$ACTION" ]] && ACTION="auto"
+colinux_init_output
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+# Emit a JSON-safe string. We avoid jq dependency at the probe layer; callers
+# that set COLINUX_JSON=true get minimal hand-built JSON via jq -n when jq is
+# present, otherwise plain text.
+have_jq() { command -v jq >/dev/null 2>&1; }
+
+# Read display.conf overrides (KEY=VALUE, safe export-only parse).
+# Returns "VALUE" for a given KEY, or empty string.
+config_get() {
+    local key="$1"
+    [[ -f "$CONFIG_FILE" ]] || return 0
+    # Only match KEY= at line start; strip surrounding quotes; reject cmd sub.
+    awk -v k="$key" '
+        BEGIN { FS="=" }
+        /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=/ {
+            n=$1; gsub(/[[:space:]]/, "", n);
+            if (n==k) {
+                v=substr($0, index($0,"=")+1);
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", v);
+                gsub(/^["'\'']|["'\'']$/, "", v);
+                print v; exit
+            }
+        }
+    ' "$CONFIG_FILE" 2>/dev/null
+}
+
+# Parse the connected output names from /sys/class/drm (works pre-compositor).
+# Prints one name per line in wlr-randr's expected form (e.g. "eDP-1", "HDMI-A-1").
+# We map /sys/class/drm/card*-<connector>/status == "connected".
+drm_connected_outputs() {
+    local conn_dir base name status
+    for conn_dir in /sys/class/drm/card*-*; do
+        [[ -e "$conn_dir/status" ]] || continue
+        # Extract connector name after "cardN-"
+        base="${conn_dir##*/}"        # e.g. card0-eDP-1
+        name="${base#card*-}"         # e.g. eDP-1
+        [[ "$name" == *"*" ]] && continue
+        # Skip write-only / virtual connectors
+        status="$(cat "$conn_dir/status" 2>/dev/null || echo unknown)"
+        if [[ "$status" == "connected" ]]; then
+            printf '%s\n' "$name"
+        fi
+    done 2>/dev/null | sort -u
+}
+
+# Best-effort EDID preferred-mode probe from /sys (no compositor required).
+# Reads /sys/class/drm/cardN-<conn>/modes (first entry is usually preferred).
+# Prints "WIDTHxHEIGHT" or empty.
+drm_preferred_mode() {
+    local conn="$1" conn_dir modes
+    for conn_dir in /sys/class/drm/card*-"$conn"; do
+        [[ -e "$conn_dir/modes" ]] || continue
+        modes="$(tr ' ' '\n' < "$conn_dir/modes" 2>/dev/null | grep -E '^[0-9]+x[0-9]+$' | head -1)"
+        [[ -n "$modes" ]] && { printf '%s\n' "$modes"; return 0; }
+    done
+    return 0
+}
+
+# Probe connected outputs + their best mode, combining /sys, wlr-randr, and
+# config overrides. Output format: "OUTPUT MODE[@REFRESH]" one per line.
+probe_outputs() {
+    local out mode override refresh
+    while IFS= read -r out; do
+        [[ -z "$out" ]] && continue
+        # Highest priority: config override
+        override="$(config_get "OUTPUT_${out}")"
+        if [[ -n "$override" ]]; then
+            printf '%s %s\n' "$out" "$override"
+            continue
+        fi
+        # Next: live compositor probe (only works once cage/sway is up)
+        mode=""
+        if [[ -n "${WAYLAND_DISPLAY:-}${SWAYSOCK:-}" ]] && command -v wlr-randr >/dev/null 2>&1; then
+            mode="$(wlr-randr --json 2>/dev/null \
+                | jq -r --arg o "$out" \
+                    '.[] | select(.name==$o and .enabled) |
+                     (.modes[] | select(.current) | "\(.width)x\(.height)@\(.refresh)") // empty' \
+                2>/dev/null | head -1 || true)"
+        fi
+        # Fallback: DRM sysfs preferred mode (pre-compositor)
+        if [[ -z "$mode" ]]; then
+            mode="$(drm_preferred_mode "$out")"
+        fi
+        [[ -n "$mode" ]] && printf '%s %s\n' "$out" "$mode"
+    done < <(drm_connected_outputs)
+}
+
+# ── Commands ───────────────────────────────────────────────────────────────
+
+# auto: probe + persist. Safe to run pre-compositor (uses /sys).
+cmd_auto() {
+    log_action "auto-detecting display modes"
+    : > "$STATE_FILE.tmp"
+    local found=0 line
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        printf '%s\n' "$line" >> "$STATE_FILE.tmp"
+        found=$((found + 1))
+        log_action "detected: $line"
+    done < <(probe_outputs)
+
+    if [[ "$found" -eq 0 ]]; then
+        log_action "no connected outputs detected (headless?)"
+        rm -f "$STATE_FILE.tmp"
+        if [[ "$JSON_OUT" == "true" ]] && have_jq; then
+            jq -n '{status:"no_outputs", outputs:[]}'
+        else
+            echo "codex-display: no connected outputs detected"
+        fi
+        return 0
+    fi
+
+    mv "$STATE_FILE.tmp" "$STATE_FILE"
+    chmod 600 "$STATE_FILE" 2>/dev/null || true
+
+    if [[ "$JSON_OUT" == "true" ]] && have_jq; then
+        jq -R 'split(" ") | {output:.[0], mode:.[1]}' "$STATE_FILE" \
+            | jq -s '{status:"ok", outputs:.}'
+    else
+        echo "codex-display: persisted $found output(s) to $STATE_FILE"
+        cat "$STATE_FILE"
+    fi
+}
+
+# apply: push persisted state to the running compositor.
+cmd_apply() {
+    [[ -f "$STATE_FILE" ]] || { log_action "no state file; nothing to apply"; return 0; }
+    local out mode refresh rest
+    while IFS=' ' read -r out rest; do
+        [[ -z "$out" ]] && continue
+        mode="$rest"
+        refresh=""
+        # Split "WxH@R" → mode=WxH, refresh=R
+        if [[ "$mode" == *@* ]]; then
+            refresh="${mode##*@}"
+            mode="${mode%@*}"
+        fi
+        local scale transform
+        scale="$(config_get SCALE)"
+        transform="$(config_get TRANSFORM)"
+        log_action "applying $out → $mode${refresh:+@$refresh}"
+        if [[ -n "${SWAYSOCK:-}" ]] && command -v swaymsg >/dev/null 2>&1; then
+            # sway
+            swaymsg output "$out" mode "${mode}${refresh:+ $refresh}" 2>/dev/null || true
+            if [[ -n "$scale" ]]; then swaymsg output "$out" scale "$scale" 2>/dev/null || true; fi
+            if [[ -n "$transform" ]]; then swaymsg output "$out" transform "$transform" 2>/dev/null || true; fi
+        elif [[ -n "${WAYLAND_DISPLAY:-}" ]] && command -v wlr-randr >/dev/null 2>&1; then
+            # cage / wlroots
+            local args=(wlr-randr --output "$out" --mode "$mode")
+            [[ -n "$refresh" ]] && args+=(--rate "$refresh")
+            [[ -n "$scale" ]] && args+=(--scale "$scale")
+            [[ -n "$transform" ]] && args+=(--transform "$transform")
+            "${args[@]}" 2>/dev/null || true
+        else
+            log_action "no live compositor detected; state will apply on next start"
+            return 0
+        fi
+    done < "$STATE_FILE"
+}
+
+# list: enumerate connected outputs and detected/preferred modes.
+cmd_list() {
+    if [[ "$JSON_OUT" == "true" ]] && have_jq; then
+        probe_outputs | jq -R 'split(" ") | {output:.[0], mode:.[1]}' | jq -s '{outputs:.}'
+    else
+        local line
+        echo "Connected outputs:"
+        if [[ -n "${WAYLAND_DISPLAY:-}${SWAYSOCK:-}" ]] && command -v wlr-randr >/dev/null 2>&1; then
+            wlr-randr 2>/dev/null || probe_outputs
+        else
+            probe_outputs
+        fi
+    fi
+}
+
+# status: show persisted state file contents.
+cmd_status() {
+    if [[ ! -f "$STATE_FILE" ]]; then
+        if [[ "$JSON_OUT" == "true" ]] && have_jq; then
+            jq -n '{status:"no_state", file:"'"$STATE_FILE"'"}'
+        else
+            echo "No persisted display state ($STATE_FILE)."
+            echo "Run: codex-display auto"
+        fi
+        return 0
+    fi
+    if [[ "$JSON_OUT" == "true" ]] && have_jq; then
+        jq -R 'split(" ") | {output:.[0], mode:.[1]}' "$STATE_FILE" \
+            | jq -s '{status:"ok", file:"'"$STATE_FILE"'", outputs:.}'
+    else
+        echo "Persisted display state ($STATE_FILE):"
+        cat "$STATE_FILE"
+    fi
+}
+
+# set: write a manual override for one output.
+cmd_set() {
+    [[ -z "$SET_OUTPUT" || -z "$SET_MODE" ]] && die "Usage: codex-display set OUTPUT MODE (e.g. set eDP-1 1920x1080@60)"
+    mkdir -p "$(dirname "$STATE_FILE")"
+    # Replace any existing line for this output, else append.
+    if [[ -f "$STATE_FILE" ]] && grep -q "^${SET_OUTPUT} " "$STATE_FILE"; then
+        sed -i "s|^${SET_OUTPUT} .*|${SET_OUTPUT} ${SET_MODE}|" "$STATE_FILE"
+    else
+        printf '%s %s\n' "$SET_OUTPUT" "$SET_MODE" >> "$STATE_FILE"
+    fi
+    chmod 600 "$STATE_FILE" 2>/dev/null || true
+    log_action "override: $SET_OUTPUT → $SET_MODE"
+    echo "Set $SET_OUTPUT → $SET_MODE"
+    echo "Run: codex-display apply"
+}
+
+case "$ACTION" in
+    auto)   cmd_auto ;;
+    apply)  cmd_apply ;;
+    list)   cmd_list ;;
+    status) cmd_status ;;
+    set)    cmd_set ;;
+    *)      die "Unknown command: $ACTION" ;;
+esac
+
+colinux_result "codex-display: $ACTION complete"

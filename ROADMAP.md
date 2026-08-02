@@ -103,8 +103,8 @@ GUI and Debian editions are experimental. Bring them to stable.
 ### Deliverables
 - [ ] **`colinux-lite-gui` stable** — cage + sway + foot:
   - Tested on 3+ real hardware configs
-  - Resolution auto-detection
-  - On-screen keyboard for tablets
+  - [x] Resolution auto-detection
+  - [x] On-screen keyboard for tablets
 - [ ] **`colinux-compat` stable** — Debian-based fallback:
   - Parity with Alpine edition on all `codex-*` commands
   - Systemd service hardening

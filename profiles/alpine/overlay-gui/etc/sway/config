@@ -27,6 +27,12 @@ bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit CoLinux GUI?' -b 'Yes' 'sw
 bindsym $mod+Shift+Escape exec killall foot || killall sway
 bindsym Print exec "mkdir -p /persist/logs && grim /persist/logs/screenshot-$(date +%Y%m%d-%H%M%S).png"
 
+# On-screen keyboard toggle (tablets/touch devices)
+bindsym $mod+Space exec "codex-osk toggle 2>/dev/null || true"
+
+# Apply persisted display resolution on compositor start (codex-display auto)
+exec --no-startup-id codex-display apply 2>/dev/null || true
+
 # =============================================================================
 # Appearance — no borders, no gaps, no title bar
 # =============================================================================

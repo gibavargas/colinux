@@ -215,6 +215,22 @@ launch_gui() {
     if [[ "$INSIDE_WAYLAND" == "true" ]]; then
         log_info "Already in Wayland — launching ${GUI_TERMINAL} + codex directly"
 
+        # ── Step 2a (NEW): Apply persisted display state to the live compositor ──
+        # codex-display auto ran pre-compositor (outer shell) and wrote
+        # /persist/state/display.state. Now apply it via wlr-randr / swaymsg.
+        if command -v codex-display >/dev/null 2>&1; then
+            log_info "Applying display state to compositor..."
+            codex-display apply >>"$GUI_LOG" 2>&1 || log_warn "Display apply had issues"
+        fi
+
+        # ── Step 2b (NEW): On-screen keyboard auto-start (touch devices) ──
+        # codex-osk auto respects /persist/config/osk.conf (ENABLED=yes|auto|no)
+        # and only starts wvkbd if a touch input device is detected.
+        if command -v codex-osk >/dev/null 2>&1; then
+            log_info "Evaluating on-screen keyboard auto-start..."
+            codex-osk auto >>"$GUI_LOG" 2>&1 || log_warn "OSK auto had issues"
+        fi
+
         # Source AGENTS.md context
         if [[ -f "$CONTEXT_FILE" ]]; then
             echo ""
@@ -255,6 +271,16 @@ launch_gui() {
         echo "ERROR: Recursive GUI launch detected — aborting" >&2
         fallback_tty
         return 1
+    fi
+
+    # ── Step 3a (NEW): Resolution auto-detection (pre-compositor) ─────────
+    # Probe DRM EDID/sysfs for connected outputs and persist their preferred
+    # mode, so cage/sway start at native resolution without manual wlr-randr.
+    if command -v codex-display >/dev/null 2>&1; then
+        log_info "Running display auto-detection..."
+        codex-display auto >>"$GUI_LOG" 2>&1 || log_warn "Display auto-detection had issues"
+    else
+        log_warn "codex-display not found — skipping resolution auto-detection"
     fi
 
     # Set environment for cage child process

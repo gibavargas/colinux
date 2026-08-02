@@ -85,6 +85,7 @@ RUN apk add --no-cache \
     wlr-randr \
     grim \
     slurp \
+    wvkbd \
     libinput-libs \
     libinput-tools \
     wl-clipboard
@@ -174,6 +175,14 @@ RUN chmod +x /usr/local/bin/codex-shell-gui
 COPY profiles/alpine/overlay-gui/usr/local/bin/codex-clipboard /usr/local/bin/codex-clipboard
 RUN chmod +x /usr/local/bin/codex-clipboard
 
+# codex-display (resolution auto-detection)
+COPY profiles/alpine/overlay-gui/usr/local/bin/codex-display /usr/local/bin/codex-display
+RUN chmod +x /usr/local/bin/codex-display
+
+# codex-osk (on-screen keyboard manager for tablets/touch)
+COPY profiles/alpine/overlay-gui/usr/local/bin/codex-osk /usr/local/bin/codex-osk
+RUN chmod +x /usr/local/bin/codex-osk
+
 # sway config
 COPY profiles/alpine/overlay-gui/etc/sway/config /etc/sway/config
 
@@ -250,6 +259,8 @@ RUN mkdir -p /persist/config/postinstall && \
 RUN echo "=== Validating script syntax ===" && \
     bash -n /usr/local/bin/codex-shell-gui && echo "  ✓ codex-shell-gui" && \
     bash -n /usr/local/bin/codex-clipboard && echo "  ✓ codex-clipboard" && \
+    bash -n /usr/local/bin/codex-display && echo "  ✓ codex-display" && \
+    bash -n /usr/local/bin/codex-osk && echo "  ✓ codex-osk" && \
     bash -n /usr/local/sbin/codex-network-stack && echo "  ✓ codex-network-stack" && \
     bash -n /usr/local/sbin/codex-wifi-wizard.sh && echo "  ✓ codex-wifi-wizard" && \
     bash -n /usr/local/sbin/install-camoufox.sh && echo "  ✓ install-camoufox.sh" && \
@@ -269,6 +280,8 @@ RUN echo "=== Validating script syntax ===" && \
     command -v seatd >/dev/null && echo "  ✓ seatd $(seatd --version 2>/dev/null || echo 'installed')" && \
     command -v grim >/dev/null && echo "  ✓ grim" && \
     command -v slurp >/dev/null && echo "  ✓ slurp" && \
+    (command -v wvkbd-mobintl >/dev/null || command -v wvkbd >/dev/null) && echo "  ✓ wvkbd" && \
+    command -v wlr-randr >/dev/null && echo "  ✓ wlr-randr" && \
     echo "" && \
     echo "=== All validations passed ===" || \
     (echo "ERROR: Script/config validation failed!" && exit 1)
