@@ -69,13 +69,9 @@ profile_colinux-desktop() {
 
     # ── Boot loader configuration ─────────────────────────────────────────────
     # GRUB modules for EFI boot (used by section_grub_efi in mkimg.base.sh)
-    # biosdisk is i386-pc only — do NOT include for x86_64-efi grub-mkimage
+    # biosdisk is i386-pc only — do NOT include it for x86_64-efi or aarch64
     # (audit finding: including biosdisk causes grub-mkimage to fail on EFI).
-    if [ "$ARCH" = "x86_64" ]; then
-        grub_mod="biosdisk part_gpt fat normal configfile linux chain boot"
-    else
-        grub_mod="part_gpt fat normal configfile linux chain boot"
-    fi
+    grub_mod="part_gpt fat normal configfile linux chain boot memdisk tar"
 
     # ── Packages ──────────────────────────────────────────────────────────────
     # Packages come from packages.$ARCH.desktop (handled by mkimage framework

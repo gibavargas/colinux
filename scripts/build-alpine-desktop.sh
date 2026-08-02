@@ -268,7 +268,8 @@ install_profile() {
     # Copy overlay directory
     if [ -d "$PROFILE_DIR/overlay-desktop" ]; then
         local overlay_dest="$APORTS_DIR/scripts/colinux-desktop/overlay-desktop"
-        rm -rf "$overlay_dest"
+        mkdir -p "$overlay_dest"
+        rm -rf "${overlay_dest:?}"
         cp -a "$PROFILE_DIR/overlay-desktop" "$overlay_dest"
 
         # Fix security-critical file permissions (cp -a preserves umask-inflated modes)
