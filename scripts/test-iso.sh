@@ -12,7 +12,10 @@
 # Usage:
 #   ./test-iso.sh --iso <path-to-iso> [--arch x86_64] [--timeout 120]
 #
-# Prerequisites: qemu-system-x86_64 (or aarch64), expect (optional)
+# Prerequisites: qemu-system-x86_64 (or aarch64), expect (optional).
+# aarch64 additionally requires ARM64 UEFI firmware (AAVMF / edk2) —
+# install qemu-efi-aarch64 on Debian/Ubuntu — because the aarch64 ISO is
+# EFI-only (no isolinux/isohybrid).
 # =============================================================================
 set -euo pipefail
 
@@ -88,6 +91,26 @@ check_qemu() {
     echo "$qemu_bin"
 }
 
+# Locate ARM64 UEFI firmware (AAVMF / edk2). The aarch64 ISO is EFI-only, so
+# qemu-system-aarch64 cannot boot it without a UEFI firmware image passed via
+# -bios. Returns the firmware path, or exits non-zero when unavailable.
+find_efi_firmware() {
+    local candidates=(
+        /usr/share/AAVMF/AAVMF_CODE.fd
+        /usr/share/AAVMF/AAVMF_CODE_4M.fd
+        /usr/share/edk2/aarch64/QEMU_EFI-pflash.raw
+        /usr/share/qemu-efi-aarch64/QEMU_EFI.fd
+    )
+    local fw
+    for fw in "${candidates[@]}"; do
+        if [ -f "$fw" ]; then
+            echo "$fw"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Detect hardware virtualisation so CI (and local KVM hosts) get a fast boot
 # instead of TCG software emulation. Returns "-enable-kvm" when /dev/kvm is
 # usable, otherwise an empty string. The caller appends it to the QEMU command.
@@ -113,6 +136,19 @@ run_tests_expect() {
     local expect_script
     local accel
     accel="$(detect_kvm_accel)"
+
+    # aarch64 needs UEFI firmware to boot the EFI-only ISO
+    local efi_fw=""
+    if [ "$ARCH" = "aarch64" ]; then
+        if efi_fw="$(find_efi_firmware)"; then
+            log_info "ARM64 UEFI firmware: $efi_fw"
+        else
+            log_fail "aarch64 boot requires ARM64 UEFI firmware (AAVMF)."
+            echo "Install with: apt install qemu-efi-aarch64" >&2
+            return 1
+        fi
+    fi
+
     expect_script="$(mktemp --suffix=.exp)"
 
     cat > "$expect_script" <<'EXPECT_SCRIPT'
@@ -124,6 +160,7 @@ set iso_path [lindex $argv 3]
 set arch     [lindex $argv 4]
 set memory   [lindex $argv 5]
 set accel    [lindex $argv 6]
+set efi_fw   [lindex $argv 7]
 
 log_file -noappend $log_file
 
@@ -131,6 +168,9 @@ log_file -noappend $log_file
 set qemu_cmd [list $qemu_bin]
 if {$arch eq "aarch64"} {
     lappend qemu_cmd -machine virt -cpu cortex-a57
+    if {$efi_fw ne ""} {
+        lappend qemu_cmd -bios $efi_fw
+    }
 } else {
     lappend qemu_cmd -machine q35 -cpu qemu64
 }
@@ -236,7 +276,7 @@ EXPECT_SCRIPT
     # (1), unexpected QEMU exit (2), shell timeout (3), or a hard test failure
     # (codex missing). That MUST surface as a test failure — otherwise a boot
     # that never reaches login falsely reports "ALL TESTS PASSED".
-    if expect "$expect_script" "$TIMEOUT" "$SERIAL_LOG" "$qemu_bin" "$ISO_PATH" "$ARCH" "$MEMORY" "$accel" 2>&1 | tee "$TEST_LOG"; then
+    if expect "$expect_script" "$TIMEOUT" "$SERIAL_LOG" "$qemu_bin" "$ISO_PATH" "$ARCH" "$MEMORY" "$accel" "$efi_fw" 2>&1 | tee "$TEST_LOG"; then
         log_pass "expect smoke suite passed (boot reached login, codex present)"
     else
         log_fail "Smoke test failed (expect exited non-zero) — boot may not have completed; see $SERIAL_LOG"
@@ -255,6 +295,19 @@ run_tests_serial() {
     if [ -n "$accel" ]; then
         log_info "KVM acceleration: enabled ($accel)"
     fi
+
+    # aarch64 needs UEFI firmware to boot the EFI-only ISO
+    local efi_fw=""
+    if [ "$ARCH" = "aarch64" ]; then
+        if efi_fw="$(find_efi_firmware)"; then
+            log_info "ARM64 UEFI firmware: $efi_fw"
+        else
+            log_fail "aarch64 boot requires ARM64 UEFI firmware (AAVMF)."
+            echo "Install with: apt install qemu-efi-aarch64" >&2
+            return 1
+        fi
+    fi
+
     local serial_fifo
     serial_fifo="$(mktemp -u)"
 
@@ -278,6 +331,7 @@ run_tests_serial() {
     local -a qemu_args=("$qemu_bin" -m "$MEMORY" -nographic -cdrom "$ISO_PATH")
     if [ "$ARCH" = "aarch64" ]; then
         qemu_args+=(-machine virt -cpu cortex-a57)
+        [ -n "$efi_fw" ] && qemu_args+=(-bios "$efi_fw")
     else
         qemu_args+=(-machine q35 -cpu qemu64)
     fi

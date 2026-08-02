@@ -234,6 +234,8 @@ docker run --rm -v "$(pwd):/src" -e ARCH=aarch64 -e OUTDIR=/src/dist \
 ```
 
 Note: aarch64 ISO does not include syslinux/isohybrid (x86-only). Boot via EFI.
+For Raspberry Pi 4/5 specifics (UEFI firmware requirement, flashing, and the
+hardware validation checklist) see `docs/RPI.md`.
 
 ---
 

@@ -744,7 +744,7 @@ docker run -it \
 ARCH=x86_64 ALPINE_RELEASE=3.21 OUTDIR=./dist \
   bash scripts/build-alpine.sh
 
-# Build for aarch64
+# Build for aarch64 (Raspberry Pi 4/5 — see docs/RPI.md)
 ARCH=aarch64 ALPINE_RELEASE=3.21 OUTDIR=./dist \
   bash scripts/build-alpine.sh
 
