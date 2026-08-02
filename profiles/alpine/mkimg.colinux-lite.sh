@@ -27,15 +27,16 @@ profile_colinux-lite() {
     arch="x86_64 aarch64"
 
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
-    kernel_cmdline="quiet modules=loop,squashfs,sd-mod,usb-storage overlaytmpfs init=/sbin/init"
-
-    # ── Architecture-specific settings ────────────────────────────────────────
+    # RPi 4/5 boot from SD (sd-mod) or USB (usb-storage); the RPi 5 NVMe
+    # HATs additionally need the nvme module loaded in the initramfs.
     case "$ARCH" in
         x86_64)
+            kernel_cmdline="quiet modules=loop,squashfs,sd-mod,usb-storage overlaytmpfs init=/sbin/init"
             kernel_flavor="lts"
             kernel_addons=""
             ;;
         aarch64)
+            kernel_cmdline="quiet modules=loop,squashfs,sd-mod,usb-storage,nvme overlaytmpfs init=/sbin/init"
             kernel_flavor="lts"
             kernel_addons=""
             ;;
@@ -45,6 +46,15 @@ profile_colinux-lite() {
     # GRUB modules for EFI boot (used by section_grub_efi in mkimg.base.sh)
     # Note: biosdisk is i386-pc only — do NOT include for EFI grub-mkimage
     grub_mod="part_gpt fat normal configfile linux chain boot"
+
+    # ── Modloop ───────────────────────────────────────────────────────────────
+    # modloop_sign=yes (profile_base default) makes update-kernel sign the
+    # module squashfs with PACKAGER_PRIVKEY, which CoLinux builds never
+    # provide. The openssl signing failure aborts update-kernel (sh -e)
+    # BEFORE it copies vmlinuz/initramfs/modloop into $DESTDIR/boot, so the
+    # ISO is produced without any kernel (issue #2). The modloop signature
+    # is not verified at boot for this appliance, so disable signing.
+    modloop_sign=no
 
     # ── Image layout ──────────────────────────────────────────────────────────
     # Partition 1: EFI System Partition (ESP) — FAT32, ~32 MB

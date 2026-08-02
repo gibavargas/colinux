@@ -364,10 +364,13 @@ verify_iso_bootable() {
         exit 1
     fi
 
-    # Inspect ISO contents for kernel + initramfs without full extraction
+    # Inspect ISO contents for kernel + initramfs without full extraction.
+    # NOTE: xorriso `-ls_l /boot/` returns an EMPTY listing for some ISO
+    # layouts (RockRidge), which made this check silently skip. `-find`
+    # reliably lists directory entries, so prefer it.
     local boot_files=""
     if command -v xorriso &>/dev/null; then
-        boot_files="$(xorriso -indev "$iso_file" -ls_l /boot/ 2>/dev/null || true)"
+        boot_files="$(xorriso -indev "$iso_file" -find /boot -maxdepth 1 2>/dev/null || true)"
     elif command -v isoinfo &>/dev/null; then
         boot_files="$(isoinfo -l -i "$iso_file" 2>/dev/null || true)"
     fi

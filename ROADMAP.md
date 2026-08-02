@@ -111,7 +111,10 @@ GUI and Debian editions are experimental. Bring them to stable.
 - [ ] **`colinux-desktop` MVP** — Electron + Codex:
   - Browser-based Codex interface
   - Desktop icon / app launcher
-- [ ] **ARM64 support** — `aarch64` builds for Raspberry Pi 4/5
+- [ ] **ARM64 support** — `aarch64` builds for Raspberry Pi 4/5:
+  - [x] aarch64 ISO + raw image builds in CI (cross-compiled, EFI-only)
+  - [x] QEMU aarch64 boot smoke test in CI
+  - [ ] Physical validation on RPi 5 8 GB (see `docs/RPI.md`)
 
 ### Exit criteria
 - GUI edition boots on real hardware with display

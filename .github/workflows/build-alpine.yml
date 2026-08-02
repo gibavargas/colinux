@@ -77,14 +77,16 @@ jobs:
 
   # ──────────────────────────────────────────────────────────────────────────
   # QEMU boot smoke test (ROADMAP v0.4 "GitHub Actions CI").
-  # Boots the x86_64 ISO built above in QEMU and verifies via the serial
-  # console that the system reaches a login prompt and the codex binary is
-  # present. Depends on the build job so it only runs once an ISO exists.
-  # KVM acceleration is auto-detected by test-iso.sh (ubuntu-latest exposes
-  # /dev/kvm); falls back to slower TCG software emulation otherwise.
+  # Boots the built ISO in QEMU and verifies via the serial console that the
+  # system reaches a login prompt and the codex binary is present. Depends on
+  # the build job so it only runs once an ISO exists. Matrix covers both
+  # arches: x86_64 boots with KVM when available; aarch64 boots via TCG
+  # software emulation (no KVM on x86 runners) and needs ARM64 UEFI firmware
+  # (qemu-efi-aarch64 → /usr/share/AAVMF/AAVMF_CODE.fd) because the aarch64
+  # ISO is EFI-only.
   # ──────────────────────────────────────────────────────────────────────────
   smoke-test:
-    name: QEMU smoke test (x86_64)
+    name: QEMU smoke test (${{ matrix.arch }})
     runs-on: ubuntu-latest
     needs: build-alpine
     # Non-blocking until the colinux-lite ISO includes a kernel (issue #2:
@@ -95,19 +97,23 @@ jobs:
     # catches the boot failure — so this job stays non-blocking and will
     # auto-pass once the kernel-inclusion bug is fixed. Remove this line then.
     continue-on-error: true
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
       actions: read   # required to download the ISO artifact from the build job
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download x86_64 ISO artifact
+      - name: Download ${{ matrix.arch }} ISO artifact
         uses: actions/download-artifact@v4
         with:
-          name: alpine-iso-x86_64
+          name: alpine-iso-${{ matrix.arch }}
           path: dist
 
       - name: Locate ISO
@@ -116,9 +122,9 @@ jobs:
           set -eu
           echo "Artifact contents:"
           ls -la dist
-          ISO="$(find dist -type f -name 'colinux-lite-x86_64-*.iso' | head -1)"
+          ISO="$(find dist -type f -name 'colinux-lite-${{ matrix.arch }}-*.iso' | head -1)"
           if [ -z "$ISO" ]; then
-            echo "::error::No x86_64 ISO found in artifact" >&2
+            echo "::error::No ${{ matrix.arch }} ISO found in artifact" >&2
             exit 1
           fi
           echo "ISO path: $ISO"
@@ -128,8 +134,14 @@ jobs:
       - name: Install QEMU + expect
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y qemu-system-x86 expect
-          qemu-system-x86_64 --version | head -1
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            # qemu-efi-aarch64 ships /usr/share/AAVMF/AAVMF_CODE.fd (UEFI
+            # firmware required to boot the EFI-only aarch64 ISO).
+            sudo apt-get install -y qemu-system-arm qemu-efi-aarch64 expect
+          else
+            sudo apt-get install -y qemu-system-x86 expect
+          fi
+          qemu-system-${{ matrix.arch }} --version | head -1
           expect -v
 
       - name: Report KVM availability
@@ -141,19 +153,20 @@ jobs:
           fi
 
       - name: Run QEMU smoke test (serial console)
-        # --memory 2048 speeds up boot; --timeout 420 gives TCG fallback headroom.
+        # --memory 2048 speeds up boot; aarch64 uses TCG emulation on x86
+        # runners, so give it a longer --timeout than the KVM-backed x86_64.
         run: |
           ./scripts/test-iso.sh \
             --iso "${{ steps.iso.outputs.path }}" \
-            --arch x86_64 \
+            --arch ${{ matrix.arch }} \
             --memory 2048 \
-            --timeout 420
+            --timeout ${{ matrix.arch == 'aarch64' && '600' || '420' }}
 
       - name: Upload serial + test logs (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-test-logs-x86_64
+          name: smoke-test-logs-${{ matrix.arch }}
           path: |
             dist/serial-output.log
             dist/test-results.log
