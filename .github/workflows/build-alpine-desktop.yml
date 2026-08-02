@@ -1,0 +1,89 @@
+name: Build Alpine Desktop ISO
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'profiles/alpine/mkimg.colinux-desktop.sh'
+      - 'profiles/alpine/packages.*.desktop'
+      - 'profiles/alpine/overlay-desktop/**'
+      - 'scripts/build-alpine-desktop.sh'
+      - 'scripts/setup-electron-codex.sh'
+      - 'shared/**'
+      - '.github/workflows/build-alpine-desktop.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'profiles/alpine/mkimg.colinux-desktop.sh'
+      - 'profiles/alpine/packages.*.desktop'
+      - 'profiles/alpine/overlay-desktop/**'
+      - 'scripts/build-alpine-desktop.sh'
+      - 'scripts/setup-electron-codex.sh'
+      - 'shared/**'
+      - '.github/workflows/build-alpine-desktop.yml'
+  workflow_dispatch:
+
+env:
+  ALPINE_RELEASE: '3.21'
+
+jobs:
+  build-desktop:
+    name: Desktop ISO (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build Alpine Desktop ISO (${{ matrix.arch }})
+        run: |
+          mkdir -p dist
+          ARCH=${{ matrix.arch }} \
+          ALPINE_RELEASE=${{ env.ALPINE_RELEASE }} \
+          OUTDIR="$GITHUB_WORKSPACE/dist" \
+          sudo docker run --rm \
+            --platform ${{ matrix.arch == 'aarch64' && 'linux/arm64' || 'linux/amd64' }} \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -e ARCH \
+            -e ALPINE_RELEASE \
+            -e OUTDIR \
+            alpine:3.21 \
+            sh -c '
+              apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl ca-certificates git \
+                xorriso squashfs-tools mtools dosfstools grub grub-efi efibootmgr e2fsprogs \
+                qemu-img openssl util-linux
+              if [ "$ARCH" = x86_64 ]; then apk add --no-cache syslinux; fi
+              git config --global --add safe.directory /src
+              cd /src && bash scripts/build-alpine-desktop.sh
+            '
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum colinux-desktop-* > SHA256SUMS-desktop-${{ matrix.arch }}.txt
+          cat SHA256SUMS-desktop-${{ matrix.arch }}.txt
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-desktop-iso-${{ matrix.arch }}
+          path: |
+            dist/colinux-desktop-*.iso
+            dist/colinux-desktop-*.raw.img
+            dist/SHA256SUMS-desktop-${{ matrix.arch }}.txt
+          retention-days: 30
+          if-no-files-found: warn

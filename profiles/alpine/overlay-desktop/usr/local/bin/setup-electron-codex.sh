@@ -223,10 +223,13 @@ CONFIG
 
     # Install Codex Desktop via npm if not built from source
     if [[ ! -d "$INSTALL_DIR/app/node_modules" ]]; then
-        log "Setting up Electron app via npm..."
-        cd "$INSTALL_DIR/app"
+        log "Creating fallback Electron app skeleton..."
+        log "Electron runtime comes from distro packages (apk add electron), NOT npm."
 
-        # Create a minimal Electron wrapper
+        # Create a minimal Electron wrapper.
+        # NOTE: We deliberately do NOT declare "electron" as an npm dependency.
+        # The distro-provided electron package is used instead. Adding it here
+        # would encourage `npm install` which bypasses package provenance.
         cat > "$INSTALL_DIR/app/package.json" <<'PKGJSON'
 {
     "name": "codex-desktop",
@@ -234,11 +237,7 @@ CONFIG
     "description": "Codex Desktop — Electron wrapper for OpenAI Codex CLI",
     "main": "main.js",
     "scripts": {
-        "start": "electron .",
-        "build": "electron-builder --linux"
-    },
-    "dependencies": {
-        "electron": "^28.0.0"
+        "start": "electron ."
     }
 }
 PKGJSON

@@ -264,9 +264,6 @@ create_fallback_wrapper() {
     "main": "main.js",
     "scripts": {
         "start": "electron ."
-    },
-    "dependencies": {
-        "electron": "^28.0.0"
     }
 }
 PKGJSON
