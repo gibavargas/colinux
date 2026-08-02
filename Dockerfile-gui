@@ -82,6 +82,7 @@ RUN apk add --no-cache \
     mesa-dri-gallium \
     mesa-gl \
     font-dejavu \
+    fontconfig \
     wlr-randr \
     grim \
     slurp \
@@ -188,6 +189,12 @@ COPY profiles/alpine/overlay-gui/etc/sway/config /etc/sway/config
 
 # cage config
 COPY profiles/alpine/overlay-gui/etc/cage/config /etc/cage/config
+
+# foot terminal config (system default — /etc/xdg is XDG_CONFIG_DIRS)
+COPY profiles/alpine/overlay-gui/etc/xdg/foot/foot.ini /etc/xdg/foot/foot.ini
+
+# fontconfig defaults (hinting / subpixel rendering on HiDPI panels)
+COPY profiles/alpine/overlay-gui/etc/fonts/local.conf /etc/fonts/local.conf
 
 # udev rules for seatd
 COPY profiles/alpine/overlay-gui/etc/udev/rules.d/99-seatd.rules /etc/udev/rules.d/99-seatd.rules

@@ -34,17 +34,24 @@ MODE="gui"
 COMPOSITOR="cage"
 GUI_TERMINAL="foot"
 GUI_FALLBACK_TTY="true"
+CAGE_MODE="mirror"
 
 if [[ -f "$CONF_FILE" ]]; then
     while IFS='=' read -r key val; do
         key="$(echo "$key" | tr -d '[:space:]')"
         val="$(echo "$val" | sed 's/^"//;s/"$//' | tr -d '[:space:]')"
         case "$key" in
-            MODE|COMPOSITOR|GUI_TERMINAL|GUI_FALLBACK_TTY|GUI_LOG)
+            MODE|COMPOSITOR|GUI_TERMINAL|GUI_FALLBACK_TTY|GUI_LOG|CAGE_MODE)
                 declare -g "$key=$val" ;;
         esac
     done < "$CONF_FILE"
 fi
+
+# Validate CAGE_MODE (mirror | last | extend); anything else → mirror.
+case "$CAGE_MODE" in
+    last|extend) ;;
+    *) CAGE_MODE="mirror" ;;
+esac
 
 # Colors
 if [[ -t 1 ]]; then
@@ -191,6 +198,43 @@ run_disk_inventory() {
 }
 
 # =============================================================================
+# Per-device foot config override
+# =============================================================================
+# /persist/config/foot.ini (if present) wins over the system default at
+# /etc/xdg/foot/foot.ini.  Copy it into the user config dir so foot picks it
+# up on every session without touching /etc.  This is the same pattern used
+# by display.conf / osk.conf for other GUI settings.
+apply_foot_override() {
+    local src="/persist/config/foot.ini"
+    local dst_dir="${HOME:-/home/codex}/.config/foot"
+    [[ -f "$src" ]] || return 0
+    mkdir -p "$dst_dir" 2>/dev/null || return 0
+    if ! cp "$src" "$dst_dir/foot.ini" 2>/dev/null; then
+        log_warn "Could not apply /persist/config/foot.ini override"
+        return 1
+    fi
+    chown "$(id -u):$(id -g)" "$dst_dir/foot.ini" 2>/dev/null || true
+    log_info "Applied /persist/config/foot.ini override"
+}
+
+# =============================================================================
+# cage multi-monitor support (cage -m was added in cage 0.2.0)
+# =============================================================================
+cage_supports_multimonitor() {
+    local ver maj min
+    ver="$(cage -v 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+    [[ -n "$ver" ]] || return 1
+    maj="${ver%%.*}"; min="${ver#*.}"
+    maj="${maj:-0}"; min="${min:-0}"
+    # 0.x → x >= 2 ; 1.x+ → supported
+    if [[ "$maj" -eq 0 ]]; then
+        [[ "$min" -ge 2 ]]
+    else
+        return 0
+    fi
+}
+
+# =============================================================================
 # Launch Codex CLI
 # =============================================================================
 launch_codex() {
@@ -298,7 +342,20 @@ launch_gui() {
             fi
             ;;
         cage|*)
-            exec env CODEX_GUI_INNER=1 CODEX_GUI_DEPTH=$((CODEX_GUI_DEPTH + 1)) cage -s -- "$GUI_TERMINAL" -- "$0"
+            # Multi-monitor: mirror (default), last, or extend via cage -m.
+            # cage < 0.2 does not support -m — fall back to mirror.
+            local cage_cmd=(env CODEX_GUI_INNER=1 CODEX_GUI_DEPTH=$((CODEX_GUI_DEPTH + 1)) cage -s)
+            case "$CAGE_MODE" in
+                last|extend)
+                    if cage_supports_multimonitor; then
+                        log_info "cage multi-monitor mode: $CAGE_MODE"
+                        cage_cmd+=(-m "$CAGE_MODE")
+                    else
+                        log_warn "Installed cage does not support -m (need >= 0.2) — using mirror"
+                    fi
+                    ;;
+            esac
+            exec "${cage_cmd[@]}" -- "$GUI_TERMINAL" -- "$0"
             ;;
     esac
 }
@@ -343,6 +400,10 @@ fallback_tty() {
 # =============================================================================
 main() {
     log_info "codex-shell-gui starting..."
+
+    # Apply per-device foot config override (/persist/config/foot.ini) before
+    # any compositor/terminal launches so HiDPI font settings are in place.
+    apply_foot_override
 
     # Step 1: Run disk inventory
     run_disk_inventory

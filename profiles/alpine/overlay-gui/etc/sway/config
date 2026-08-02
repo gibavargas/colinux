@@ -11,6 +11,13 @@ input * {
     xkb_options ""
 }
 
+# Tablets / touch devices: tap-to-click and natural scrolling on touchpads.
+# Touchscreens are handled natively by libinput (single-touch = tap, drag).
+input type:touchpad {
+    tap enabled
+    natural_scroll enabled
+}
+
 # =============================================================================
 # Output — use all connected displays
 # =============================================================================
@@ -55,13 +62,4 @@ for_window [app_id="foot"] {
     border none
     gaps outer 0
     gaps inner 0
-}
-
-# =============================================================================
-# Environment
-# =============================================================================
-set $SWAYSOCK /run/codex/sway-sock
-exec_always {
-    export XDG_RUNTIME_DIR="/run/user/1000"
-    export WAYLAND_DISPLAY="wayland-1"
 }

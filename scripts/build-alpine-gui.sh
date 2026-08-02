@@ -185,6 +185,11 @@ install_build_deps() {
                 git \
                 qemu-img \
                 openssl
+            # isohybrid-mbr for x86_64 ISO repack (BusyBox systems need the
+            # syslinux package; aarch64 is EFI-only and does not need it)
+            if [ "$ARCH" = "x86_64" ]; then
+                apk add --no-cache syslinux
+            fi
             ;;
         apt)
             apt-get update
@@ -300,7 +305,27 @@ run_mkimage() {
     fi
     chmod +x "$mkimage_script"
 
-    export COLINUX_IMG_SIZE
+    # Patch mkimg.base.sh: make build_kernel tolerant of depmod warnings
+    # Alpine 3.21's depmod/BusyBox install emits errors that are non-fatal
+    # (depmod: ERROR: fstatat vmlinuz; install: omitting directory) but
+    # cause build_section to fail via || return 1. Same fix as the lite
+    # edition (scripts/build-alpine.sh).
+    local mkimg_base="$APORTS_DIR/scripts/mkimg.base.sh"
+    if [ -f "$mkimg_base" ]; then
+        sed -i 's/^\t\t|| return 1$/\t\t|| true/' "$mkimg_base"
+    fi
+
+    # Set PACKAGER_PUBKEY so mkimage.sh can inject APK signing keys
+    # (without it, cp "" fails inside the aports build framework)
+    export PACKAGER_PUBKEY="${PACKAGER_PUBKEY:-$(find /usr/share/apk/keys -maxdepth 1 -type f -name '*.rsa.pub' 2>/dev/null | sort | head -1)}"
+
+    # The aports mkimage.sh calls git status to detect a -dirty suffix.
+    # Inside the Docker container, git discovers the mounted /src/.git
+    # (colinux repo) instead of the aports repo and fails.
+    # alpine-sdk depends on git so `apk del` fails; move the binary instead.
+    if command -v git >/dev/null 2>&1; then
+        mv "$(command -v git)" /tmp/git.disabled || true
+    fi
 
     "$mkimage_script" \
         --profile "colinux-lite-gui" \
@@ -309,7 +334,6 @@ run_mkimage() {
         --repository "${ALPINE_MIRROR}/v${ALPINE_RELEASE}/community" \
         --outdir "$OUTDIR" \
         --tag "v${ALPINE_RELEASE}" \
-        --yaml "$APORTS_DIR/scripts/mkimg.colinux-lite-gui.sh" \
         || {
             log_error "mkimage.sh failed!"
             exit 1
@@ -480,23 +504,37 @@ inject_codex() {
     log_info "Repacking ISO with injected files..."
 
     if command -v xorriso &>/dev/null; then
-        xorriso -as mkisofs \
-            -o "$repacked_iso" \
-            -isohybrid-mbr /usr/share/syslinux/mbr.bin \
-            -c boot/boot.cat \
-            -b boot/isolinux/isolinux.bin \
-            -no-emul-boot \
-            -boot-load-size 4 \
-            -boot-info-table \
-            -eltorito-alt-boot \
-            -e boot/grub/efi.img \
-            -no-emul-boot \
-            -isohybrid-gpt-basdat \
-            -V "COLINUX-GUI" \
-            "$iso_staging" 2>/dev/null || {
-            log_warn "xorriso repack failed."
-            repacked_iso=""
-        }
+        if [ "$ARCH" = "x86_64" ]; then
+            xorriso -as mkisofs \
+                -o "$repacked_iso" \
+                -isohybrid-mbr /usr/share/syslinux/mbr.bin \
+                -c boot/boot.cat \
+                -b boot/isolinux/isolinux.bin \
+                -no-emul-boot \
+                -boot-load-size 4 \
+                -boot-info-table \
+                -eltorito-alt-boot \
+                -e boot/grub/efi.img \
+                -no-emul-boot \
+                -isohybrid-gpt-basdat \
+                -V "COLINUX-GUI" \
+                "$iso_staging" 2>/dev/null || {
+                log_warn "xorriso repack failed."
+                repacked_iso=""
+            }
+        else
+            # EFI-only arches (aarch64): no isohybrid-mbr or isolinux
+            xorriso -as mkisofs \
+                -o "$repacked_iso" \
+                -eltorito-alt-boot \
+                -e boot/grub/efi.img \
+                -no-emul-boot \
+                -V "COLINUX-GUI" \
+                "$iso_staging" 2>/dev/null || {
+                log_warn "xorriso repack failed for $ARCH."
+                repacked_iso=""
+            }
+        fi
     fi
 
     if [[ -n "$repacked_iso" && -f "$repacked_iso" ]]; then

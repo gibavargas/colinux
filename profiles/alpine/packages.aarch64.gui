@@ -99,6 +99,8 @@ mesa-dri-gallium
 
 # Fonts
 font-dejavu
+# Fontconfig (reads /etc/fonts/local.conf — HiDPI hinting/subpixel defaults)
+fontconfig
 
 # Wayland utilities
 wlr-randr

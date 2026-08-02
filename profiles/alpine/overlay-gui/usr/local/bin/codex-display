@@ -15,7 +15,7 @@
 #       A) Pre-cage:  codex-display auto  (writes /persist/state/display.state)
 #       B) Post-cage: codex-display apply (applies state via wlr-randr / swaymsg)
 #   - All detection degrades gracefully. A headless / DRM-less box is a no-op.
-#   - BusyBox-safe: no `grep -P`, no brace expansion, no bashisms beyond what
+#   - BusyBox-safe: no PCRE grep, no brace expansion, no bashisms beyond what
 #     /bin/bash provides (we run under bash, not sh).
 #
 # Usage:
