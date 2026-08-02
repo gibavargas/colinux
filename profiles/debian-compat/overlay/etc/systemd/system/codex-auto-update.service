@@ -9,3 +9,20 @@ ExecStart=/usr/local/bin/cron-codex-update
 TimeoutStartSec=300
 StandardOutput=journal
 StandardError=journal
+# ── Security hardening ──────────────────────────────────────────────────────
+# cron-codex-update installs the Codex binary to /usr/local/bin and writes
+# state/logs under /persist. Everything else is read-only.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/usr/local/bin /persist /etc /run /var
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RemoveIPC=true

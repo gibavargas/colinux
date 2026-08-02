@@ -42,8 +42,8 @@ PACKAGE_LIST="$PROFILE_DIR/packages.compat"
 
 ARCH="${ARCH:-amd64}"
 SUITE="${SUITE:-bookworm}"
-DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://deb.debian.org/debian}"
-DEBIAN_SECURITY="${DEBIAN_SECURITY:-http://security.debian.org/debian-security}"
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
+DEBIAN_SECURITY="${DEBIAN_SECURITY:-https://security.debian.org/debian-security}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/dist}"
 CODEX_VERSION="${CODEX_VERSION:-latest}"
 COLINUX_IMG_SIZE="${COLINUX_IMG_SIZE:-1200}"
@@ -152,9 +152,9 @@ check_root() {
 
 check_arch() {
     case "$ARCH" in
-        amd64) ;;
+        amd64|arm64) ;;
         i386) log_error "Unsupported architecture: i386 (OpenAI Codex publishes no i386 Linux binary)"; exit 1 ;;
-        *) log_error "Unsupported architecture: $ARCH (use amd64)"; exit 1 ;;
+        *) log_error "Unsupported architecture: $ARCH (use amd64 or arm64)"; exit 1 ;;
     esac
 }
 
@@ -163,14 +163,19 @@ install_build_deps() {
     log_step "Installing build dependencies"
 
     if command -v apt-get >/dev/null 2>&1; then
+        # Bootloader toolchain is arch-specific: grub-mkrescue needs the
+        # matching grub-*-bin modules for the TARGET arch. isolinux/syslinux
+        # are x86-only (isohdpfx for the amd64 hybrid MBR).
+        local boot_pkgs=()
+        case "$ARCH" in
+            amd64) boot_pkgs=(grub-efi-amd64-bin grub-efi-ia32-bin grub-pc-bin isolinux syslinux-common) ;;
+            arm64) boot_pkgs=(grub-efi-arm64-bin) ;;
+        esac
         apt-get update
         apt-get install -y --no-install-recommends \
             debootstrap \
             squashfs-tools \
             xorriso \
-            grub-efi-amd64-bin \
-            grub-efi-ia32-bin \
-            grub-pc-bin \
             mtools \
             dosfstools \
             fdisk \
@@ -182,10 +187,8 @@ install_build_deps() {
             qemu-utils \
             openssl \
             cpio \
-            isolinux \
-            syslinux-common \
             live-build \
-            xorriso
+            "${boot_pkgs[@]}"
     else
         log_error "This build script requires a Debian-based host with apt-get."
         exit 1
@@ -267,6 +270,24 @@ install_packages() {
     # Read package list and install (skip comments and blank lines)
     local packages=()
     mapfile -t packages < <(grep -v '^\s*#' "$PACKAGE_LIST" | grep -v '^\s*$')
+
+    # Arch-specific boot essentials: kernel + live-boot so the ISO can boot
+    # the squashfs root with `boot=live`. linux-image-<arch> is NOT listed in
+    # packages.compat because the arch name differs per target (amd64/arm64).
+    packages+=(linux-image-"$ARCH" live-boot live-boot-initramfs-tools)
+
+    # Legacy x86-only wifi firmware (broadcom-sta-dkms / b43) has no arm64
+    # candidates in bookworm and targets old x86 laptops; skip on arm64.
+    if [[ "$ARCH" == "arm64" ]]; then
+        local filtered=()
+        for p in "${packages[@]}"; do
+            case "$p" in
+                broadcom-sta-dkms|firmware-b43-installer) continue ;;
+            esac
+            filtered+=("$p")
+        done
+        packages=("${filtered[@]}")
+    fi
 
     log_info "Installing ${#packages[@]} packages..."
 
@@ -360,6 +381,10 @@ inject_codex() {
     case "$ARCH" in
         amd64)
             codex_arch="x86_64-unknown-linux-musl"
+            codex_filename="codex-${codex_arch}.tar.gz"
+            ;;
+        arm64)
+            codex_arch="aarch64-unknown-linux-musl"
             codex_filename="codex-${codex_arch}.tar.gz"
             ;;
         i386)
@@ -483,6 +508,7 @@ create_squashfs() {
 
     mksquashfs "$chroot" "$squashfs" \
         -comp xz \
+        -b 1M \
         -Xdict-size 1M \
         -noappend \
         -e proc sys dev run
@@ -544,34 +570,21 @@ menuentry "CoLinux Compat (Debian) — Safe Mode" {
 }
 GRUBCFG
 
-    # Build the ISO with xorriso
-    if command -v xorriso &>/dev/null; then
-        xorriso -as mkisofs \
-            -o "$iso_path" \
-            -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-            -c boot/boot.cat \
-            -b boot/grub/bios.img \
-            -no-emul-boot \
-            -boot-load-size 4 \
-            -boot-info-table \
-            -eltorito-alt-boot \
-            -e boot/grub/efi.img \
-            -no-emul-boot \
-            -isohybrid-gpt-basdat \
-            -V "COLINUX-COMPAT" \
-            -joliet -rational-rock \
-            "$iso_staging" 2>/dev/null || {
-            log_warn "xorriso EFI build failed, falling back to basic ISO..."
-            xorriso -as mkisofs \
-                -o "$iso_path" \
-                -R -J -V "COLINUX-COMPAT" \
-                "$iso_staging" 2>/dev/null || {
-                log_error "ISO creation failed."
-                exit 1
-            }
-        }
+    # Build the bootable hybrid ISO with grub-mkrescue. This is the reliable
+    # path: it emits a BIOS El Torito + UEFI hybrid (amd64, using the grub-pc
+    # and grub-efi-*-bin modules installed above) or a UEFI-only ISO (arm64).
+    # The previous xorriso hand-rolled block referenced boot/grub/bios.img and
+    # boot/grub/efi.img which were never created, so it always fell back to a
+    # NON-bootable data ISO. Fail loudly instead of shipping a dead image.
+    if command -v grub-mkrescue &>/dev/null; then
+        if grub-mkrescue -o "$iso_path" "$iso_staging" 2>&1; then
+            log_info "Bootable hybrid ISO created: $iso_path"
+        else
+            log_error "grub-mkrescue failed. Refusing to emit a non-bootable ISO."
+            exit 1
+        fi
     else
-        log_error "xorriso not found. Cannot create ISO."
+        log_error "grub-mkrescue not found (install grub-common/grub-efi-*-bin). Cannot create bootable ISO."
         exit 1
     fi
 
@@ -599,18 +612,27 @@ create_usb_image() {
 
     dd if=/dev/zero of="$raw_file" bs=1M count="$size_mb" status=progress
 
-    # Create GPT partition table
+    # Create GPT partition table (omit size=* — neither GNU nor BusyBox sfdisk
+    # accept it; omitting size fills the remaining space)
     sfdisk "$raw_file" <<EOF
 label: gpt
 unit: sectors
 
 start=2048,  size=65536,  type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="codex-efi"
-start=67584, size=*,      type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="codex-boot"
+start=67584,              type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="codex-boot"
 EOF
 
     # Set up loop device
     local loop_dev
-    loop_dev="$(losetup --find --show --partscan "$raw_file")"
+    # Docker containers usually lack /dev/loop* nodes — create them if possible.
+    if [ ! -e /dev/loop0 ] && [ -w /dev ]; then
+        mknod /dev/loop0 b 7 0 2>/dev/null || true
+        mknod /dev/loop-control c 10 237 2>/dev/null || true
+    fi
+    if ! loop_dev="$(losetup --find --show --partscan "$raw_file" 2>/dev/null)"; then
+        log_warn "losetup unavailable (no loop devices in this environment). Skipping raw USB image — the ISO remains the bootable artifact."
+        return 0
+    fi
 
     # Format partitions
     mkfs.vfat -F 32 -n "CODEX-EFI" "${loop_dev}p1"
@@ -656,6 +678,15 @@ EOF
                 "$loop_dev" 2>/dev/null || \
             log_warn "grub-install failed (may work on bare metal)"
             ;;
+        arm64)
+            grub-install --target=arm64-efi \
+                --efi-directory="$esp_mount" \
+                --boot-directory="$boot_mount/boot" \
+                --removable \
+                --no-nvram \
+                "$loop_dev" 2>/dev/null || \
+            log_warn "grub-install failed (may work on bare metal)"
+            ;;
     esac
 
     sync
@@ -680,7 +711,11 @@ print_summary() {
         -exec ls -lh {} \;
     echo ""
     log_info "To write to USB: sudo dd if=<raw.img> of=/dev/sdX bs=4M status=progress"
-    log_info "To test in QEMU:  qemu-system-x86_64 -m 2048 -cdrom <iso>"
+    if [[ "$ARCH" == "arm64" ]]; then
+        log_info "To test in QEMU:  qemu-system-aarch64 -m 2048 -M virt -cpu max -cdrom <iso>"
+    else
+        log_info "To test in QEMU:  qemu-system-x86_64 -m 2048 -cdrom <iso>"
+    fi
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────

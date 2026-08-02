@@ -11,6 +11,23 @@ RemainAfterExit=yes
 TimeoutStartSec=60
 StandardOutput=journal
 StandardError=journal
+# ── Security hardening ──────────────────────────────────────────────────────
+# Network stack configures interfaces and WiFi (writes /etc, /run, /var,
+# /persist/logs). No home-directory access needed.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/etc /run /var /persist
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RemoveIPC=true
 
 [Install]
 WantedBy=multi-user.target

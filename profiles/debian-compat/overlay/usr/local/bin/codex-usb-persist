@@ -15,18 +15,26 @@
 #   info [DEVICE]           Detailed info about persistence partition
 set -euo pipefail
 
+
+COLINUX_COMMAND="codex-usb-persist"
+[[ " $* " == *" --json "* ]] && COLINUX_JSON=true
+[[ " $* " == *" --yes "* || " $* " == *" -y "* ]] && COLINUX_YES=true
+# shellcheck source=/usr/local/lib/colinux/output.sh
+if ! source /usr/local/lib/colinux/output.sh 2>/dev/null; then
+    colinux_init_output() { :; }
+    colinux_result() { :; }
+    colinux_die() { echo "ERROR: $*" >&2; exit 1; }
+    colinux_confirm() {
+        [[ "${COLINUX_YES:-}" == "true" ]] && return 0
+        local _r=""; read -rp "$1 " _r || _r=""; case "${_r,,}" in y|yes) return 0;; *) return 1;; esac
+    }
+fi
+
 PERSIST_DIR="/persist"
 MOUNT_POINT="/persist"
 LUKS_MAPPER="codex-persist"
 LOG_DIR="/persist/logs"
 LOGFILE="${LOG_DIR}/disk-actions.log"
-
-# Global flags parsed from argv (text-mode only; compat edition has no JSON lib).
-COLINUX_YES="false"
-for _a in "$@"; do
-    case "$_a" in --yes|-y) COLINUX_YES="true" ;; esac
-done
-unset _a
 
 # Best-effort: /persist/ may not exist yet (CI, pre-first-boot, read-only).
 # Logging already degrades gracefully via `2>/dev/null || true` below.
@@ -39,27 +47,8 @@ log_action() {
 }
 
 die() {
-    echo "ERROR: $*" >&2
     log_action "FATAL usb-persist: $*"
-    exit 1
-}
-
-# Local confirmation helper mirroring the Alpine output.sh contract.
-colinux_confirm() {
-    local prompt="$1" expected="${2:-}"
-    if [[ "$COLINUX_YES" == "true" ]]; then
-        return 0
-    fi
-    local resp=""
-    read -rp "$prompt " resp || resp=""
-    if [[ -n "$expected" ]]; then
-        [[ "$resp" == "$expected" ]]
-        return $?
-    fi
-    case "${resp,,}" in
-        y|yes) return 0 ;;
-        *) return 1 ;;
-    esac
+    colinux_die "$@"
 }
 
 # ── Find the persistence partition ────────────────────────────────────────
@@ -437,8 +426,23 @@ cmd_info() {
 
 # ── Helpers for setup wizard ──────────────────────────────────────────────
 
+# Derive the parent disk + partition number from a partition device path.
+# Echoes "<disk> <partnum>" on success. Dies on unparseable input.
+_parse_part_dev() {
+    local part="$1"
+    if [[ "$part" =~ ^/dev/(nvme[0-9]+n[0-9]+)p([0-9]+)$ ]]; then
+        echo "/dev/${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+    elif [[ "$part" =~ ^/dev/(mmcblk[0-9]+)p([0-9]+)$ ]]; then
+        echo "/dev/${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+    elif [[ "$part" =~ ^/dev/([a-z]+)([0-9]+)$ ]]; then
+        echo "/dev/${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+    else
+        die "Cannot parse partition device: $part"
+    fi
+}
+
 # Check that a device is safe to write to (not the boot device, not mounted,
-# not a loop/ram device, meets minimum size). Echoes size in bytes on success.
+# not a loop/ram device, meets minimum size). Echoes human-readable size info.
 _validate_target_device() {
     local dev="$1" min_bytes="${2:-$((4 * 1024 * 1024 * 1024))}"
 
@@ -489,7 +493,7 @@ _read_passphrase_twice() {
 }
 
 # Format a partition as LUKS2 + ext4 labeled codex-persist. Args:
-#   $1 partition device, passphrase read from stdin via fd 0
+#   $1 partition device, $2 passphrase (read from stdin via fd 0)
 _format_luks_persist() {
     local part="$1" pass
     pass="$(cat)"
@@ -506,6 +510,18 @@ _format_luks_persist() {
 }
 
 # ── Command: setup (guided wizard) ────────────────────────────────────────
+# The guided persistence setup wizard. Creates and formats a persistence
+# partition, either:
+#   (a) on an EXISTING free partition of a target device (--partition), or
+#   (b) by creating a NEW partition filling the remaining space on a whole
+#       disk that already has CoLinux installed (--disk).
+#
+# Either mode ends with an unmounted, closed LUKS2+ext4 partition labeled
+# `codex-persist`, ready to be opened/mounted by `codex-usb-persist mount`.
+#
+# Usage:
+#   codex-usb-persist setup --disk /dev/sdX [--size N]
+#   codex-usb-persist setup --partition /dev/sdXN
 cmd_setup() {
     local target_disk="" target_part="" size_spec="max"
 
@@ -514,7 +530,6 @@ cmd_setup() {
             --disk) target_disk="${2:?--disk requires a device}"; shift 2 ;;
             --partition) target_part="${2:?--partition requires a device}"; shift 2 ;;
             --size) size_spec="${2:?--size requires a value (e.g. 4096 or max)}"; shift 2 ;;
-            --yes|-y) shift ;;  # already parsed globally; consume
             --help|-h) cat <<'EOF'
 Usage: codex-usb-persist setup --disk DEVICE [--size N]
        codex-usb-persist setup --partition PARTITION
@@ -532,6 +547,7 @@ Options:
   --size N            Partition size in MB (only with --disk). Use 'max' (the
                       default) to fill all remaining free space.
   --yes               Skip interactive confirmation (CI / scripted use).
+  --json              Emit a structured JSON result envelope.
   --help, -h          Show this help.
 
 Examples:
@@ -544,6 +560,7 @@ EOF
         esac
     done
 
+    # Exactly one of --disk / --partition must be given.
     if [[ -z "$target_disk" ]] && [[ -z "$target_part" ]]; then
         die "setup: --disk or --partition is required. See 'codex-usb-persist setup --help'."
     fi
@@ -585,6 +602,7 @@ EOF
         colinux_confirm "Type YES to continue:" "YES" \
             || die "Aborted by user."
 
+        # Determine the new partition number (one past the last existing one).
         local last_part
         last_part="$(sgdisk -p "$target_disk" 2>/dev/null | awk '/^ +[0-9]+/ {n=$1} END{print n+0}')"
         local new_part_num=$((last_part + 1))
@@ -595,6 +613,7 @@ EOF
                    -c "${new_part_num}:CoLinuxPersistence" "$target_disk" >/dev/null 2>&1 \
                 || die "sgdisk: failed to create partition ${new_part_num} on $target_disk"
         else
+            # Validate numeric MB size.
             [[ "$size_spec" =~ ^[0-9]+$ ]] || die "--size must be a number of MB or 'max'."
             sgdisk -n "${new_part_num}:0:+${size_spec}M" -t "${new_part_num}:8300" \
                    -c "${new_part_num}:CoLinuxPersistence" "$target_disk" >/dev/null 2>&1 \
@@ -604,6 +623,7 @@ EOF
         partprobe "$target_disk" 2>/dev/null || true
         sleep 2
 
+        # Resolve the new partition device path.
         case "$target_disk" in
             /dev/nvme*|/dev/mmcblk*) part="${target_disk}p${new_part_num}" ;;
             *) part="${target_disk}${new_part_num}" ;;
@@ -641,8 +661,9 @@ EOF
 
     # ── Verify the result ─────────────────────────────────────────────────
     echo "[3/3] Verifying ..."
-    local fmt
+    local fmt label
     fmt="$(blkid -s TYPE -o value "$part" 2>/dev/null || true)"
+    label="$(blkid -s LABEL -o value "$part" 2>/dev/null || true)"
     [[ "$fmt" == "crypto_LUKS" ]] || die "Verification failed: $part is not LUKS ($fmt)."
 
     echo ""
@@ -653,23 +674,36 @@ EOF
     echo "To use it:"
     echo "  codex-usb-persist mount $part"
     log_action "setup_ok part=$part fmt=$fmt"
+
+    colinux_result "persistence partition created" \
+        "{\"partition\":\"$part\",\"format\":\"LUKS2+ext4\",\"label\":\"codex-persist\"}"
 }
 
 # ── Main dispatch ─────────────────────────────────────────────────────────
 # Guarded so the script can be sourced by unit tests (functions only) without
-# triggering dispatch.
+# triggering dispatch. The snapshot/update-os wrappers use the same pattern.
 if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
 main_dispatch() {
     # `setup` takes its own flags (--disk/--partition/--size/--help), so route
-    # it BEFORE the simple positional dispatch used by the other subcommands.
+    # it BEFORE stripping global flags; everything else uses positional args
+    # after --json/--yes/-y are removed.
+    colinux_init_output
+
     case "${1:-}" in
         setup|create|init|wizard)
-            shift
+            shift  # drop the subcommand name, pass remaining flags to cmd_setup
             cmd_setup "$@"
             exit $?
             ;;
     esac
 
+    # Strip --json/--yes/-y from positional args (pre-scan already set
+    # COLINUX_* vars); subcommands use positional $2/$3 directly.
+    _filtered=()
+    for _a in "$@"; do
+        case "$_a" in --json|--yes|-y) ;; *) _filtered+=("$_a") ;; esac
+    done
+    set -- "${_filtered[@]}"
     COMMAND="${1:-}"
 
     case "${COMMAND:-}" in
@@ -717,9 +751,7 @@ If DEVICE is not specified, auto-detection is attempted.
 EOF
             ;;
         *)
-            echo "Unknown command: $COMMAND"
-            echo "Run 'codex-usb-persist help' for usage."
-            exit 1
+            die "Unknown command: ${COMMAND}. Run 'codex-usb-persist help' for usage."
             ;;
     esac
 }
