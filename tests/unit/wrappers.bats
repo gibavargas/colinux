@@ -259,12 +259,14 @@ If you ADDED a wrapper, add die()/error() or register it in _KNOWN_DIE_GAPS."
     local offenders=""
 
     # 8a. Dockerfile-compat generated sudoers line (bin-only whitelist).
+    #     Only extract from the actual "codex ALL=" line to avoid matching
+    #     codex-* strings in directory paths/comments elsewhere in the file.
     while read -r cmd; do
         [ -n "$cmd" ] || continue
         if [ ! -x "$overlay_bin/$cmd" ]; then
             offenders="${offenders}\n  Dockerfile-compat /etc/sudoers.d/codex: ${cmd} not in compat overlay bin"
         fi
-    done < <(grep -oE 'codex-[a-z-]+' "$COLINUX_ROOT/Dockerfile-compat" | sort -u)
+    done < <(grep 'codex ALL=' "$COLINUX_ROOT/Dockerfile-compat" | grep -oE 'codex-[a-z-]+' | sort -u)
 
     # 8b. Overlay sudoers.d/codex-compat — /usr/local/bin entries.
     local sudoers="$COLINUX_ROOT/profiles/debian-compat/overlay/etc/sudoers.d/codex-compat"
