@@ -10,6 +10,22 @@ RemainAfterExit=yes
 TimeoutStartSec=30
 StandardOutput=journal
 StandardError=journal
+# ── Security hardening ──────────────────────────────────────────────────────
+# Read-only inventory scan of block devices; only writes logs under /persist.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/persist
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RemoveIPC=true
 
 [Install]
 WantedBy=multi-user.target

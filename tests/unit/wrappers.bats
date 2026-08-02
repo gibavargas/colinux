@@ -244,3 +244,53 @@ If you ADDED a wrapper, add die()/error() or register it in _KNOWN_DIE_GAPS."
     done < <(colinux_list_wrappers)
     [ -z "$offenders" ] || colinux_fail "Wrappers writing masked '***' as a value (P0):${offenders}"
 }
+
+# -----------------------------------------------------------------------------
+# 8. No dead sudoers/doas whitelist entries (P1: privilege whitelist drift)
+# -----------------------------------------------------------------------------
+
+@test "every compat sudoers whitelist entry resolves to a real command" {
+    # Guards the recurring "dead sudoers" bug class (0f848bf): a whitelist
+    # entry for a command that is not installed is both a broken workflow and
+    # a latent privilege-escalation hazard if the path is created later.
+    # Covers BOTH the overlay sudoers file AND the Dockerfile-compat-generated
+    # /etc/sudoers.d/codex (which drifted separately in the past).
+    local overlay_bin="$COLINUX_ROOT/profiles/debian-compat/overlay/usr/local/bin"
+    local offenders=""
+
+    # 8a. Dockerfile-compat generated sudoers line (bin-only whitelist).
+    #     Only extract from the actual "codex ALL=" line to avoid matching
+    #     codex-* strings in directory paths/comments elsewhere in the file.
+    while read -r cmd; do
+        [ -n "$cmd" ] || continue
+        if [ ! -x "$overlay_bin/$cmd" ]; then
+            offenders="${offenders}\n  Dockerfile-compat /etc/sudoers.d/codex: ${cmd} not in compat overlay bin"
+        fi
+    done < <(grep 'codex ALL=' "$COLINUX_ROOT/Dockerfile-compat" | grep -oE 'codex-[a-z-]+' | sort -u)
+
+    # 8b. Overlay sudoers.d/codex-compat — /usr/local/bin entries.
+    local sudoers="$COLINUX_ROOT/profiles/debian-compat/overlay/etc/sudoers.d/codex-compat"
+    while read -r cmd; do
+        [ -n "$cmd" ] || continue
+        if [ ! -x "$overlay_bin/$cmd" ]; then
+            offenders="${offenders}\n  overlay sudoers.d: ${cmd} not in compat overlay bin"
+        fi
+    done < <(grep -oE 'NOPASSWD: /usr/local/bin/[a-z0-9._-]+' "$sudoers" | awk '{print $2}' | xargs -n1 basename 2>/dev/null || true)
+
+    # 8c. Overlay sudoers.d/codex-compat — /usr/local/sbin entries must be
+    # shipped by shared/install-shared.sh (they are not in the repo overlay).
+    while read -r cmd; do
+        [ -n "$cmd" ] || continue
+        case "$cmd" in
+            codex-wifi-wizard)   src="$COLINUX_ROOT/shared/network/codex-wifi-wizard.sh" ;;
+            codex-network-stack) src="$COLINUX_ROOT/shared/network/codex-network-stack.sh" ;;
+            install-camoufox.sh) src="$COLINUX_ROOT/shared/camoufox/install-camoufox.sh" ;;
+            *) src="" ;;
+        esac
+        if [ -z "$src" ] || [ ! -f "$src" ]; then
+            offenders="${offenders}\n  overlay sudoers.d sbin: ${cmd} has no shared/ source"
+        fi
+    done < <(grep -oE 'NOPASSWD: /usr/local/sbin/[a-z0-9._-]+' "$sudoers" | awk '{print $2}' | xargs -n1 basename 2>/dev/null || true)
+
+    [ -z "$offenders" ] || colinux_fail "Dead sudoers whitelist entries:${offenders}"
+}

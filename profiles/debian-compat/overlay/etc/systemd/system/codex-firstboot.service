@@ -12,6 +12,25 @@ RemainAfterExit=yes
 TimeoutStartSec=300
 StandardOutput=journal
 StandardError=journal
+# ── Security hardening ──────────────────────────────────────────────────────
+# First boot mounts the persistence device, runs DHCP, installs the Codex
+# binary and writes the /persist state tree. It needs full capabilities for
+# mount(2), so no CapabilityBoundingSet is applied — the root filesystem and
+# all other paths stay read-only via ProtectSystem=strict.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/persist /etc /usr/local/bin /workspace /run /var /home/codex
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RemoveIPC=true
 
 [Install]
 WantedBy=multi-user.target
