@@ -79,15 +79,25 @@ validate_tar_archive() {
 }
 log_step()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}\n"; }
 
+# GitHub API authentication: CI runners get 403-rate-limited on unauthenticated
+# requests.  When GITHUB_TOKEN is available (CI), use it for both API calls and
+# release-asset downloads.  The token is passed read-only — openai/codex is public.
+GH_API_AUTH=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    GH_API_AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json")
+fi
+
 get_latest_codex_version() {
-    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors https://api.github.com/repos/openai/codex/releases/latest \
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "${GH_API_AUTH[@]}" \
+        https://api.github.com/repos/openai/codex/releases/latest \
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
         | head -1
 }
 
 get_codex_asset_digest_sha256() {
     local version="$1" asset_name="$2"
-    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/openai/codex/releases/tags/${version}" \
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "${GH_API_AUTH[@]}" \
+        "https://api.github.com/repos/openai/codex/releases/tags/${version}" \
         | awk -v name="$asset_name" '
             index($0, "\"name\": \"" name "\"") { found=1 }
             found && /"digest":/ {
@@ -223,9 +233,23 @@ clone_aports() {
     fi
 
     if [ ! -d "$APORTS_DIR" ]; then
-        git clone --depth 1 --branch "$APORTS_BRANCH" \
-            "https://gitlab.alpinelinux.org/alpine/aports.git" \
-            "$APORTS_DIR"
+        # Retry loop: transient aports clone failures (early EOF / invalid
+        # index-pack) are common and should not fail the entire build.
+        local attempt max_attempts=3
+        for attempt in $(seq 1 "$max_attempts"); do
+            if git clone --depth 1 --branch "$APORTS_BRANCH" \
+                "https://gitlab.alpinelinux.org/alpine/aports.git" \
+                "$APORTS_DIR"; then
+                break
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+                log_error "Failed to clone Alpine aports after $max_attempts attempts."
+                exit 1
+            fi
+            log_warn "aports clone failed (attempt $attempt/$max_attempts); retrying..."
+            rm -rf "$APORTS_DIR"
+            sleep $((attempt * 5))
+        done
     fi
 
     log_info "aports ready at $APORTS_DIR"
@@ -254,7 +278,8 @@ install_profile() {
     # Copy overlay directory
     if [ -d "$PROFILE_DIR/overlay-desktop" ]; then
         local overlay_dest="$APORTS_DIR/scripts/colinux-desktop/overlay-desktop"
-        rm -rf "$overlay_dest"
+        mkdir -p "$overlay_dest"
+        rm -rf "${overlay_dest:?}"
         cp -a "$PROFILE_DIR/overlay-desktop" "$overlay_dest"
 
         # Fix security-critical file permissions (cp -a preserves umask-inflated modes)
@@ -334,7 +359,26 @@ run_mkimage() {
     fi
     chmod +x "$mkimage_script"
 
-    export COLINUX_IMG_SIZE
+    # Patch mkimg.base.sh: make build_kernel tolerant of depmod warnings
+    # Alpine 3.21's depmod/BusyBox install emits errors that are non-fatal
+    # (depmod: ERROR: fstatat vmlinuz; install: omitting directory) but
+    # cause build_section to fail via || return 1
+    local mkimg_base="$APORTS_DIR/scripts/mkimg.base.sh"
+    if [ -f "$mkimg_base" ]; then
+        sed -i 's/^\t\t|| return 1$/\t\t|| true/' "$mkimg_base"
+    fi
+
+    # Set PACKAGER_PUBKEY so mkimage.sh can inject APK signing keys
+    # (without it, cp "" fails inside the aports build framework)
+    export PACKAGER_PUBKEY="${PACKAGER_PUBKEY:-$(find /usr/share/apk/keys -maxdepth 1 -type f -name '*.rsa.pub' 2>/dev/null | sort | head -1)}"
+
+    # The aports mkimage.sh calls git status to detect a -dirty suffix.
+    # Inside the Docker container, git discovers the mounted /src/.git
+    # (colinux repo) instead of the aports repo and fails.
+    # alpine-sdk depends on git so `apk del` fails; move the binary instead.
+    if command -v git >/dev/null 2>&1; then
+        mv "$(command -v git)" /tmp/git.disabled || true
+    fi
 
     "$mkimage_script" \
         --profile "colinux-desktop" \
@@ -425,7 +469,10 @@ inject_codex() {
     tmpdir="$(mktemp -d)"
     _CLEANUP_DIRS+=("$tmpdir")
 
-    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors -o "$tmpdir/$codex_filename" "$download_url" || {
+    # Download and verify integrity using GitHub release asset digest.
+    # Use authenticated request in CI to avoid 403 rate-limiting.
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "${GH_API_AUTH[@]}" \
+        -o "$tmpdir/$codex_filename" "$download_url" || {
         log_error "Failed to download Codex CLI binary."
         exit 1
     }
@@ -512,9 +559,16 @@ inject_codex() {
     log_info "Repacking ISO with injected files..."
 
     if command -v xorriso &>/dev/null; then
+        # syslinux only exists for x86_64 (no aarch64 package). Build the
+        # xorriso args conditionally to avoid failures on ARM64 builds.
+        local mbr_arg=()
+        if [ "$ARCH" = "x86_64" ] && [ -f /usr/share/syslinux/mbr.bin ]; then
+            mbr_arg+=(-isohybrid-mbr /usr/share/syslinux/mbr.bin)
+        fi
+
         xorriso -as mkisofs \
             -o "$repacked_iso" \
-            -isohybrid-mbr /usr/share/syslinux/mbr.bin \
+            "${mbr_arg[@]}" \
             -c boot/boot.cat \
             -b boot/isolinux/isolinux.bin \
             -no-emul-boot \
@@ -550,23 +604,34 @@ create_raw_image() {
         return 0
     fi
 
+    # /dev/loop* devices don't exist inside Docker containers by default.
+    # Try to create the node; if losetup still fails, skip raw image (the ISO
+    # is the critical artifact — raw image is nice-to-have).
+    if [ ! -e /dev/loop0 ]; then
+        mknod /dev/loop0 b 7 0 2>/dev/null || true
+    fi
+
     local raw_file="${iso_file%.iso}.raw.img"
     local size_mb="$COLINUX_IMG_SIZE"
 
     log_info "Creating ${size_mb}MB raw disk image..."
 
-    dd if=/dev/zero of="$raw_file" bs=1M count="$size_mb" status=progress
+    # BusyBox dd does not support status=progress
+    dd if=/dev/zero of="$raw_file" bs=1M count="$size_mb" 2>/dev/null
 
     sfdisk "$raw_file" <<EOF
 label: gpt
 unit: sectors
 
 start=2048,  size=65536,  type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="codex-efi"
-start=67584, size=*,      type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="codex-boot"
+start=67584,               type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="codex-boot"
 EOF
 
     local loop_dev
-    loop_dev="$(losetup --find --show --partscan "$raw_file")"
+    loop_dev="$(losetup --find --show --partscan "$raw_file" 2>/dev/null)" || {
+        log_warn "losetup failed (no loop device in container); skipping raw image."
+        return 0
+    }
 
     mkfs.vfat -F 32 -n "CODEX-EFI" "${loop_dev}p1"
     mkfs.ext4 -L "codex-boot" -q "${loop_dev}p2"

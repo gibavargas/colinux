@@ -79,6 +79,7 @@ jobs:
             -e ARCH \
             -e ALPINE_RELEASE \
             -e OUTDIR \
+            -e GITHUB_TOKEN \
             alpine:3.21 \
             sh -c '
               apk add --no-cache alpine-sdk apk-tools alpine-conf bash curl ca-certificates git \
