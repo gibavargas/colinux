@@ -78,15 +78,25 @@ validate_tar_archive() {
 }
 log_step()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}\n"; }
 
+# GitHub API authentication: CI runners get 403-rate-limited on unauthenticated
+# requests.  When GITHUB_TOKEN is available (CI), use it for both API calls and
+# release-asset downloads.  The token is passed read-only â openai/codex is public.
+GH_API_AUTH=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    GH_API_AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json")
+fi
+
 get_latest_codex_version() {
-    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors https://api.github.com/repos/openai/codex/releases/latest \
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "${GH_API_AUTH[@]}" \
+        https://api.github.com/repos/openai/codex/releases/latest \
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
         | head -1
 }
 
 get_codex_asset_digest_sha256() {
     local version="$1" asset_name="$2"
-    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/openai/codex/releases/tags/${version}" \
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "${GH_API_AUTH[@]}" \
+        "https://api.github.com/repos/openai/codex/releases/tags/${version}" \
         | awk -v name="$asset_name" '
             index($0, "\"name\": \"" name "\"") { found=1 }
             found && /"digest":/ {
@@ -392,7 +402,9 @@ inject_codex() {
     _CLEANUP_DIRS=("${_CLEANUP_DIRS[@]}" "$tmpdir")
     trap _cleanup EXIT
 
-    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors -o "$tmpdir/$codex_filename" "$download_url" || {
+    # Use authenticated request in CI to avoid 403 rate-limiting.
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "${GH_API_AUTH[@]}" \
+        -o "$tmpdir/$codex_filename" "$download_url" || {
         log_error "Failed to download Codex CLI binary."
         exit 1
     }
