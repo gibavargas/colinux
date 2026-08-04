@@ -25,10 +25,10 @@ profile_colinux_lite_gui() {
 
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
     kernel_cmdline="
-        quiet
         modules=loop,squashfs,sd-mod,usb-storage,i915,drm,efi_pstore
         overlaytmpfs
         init=/sbin/init
+        console=ttyS0,115200 console=tty0
     "
 
     # Remove leading whitespace from cmdline

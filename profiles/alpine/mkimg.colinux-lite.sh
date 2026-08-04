@@ -27,7 +27,7 @@ profile_colinux-lite() {
     arch="x86_64 aarch64"
 
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
-    kernel_cmdline="quiet modules=loop,squashfs,sd-mod,usb-storage overlaytmpfs init=/sbin/init"
+    kernel_cmdline="modules=loop,squashfs,sd-mod,usb-storage overlaytmpfs init=/sbin/init console=ttyS0,115200 console=tty0"
 
     # modloop signing is DISABLED: profile_base sets modloop_sign=yes, which
     # makes mkimg.base.sh pass --modloopsign to update-kernel. update-kernel
