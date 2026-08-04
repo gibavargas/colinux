@@ -30,15 +30,28 @@ profile_colinux_desktop() {
     # Remove leading whitespace from cmdline
     kernel_cmdline="$(echo "$kernel_cmdline" | tr -s '[:space:]' ' ' | sed 's/^ //')"
 
+    # modloop signing is DISABLED: profile_base sets modloop_sign=yes, which
+    # makes mkimg.base.sh pass --modloopsign to update-kernel. update-kernel
+    # then runs sign_modloop(), which fails (openssl: empty PACKAGER_PRIVKEY)
+    # and aborts BEFORE vmlinuz/initramfs are copied into /boot — producing a
+    # kernel-less ISO (issue #2). The signature is only needed to verify the
+    # modloop against a trusted key at boot; without keys it must be skipped.
+    modloop_sign=""
+
     # ── Architecture-specific settings ────────────────────────────────────────
+    # NOTE: mkimg.base.sh iterates $kernel_flavors (plural, set by profile_base);
+    # kernel_flavor (singular) is a dead variable — kept in sync for clarity.
     case "$ARCH" in
         x86_64)
-            kernel_flavor="lts"
-            kernel_addons="intel-agp i915 drm"
+            kernel_flavors="lts"
+            # kernel_addons like "intel-agp i915 drm" are NOT separate packages
+            # in Alpine 3.21 — apk fails to resolve them and section_kernels
+            # produces an empty /boot (issue #2).
+            kernel_addons=""
             bootloader="grub"
             ;;
         aarch64)
-            kernel_flavor="lts"
+            kernel_flavors="lts"
             kernel_addons=""
             bootloader="grub"
             ;;

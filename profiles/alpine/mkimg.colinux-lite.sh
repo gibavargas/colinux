@@ -29,14 +29,24 @@ profile_colinux-lite() {
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
     kernel_cmdline="quiet modules=loop,squashfs,sd-mod,usb-storage overlaytmpfs init=/sbin/init"
 
+    # modloop signing is DISABLED: profile_base sets modloop_sign=yes, which
+    # makes mkimg.base.sh pass --modloopsign to update-kernel. update-kernel
+    # then runs sign_modloop(), which fails (openssl: empty PACKAGER_PRIVKEY)
+    # and aborts BEFORE vmlinuz/initramfs are copied into /boot — producing a
+    # kernel-less ISO (issue #2). The signature is only needed to verify the
+    # modloop against a trusted key at boot; without keys it must be skipped.
+    modloop_sign=""
+
     # ── Architecture-specific settings ────────────────────────────────────────
+    # NOTE: mkimg.base.sh iterates $kernel_flavors (plural, set by profile_base);
+    # kernel_flavor (singular) is a dead variable — kept in sync for clarity.
     case "$ARCH" in
         x86_64)
-            kernel_flavor="lts"
+            kernel_flavors="lts"
             kernel_addons=""
             ;;
         aarch64)
-            kernel_flavor="lts"
+            kernel_flavors="lts"
             kernel_addons=""
             ;;
     esac
