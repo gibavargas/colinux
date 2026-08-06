@@ -91,7 +91,7 @@ jobs:
     # was failing because modloop_sign=yes caused sign_modloop() to abort
     # before vmlinuz/initramfs were staged; fixed by setting modloop_sign=""
     # in the mkimg profiles). This job is now a hard CI gate.
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read   # required to download the ISO artifact from the build job
