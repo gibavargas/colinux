@@ -20,6 +20,9 @@ profile_colinux_desktop() {
     image_name="colinux-desktop-$ARCH-$RELEASE"
 
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
+    # Override profile_base's initfs_cmdline to remove 'quiet' — under QEMU TCG
+    # software emulation (CI), 'quiet' suppresses all boot output.
+    initfs_cmdline="modules=loop,squashfs,sd-mod,usb-storage,i915,drm,efi_pstore console=ttyS0,115200"
     kernel_cmdline="
         modules=loop,squashfs,sd-mod,usb-storage,i915,drm,efi_pstore
         overlaytmpfs

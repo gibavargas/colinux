@@ -27,6 +27,11 @@ profile_colinux-lite() {
     arch="x86_64 aarch64"
 
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
+    # Override profile_base's initfs_cmdline to remove 'quiet' — under QEMU TCG
+    # software emulation (CI), 'quiet' suppresses all boot output, making it
+    # impossible to tell if the kernel is loading. Also add console=ttyS0 here
+    # (belt-and-suspenders with kernel_cmdline below).
+    initfs_cmdline="modules=loop,squashfs,sd-mod,usb-storage console=ttyS0,115200"
     kernel_cmdline="modules=loop,squashfs,sd-mod,usb-storage overlaytmpfs init=/sbin/init console=ttyS0,115200 console=tty0"
 
     # modloop signing is DISABLED: profile_base sets modloop_sign=yes, which

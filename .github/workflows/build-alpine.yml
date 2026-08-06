@@ -137,13 +137,13 @@ jobs:
           fi
 
       - name: Run QEMU smoke test (serial console)
-        # --memory 2048 speeds up boot; --timeout 420 gives TCG fallback headroom.
+        # --memory 2048 speeds up boot; --timeout 600 gives TCG fallback headroom.
         run: |
           ./scripts/test-iso.sh \
             --iso "${{ steps.iso.outputs.path }}" \
             --arch x86_64 \
             --memory 2048 \
-            --timeout 420
+            --timeout 600
 
       - name: Upload serial + test logs (on failure)
         if: failure()
