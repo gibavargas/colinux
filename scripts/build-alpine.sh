@@ -259,6 +259,12 @@ install_profile() {
     cp "$PROFILE_DIR/mkimg.colinux-lite.sh" "$profile_dest"
     chmod +x "$profile_dest"
 
+    # Copy the apkovl generator script (referenced by the profile's apkovl=
+    # variable). mkimage's build_apkovl() finds it via $scriptdir/$apkovl,
+    # so it must live in the same scripts/ directory as mkimg.*.sh.
+    cp "$PROFILE_DIR/genapkovl-colinux.sh" "$APORTS_DIR/scripts/genapkovl-colinux.sh"
+    chmod +x "$APORTS_DIR/scripts/genapkovl-colinux.sh"
+
     # Copy package lists
     cp "$PROFILE_DIR/packages.$ARCH" "$APORTS_DIR/scripts/packages.colinux-lite.$ARCH"
     # Also copy as the generic name for mkimage compatibility
@@ -364,22 +370,25 @@ verify_iso_bootable() {
         exit 1
     fi
 
-    # Inspect ISO contents for kernel + initramfs without full extraction
+    # Inspect ISO contents for kernel + initramfs without full extraction.
+    # xorriso -find is the reliable listing primitive; -ls_l is NOT a valid
+    # xorriso command and silently produces empty output (which made this gate
+    # a no-op — the safety net that should have caught issue #2 never fired).
     local boot_files=""
     if command -v xorriso &>/dev/null; then
-        boot_files="$(xorriso -indev "$iso_file" -ls_l /boot/ 2>/dev/null || true)"
+        boot_files="$(xorriso -indev "$iso_file" -find / -name 'vmlinuz*' -or -name 'initramfs*' 2>/dev/null || true)"
     elif command -v isoinfo &>/dev/null; then
-        boot_files="$(isoinfo -l -i "$iso_file" 2>/dev/null || true)"
+        boot_files="$(isoinfo -R -f -i "$iso_file" 2>/dev/null | grep -E 'vmlinuz|initramfs' || true)"
     fi
 
     if [ -z "$boot_files" ]; then
-        log_warn "Cannot inspect ISO (xorriso/isoinfo unavailable) — skipping kernel check"
-        return 0
+        log_error "Cannot inspect ISO contents (xorriso/isoinfo unavailable or failed)"
+        exit 1
     fi
 
     if ! echo "$boot_files" | grep -q 'vmlinuz'; then
         log_error "FATAL: ISO missing kernel (boot/vmlinuz-*) — section_kernels failed silently"
-        log_error "The tolerance patch may be masking a kernel build failure (issue #2)"
+        log_error "modloop_sign was left enabled or the tolerance patch masked a failure (issue #2)"
         exit 1
     fi
 

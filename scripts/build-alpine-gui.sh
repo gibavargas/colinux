@@ -240,6 +240,11 @@ install_profile() {
     cp "$PROFILE_DIR/mkimg.colinux-lite-gui.sh" "$profile_dest"
     chmod +x "$profile_dest"
 
+    # Copy the apkovl generator script (same as lite edition — searches for
+    # overlay-gui directory at runtime).
+    cp "$PROFILE_DIR/genapkovl-colinux.sh" "$APORTS_DIR/scripts/genapkovl-colinux.sh"
+    chmod +x "$APORTS_DIR/scripts/genapkovl-colinux.sh"
+
     # Copy GUI package lists
     local gui_pkg="$PROFILE_DIR/packages.${ARCH}.gui"
     if [[ ! -f "$gui_pkg" ]]; then

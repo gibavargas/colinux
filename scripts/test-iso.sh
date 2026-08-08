@@ -145,8 +145,15 @@ if {$accel ne ""} {
 puts "Starting QEMU: $qemu_cmd"
 spawn {*}$qemu_cmd
 
-# Wait for login prompt
+# The syslinux.cfg has PROMPT 1 which shows a "boot:" prompt on serial.
+# On serial console, syslinux may wait indefinitely for input even with
+# TIMEOUT set. When we see the boot prompt, press Enter to boot DEFAULT.
 expect {
+    "boot:" {
+        puts "\n>>> SYSLINUX boot prompt detected — sending Enter"
+        send "\r"
+        exp_continue
+    }
     "login:" {
         puts "\n>>> BOOT SUCCESS: Reached login prompt"
     }

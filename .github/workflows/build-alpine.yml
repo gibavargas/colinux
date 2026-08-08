@@ -87,15 +87,11 @@ jobs:
     name: QEMU smoke test (x86_64)
     runs-on: ubuntu-latest
     needs: build-alpine
-    # Non-blocking until the colinux-lite ISO includes a kernel (issue #2:
-    # https://github.com/gibavargas/colinux/issues/2). The current build
-    # emits an 18 MB ISO with apks/, isolinux, and grub-efi, but NO
-    # /boot/vmlinuz-* or /boot/initramfs-*, so section_kernels is failing
-    # silently. The test infrastructure itself is functional — it correctly
-    # catches the boot failure — so this job stays non-blocking and will
-    # auto-pass once the kernel-inclusion bug is fixed. Remove this line then.
-    continue-on-error: true
-    timeout-minutes: 15
+    # Issue #2 FIXED: the ISO now includes kernel + initramfs (section_kernels
+    # was failing because modloop_sign=yes caused sign_modloop() to abort
+    # before vmlinuz/initramfs were staged; fixed by setting modloop_sign=""
+    # in the mkimg profiles). This job is now a hard CI gate.
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read   # required to download the ISO artifact from the build job
@@ -141,13 +137,13 @@ jobs:
           fi
 
       - name: Run QEMU smoke test (serial console)
-        # --memory 2048 speeds up boot; --timeout 420 gives TCG fallback headroom.
+        # --memory 2048 speeds up boot; --timeout 600 gives TCG fallback headroom.
         run: |
           ./scripts/test-iso.sh \
             --iso "${{ steps.iso.outputs.path }}" \
             --arch x86_64 \
             --memory 2048 \
-            --timeout 420
+            --timeout 600
 
       - name: Upload serial + test logs (on failure)
         if: failure()
