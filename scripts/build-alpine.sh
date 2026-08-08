@@ -259,6 +259,12 @@ install_profile() {
     cp "$PROFILE_DIR/mkimg.colinux-lite.sh" "$profile_dest"
     chmod +x "$profile_dest"
 
+    # Copy the apkovl generator script (referenced by the profile's apkovl=
+    # variable). mkimage's build_apkovl() finds it via $scriptdir/$apkovl,
+    # so it must live in the same scripts/ directory as mkimg.*.sh.
+    cp "$PROFILE_DIR/genapkovl-colinux.sh" "$APORTS_DIR/scripts/genapkovl-colinux.sh"
+    chmod +x "$APORTS_DIR/scripts/genapkovl-colinux.sh"
+
     # Copy package lists
     cp "$PROFILE_DIR/packages.$ARCH" "$APORTS_DIR/scripts/packages.colinux-lite.$ARCH"
     # Also copy as the generic name for mkimage compatibility

@@ -22,12 +22,15 @@ profile_colinux_desktop() {
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
     # Override profile_base's initfs_cmdline to remove 'quiet' — under QEMU TCG
     # software emulation (CI), 'quiet' suppresses all boot output.
-    initfs_cmdline="modules=loop,squashfs,sd-mod,usb-storage,i915,drm,efi_pstore console=ttyS0,115200"
+    #
+    # Console ordering: ttyS0 LAST so it becomes primary /dev/console in QEMU
+    # -nographic / serial-console mode.
+    initfs_cmdline="modules=loop,squashfs,sd-mod,usb-storage,i915,drm,efi_pstore console=tty0 console=ttyS0,115200"
     kernel_cmdline="
         modules=loop,squashfs,sd-mod,usb-storage,i915,drm,efi_pstore
         overlaytmpfs
         init=/sbin/init
-        console=ttyS0,115200 console=tty0
+        console=tty0 console=ttyS0,115200
     "
 
     # Remove leading whitespace from cmdline
@@ -63,6 +66,13 @@ profile_colinux_desktop() {
             return 1
             ;;
     esac
+
+    # ── Overlay (apkovl) ──────────────────────────────────────────────────────
+    # profile_base sets apkovl="" — without overriding it, section_apkovl() in
+    # mkimg.base.sh silently returns and the overlay (inittab, doas.conf, codex-*
+    # wrappers, OpenRC services, desktop configs) is never packaged into the ISO.
+    apkovl="genapkovl-colinux.sh"
+    hostname="colinux"
 
     # ── Boot loader configuration ─────────────────────────────────────────────
     if [ "$ARCH" = "x86_64" ]; then

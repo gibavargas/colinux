@@ -29,10 +29,14 @@ profile_colinux-lite() {
     # ── Kernel & Initramfs ────────────────────────────────────────────────────
     # Override profile_base's initfs_cmdline to remove 'quiet' — under QEMU TCG
     # software emulation (CI), 'quiet' suppresses all boot output, making it
-    # impossible to tell if the kernel is loading. Also add console=ttyS0 here
-    # (belt-and-suspenders with kernel_cmdline below).
-    initfs_cmdline="modules=loop,squashfs,sd-mod,usb-storage console=ttyS0,115200"
-    kernel_cmdline="modules=loop,squashfs,sd-mod,usb-storage overlaytmpfs init=/sbin/init console=ttyS0,115200 console=tty0"
+    # impossible to tell if the kernel is loading.
+    #
+    # Console ordering: Linux makes the LAST console= on the command line the
+    # primary /dev/console. Putting ttyS0 last ensures that in headless / QEMU
+    # -nographic mode, OpenRC output and the login prompt appear on serial.
+    # (tty0 first = console output also goes to the virtual VGA, harmless.)
+    initfs_cmdline="modules=loop,squashfs,sd-mod,usb-storage console=tty0 console=ttyS0,115200"
+    kernel_cmdline="modules=loop,squashfs,sd-mod,usb-storage overlaytmpfs init=/sbin/init console=tty0 console=ttyS0,115200"
 
     # modloop signing is DISABLED: profile_base sets modloop_sign=yes, which
     # makes mkimg.base.sh pass --modloopsign to update-kernel. update-kernel
@@ -55,6 +59,20 @@ profile_colinux-lite() {
             kernel_addons=""
             ;;
     esac
+
+    # ── Overlay (apkovl) ──────────────────────────────────────────────────────
+    # profile_base sets apkovl="" (empty) and hostname="alpine". Without an
+    # apkovl script, section_apkovl() in mkimg.base.sh silently returns and the
+    # overlay directory (inittab with serial getty, doas.conf, codex-* wrappers,
+    # OpenRC services) is NEVER packaged into the ISO. The booted system is a
+    # stock Alpine with no serial getty, no enabled services, and no codex
+    # binaries — QEMU smoke test sees a kernel boot then silence (issue #2).
+    #
+    # genapkovl-colinux.sh is a generator script that copies the overlay tree
+    # and creates OpenRC runlevel symlinks into <hostname>.apkovl.tar.gz, which
+    # mkimage bakes into the ISO root filesystem.
+    apkovl="genapkovl-colinux.sh"
+    hostname="colinux"
 
     # ── Boot loader configuration ─────────────────────────────────────────────
     # GRUB modules for EFI boot (used by section_grub_efi in mkimg.base.sh)
